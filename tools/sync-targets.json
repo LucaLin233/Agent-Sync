@@ -1,0 +1,442 @@
+{
+  "schemaVersion": 1,
+  "note": "对象身份与落点的唯一活真源。present 仅表示受管存在性，不表示已部署或验收；写前按明确 ID 回读，冲突即停。不再自动互校或全量同名发现。",
+  "contract": {
+    "spec": "tools/body_contract.py",
+    "implementation": "tools/body_contract.py",
+    "body": "正文 = 去掉 YAML frontmatter 块及其后紧随的一个行终止符；不满足起止条件则整体为正文",
+    "bytes": "原始字节读取；UTF-8 严格校验（含 frontmatter）；文本入口禁 BOM；CRLF 不归一；尾换行不规范化",
+    "fields": "frontmatter 字段用 YAML 解析取值（缺字段/null/空串三分）；平台 JSON 字段解码后按值比较，不 trim",
+    "resources": "包资源（references/scripts/assets 等）按原始字节复制与比较，不做正文规范化",
+    "comparison": "文件载荷用全文；平台字段（soul.body / systemRole / skill content / persona prefix）用正文",
+    "fieldTrailingNewline": {
+      "measured": {
+        "lh.skill.edit.content": "原样存储（写入 1695 B 正文 → 回读 1695 B）",
+        "lh.agent.edit.systemRole": "原样存储（写入 3791 B 正文 → 回读 3791 B）",
+        "minis.soul.body": "保留（写入 3790 B → 回读 3791 B：**强制补尾换行**，故仓库须带尾换行）",
+        "minis.subagents.*.instructions": "**剥除**（写入带尾换行 → 回读无），故仓库三份子代理文件**不带**尾换行"
+      },
+      "boundedRule": "默认逐字节相等；确需新增形态例外须逐对象审定。只允许去掉恰好一个已登记尾 LF；禁止 rstrip 或无界规范化。"
+    }
+  },
+  "objects": [
+    {
+      "id": "prompt/LUNO.md",
+      "type": "prompt",
+      "source": "prompt/LUNO.md",
+      "resources": [],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "field",
+          "field": "soul.body",
+          "alsoFile": "/var/minis/memory/SOUL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "agent",
+          "id": "agt_0Q1gmmEVOqF1",
+          "field": "systemRole"
+        }
+      }
+    },
+    {
+      "id": "subagents/LENS.md",
+      "type": "subagent",
+      "source": "subagents/LENS.md",
+      "resources": [],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "field",
+          "field": "subagents.8DF7ECDE-B73E-411C-80D1-02DCA7542D75.instructions"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "agent",
+          "id": "agt_EyGvkuZ3InQj",
+          "field": "systemRole"
+        }
+      }
+    },
+    {
+      "id": "subagents/FORGE.md",
+      "type": "subagent",
+      "source": "subagents/FORGE.md",
+      "resources": [],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "field",
+          "field": "subagents.9FF19B3C-3D0A-4E22-9986-4FC5900DCDA3.instructions"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "agent",
+          "id": "agt_JSQo9uyuxMU9",
+          "field": "systemRole"
+        }
+      }
+    },
+    {
+      "id": "subagents/minis-general-fallback.md",
+      "type": "subagent",
+      "source": "subagents/minis-general-fallback.md",
+      "resources": [],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "field",
+          "field": "subagents.general.instructions"
+        },
+        "lobehub": {
+          "present": false
+        }
+      },
+      "note": "Minis 内置通用执行兜底，非 FORGE 副本；名字与描述固定、不可删；按类型批量覆盖时须排除。LobeHub 设计无此对象。"
+    },
+    {
+      "id": "luno-core",
+      "type": "skill",
+      "source": "skills/luno-core/SKILL.md",
+      "resources": [
+        "skills/luno-core/references/retrieval.md",
+        "skills/luno-core/references/retrieval-sources.md",
+        "skills/luno-core/references/delegation.md",
+        "skills/luno-core/LICENSE.matt-pocock.txt",
+        "skills/luno-core/LICENSE.retrieval-sources.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-core/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_0SD2tNfsevw1",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-review",
+      "type": "skill",
+      "source": "skills/luno-review/SKILL.md",
+      "resources": [
+        "skills/luno-review/references/code-review.md",
+        "skills/luno-review/LICENSE.code-review.txt",
+        "skills/luno-review/LICENSE.anthropic-plugins.txt",
+        "skills/luno-review/LICENSE.matt-pocock.txt",
+        "skills/luno-review/LICENSE.obra-superpowers.txt",
+        "skills/luno-review/LICENSE.openminis.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-review/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_KQgebKvYSrEz",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-ops",
+      "type": "skill",
+      "source": "skills/luno-ops/SKILL.md",
+      "resources": [
+        "skills/luno-ops/LICENSE.openclaw.txt",
+        "skills/luno-ops/references/cfst.md",
+        "skills/luno-ops/references/execution-environment.md",
+        "skills/luno-ops/references/github.md",
+        "skills/luno-ops/references/onlyboxes-baseline.md",
+        "skills/luno-ops/references/onlyboxes.md",
+        "skills/luno-ops/references/remote-files-backup.md",
+        "skills/luno-ops/references/service-runtime.md"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-ops/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_m9EH1iQ34axx",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-writing",
+      "type": "skill",
+      "source": "skills/luno-writing/SKILL.md",
+      "resources": [
+        "skills/luno-writing/LICENSE.davila7.txt",
+        "skills/luno-writing/LICENSE.matt-pocock.txt",
+        "skills/luno-writing/references/i18n.md",
+        "skills/luno-writing/references/prose.md",
+        "skills/luno-writing/references/wordpress.md"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-writing/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_JHTvKTtYurcI",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-sync",
+      "type": "skill",
+      "source": "skills/luno-sync/SKILL.md",
+      "resources": [
+        "skills/luno-sync/references/sync-workflow.md",
+        "skills/luno-sync/references/agent-document-writing.md",
+        "skills/luno-sync/references/skill-authoring.md",
+        "skills/luno-sync/references/test-authoring.md",
+        "skills/luno-sync/scripts/quick_validate.py",
+        "skills/luno-sync/LICENSE.skill-authoring.txt",
+        "skills/luno-sync/LICENSE.matt-pocock.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-sync/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_4D5PRoCxRUxt",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-memory",
+      "type": "skill",
+      "source": "skills/luno-memory/SKILL.md",
+      "resources": [
+        "skills/luno-memory/references/maintenance.md",
+        "skills/luno-memory/LICENSE.matt-pocock.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-memory/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_alFYKsBbc7b2",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-minis",
+      "type": "skill",
+      "source": "skills/luno-minis/SKILL.md",
+      "resources": [
+        "skills/luno-minis/references/configuration.md",
+        "skills/luno-minis/references/runtime.md",
+        "skills/luno-minis/references/memory.md",
+        "skills/luno-minis/LICENSE.openminis.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-minis/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_Hy4pnh2pLLmR",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-surge",
+      "type": "skill",
+      "source": "skills/luno-surge/SKILL.md",
+      "resources": [
+        "skills/luno-surge/agents/openai.yaml",
+        "skills/luno-surge/references/command-reference.md",
+        "skills/luno-surge/references/official-sources.md",
+        "skills/luno-surge/references/SOURCE.md",
+        "skills/luno-surge/references/http-api.md",
+        "skills/luno-surge/references/controller-cli.md",
+        "skills/luno-surge/references/upstream-manifest.json",
+        "skills/luno-surge/references/diagnostics.md",
+        "skills/luno-surge/references/platform-compatibility.md",
+        "skills/luno-surge/scripts/_privacy.py",
+        "skills/luno-surge/scripts/surge_cli.py",
+        "skills/luno-surge/scripts/install.sh",
+        "skills/luno-surge/scripts/sync_upstream.sh",
+        "skills/luno-surge/scripts/surge_ios.py",
+        "skills/luno-surge/scripts/test_policy_descriptor.py",
+        "skills/luno-surge/scripts/adapt_upstream_reference.py",
+        "skills/luno-surge/scripts/acceptance.sh",
+        "skills/luno-surge/scripts/package_release.py",
+        "skills/luno-surge/scripts/update_upstream.py",
+        "skills/luno-surge/LICENSE.openminis.txt",
+        "skills/luno-surge/LICENSE.openminis-ios-dev.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-surge/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_pnbC80rsnSNo",
+          "fields": "content,name,description",
+          "key": "surge.zip"
+        }
+      },
+      "officialPackageResources": {
+        "note": "部署时从官方包按 upstream-manifest.json 的 raw_sha256 取件装入本端技能，公开仓库不含这 3 份参考原件；agents/openai.yaml 是本地有意改写，属自有文件",
+        "paths": [
+          "skills/luno-surge/references/plugin-authoring.md",
+          "skills/luno-surge/references/upstream-SKILL.md",
+          "skills/luno-surge/references/upstream-command-reference.md"
+        ]
+      }
+    },
+    {
+      "id": "luno-coding",
+      "type": "skill",
+      "source": "skills/luno-coding/SKILL.md",
+      "resources": [
+        "skills/luno-coding/LICENSE.matt-pocock.txt",
+        "skills/luno-coding/LICENSE.obra-superpowers.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-coding/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_jm396MpmCiSu",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-lobehub",
+      "type": "skill",
+      "source": "skills/luno-lobehub/SKILL.md",
+      "resources": [
+        "skills/luno-lobehub/references/skills.md",
+        "skills/luno-lobehub/references/knowledge.md",
+        "skills/luno-lobehub/references/instance.md",
+        "skills/luno-lobehub/references/access.md"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-lobehub/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_7xX0aEXWaXlg",
+          "fields": "content,name,description"
+        }
+      }
+    },
+    {
+      "id": "luno-cchp",
+      "type": "skill",
+      "source": "skills/luno-cchp/SKILL.md",
+      "resources": [
+        "skills/luno-cchp/references/interfaces.md",
+        "skills/luno-cchp/references/workflows.md",
+        "skills/luno-cchp/references/coverage-rules.md",
+        "skills/luno-cchp/SOURCE.md",
+        "skills/luno-cchp/LICENSE.upstream.txt"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": true,
+          "kind": "file",
+          "path": "/var/minis/skills/luno-cchp/SKILL.md"
+        },
+        "lobehub": {
+          "present": true,
+          "kind": "skill",
+          "id": "skl_tmxDluMgdcYG",
+          "fields": "content,name,description"
+        }
+      }
+    }
+  ]
+}

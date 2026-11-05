@@ -1,0 +1,13 @@
+{
+  "source": "/var/minis/shared/agent-sync-candidates/surge6-20261103-upstream/official",
+  "version_report": "Surge for macOS 6.11.0 (12680)",
+  "retrieved_at": "2026-11-03T04:37:16.324672",
+  "raw_sha256": {
+    "SKILL.md": "d01acba41ad9e90869a32f708b48b117b7e96a6c92b422636503837dc107beb1",
+    "references/command-reference.md": "81be46e9a4444de5af120ddac49bd18910f0a98279a1467174cd8c3b0001a7a5",
+    "references/plugin-authoring.md": "d41b905588c8a941e5c208854f76b05b8a395f981a6027ba758a8b9ee4ac7193",
+    "agents/openai.yaml": "ef5cdcb1edd583d4b673774aa1e3b1c153b83df23cf1105191e8aac4d09912b1",
+    "assets/logo.png": "6e8ba4a6ee0ac71c7c03e4a5c7ee457d2f782abe71542e9819dc35443fb1d6f9"
+  },
+  "runtime_validation": "not performed"
+}
