@@ -76,6 +76,15 @@
     本组 11 例实测：整组 5.1–6.3 s（9 例时同机同口径 5.2 s），新增 2 例 1.1 s。
     撤防实测：删安装点核验整块 ⇒ 4 条负控红；删可执行位／realpath／存在性判据 ⇒ 对应用例各红；
     `install.sh` 去掉核验调用 ⇒ 「不打印成功语」负控红。
+20. **公开发布快照两态（2026-11-06，待他批 N1 落地）**：`SurgeReleaseSnapshotTest` 原按公开态
+    单态断言三份官方原件不在技能目录与 ZIP 中，按 manifest 部署取件后重跑必红。现改为两态：
+    公开态（三件全不在）保持原断言；取件态（三件全在且逐件 sha256 等于 manifest
+    `raw_sha256`：`SKILL.md`→`references/upstream-SKILL.md`、`references/command-reference.md`
+    →`references/upstream-command-reference.md`、`references/plugin-authoring.md`→同名落点）
+    断言三份原件**进包**且归档字节等于盘上字节——依据 `package_release.py` 的 `collect()`：
+    排除表只含目录名／后缀／名单（`__pycache__`、`.pem`、`secrets.env` 等），不含这三条路径，
+    故 `build()` 会把它们一并归档。部分在位或在位但哈希不符 ⇒ `self.fail()` 显式失败，不 skip。
+    例数不变（一例换一例，仍 78）。
 """
 import contextlib
 import errno
@@ -1457,20 +1466,43 @@ runpy.run_path(script, run_name="__main__")
 
 
 class SurgeReleaseSnapshotTest(unittest.TestCase):
-    def test_packaged_overlay_and_official_files_match_bytes(self):
+    """公开发布快照的**两态**判据：公开态（三份官方原件全不在）与取件态（三件都在且哈希合规）。
+
+    `package_release.py` 的 `collect()` 只按目录名／后缀／名单排除（`__pycache__`、`.pem`、
+    `secrets.env` 等），**没有**把 `references/upstream-*`／`references/plugin-authoring.md`
+    列入排除表，故取件后三份原件会随技能目录整份进包；公开态它们不存在，包里自然也没有。
+    因此本用例按实际行为分态断言，不为迎合某一态改脚本。
+
+    「部分在位」或「在位但哈希不符」不属任何一种合法态（未按 manifest 取件／夹具损坏），
+    一律显式失败并报出具体文件与类别，不用 `skipTest` 静默跳过。
+    """
+
+    # 仓库内落点 → `references/upstream-manifest.json` 的 `raw_sha256` 键（官方取件时的原路径）。
+    ORIGINALS = {
+        'references/upstream-SKILL.md': 'SKILL.md',
+        'references/upstream-command-reference.md': 'references/command-reference.md',
+        'references/plugin-authoring.md': 'references/plugin-authoring.md',
+    }
+
+    def test_release_zip_snapshot_in_both_states(self):
         import zipfile
         skill = ROOT / 'skills/luno-surge'
-        # 公开快照（2026-11-06 r3）不含官方参考原件：ZIP 只带覆盖层、manifest 与自有的
-        # agents/openai.yaml（本地有意改写，从 df54a93 按原字节恢复），三份参考原件路径缺席；
-        # 五文件 raw_sha256 仍登记在 manifest，逐字节核对改在部署取件后按〈取件与部署〉执行。
+        # 两态共有：覆盖层、manifest 与自有的 agents/openai.yaml（本地有意改写，从 df54a93
+        # 按原字节恢复）都必须逐字节进包。
         names = ('references/command-reference.md', 'references/upstream-manifest.json',
                  'agents/openai.yaml')
-        absent = ('references/upstream-command-reference.md', 'references/upstream-SKILL.md',
-                  'references/plugin-authoring.md')
         manifest = json.loads((skill / 'references/upstream-manifest.json').read_text())
         self.assertEqual(5, len(manifest['raw_sha256']))
-        for target in absent:
-            self.assertFalse((skill / target).exists(), target)
+        missing = sorted(rel for rel in self.ORIGINALS if not (skill / rel).exists())
+        fetched = not missing
+        if missing and len(missing) != len(self.ORIGINALS):
+            self.fail('官方原件部分在位：缺少 ' + ', '.join(missing) +
+                      '（公开态要求三件全不在，取件态要求三件全在且哈希合规）')
+        if fetched:
+            for rel, key in sorted(self.ORIGINALS.items()):
+                actual = hashlib.sha256((skill / rel).read_bytes()).hexdigest()
+                self.assertEqual(manifest['raw_sha256'][key], actual,
+                                 f'{rel} 的 sha256 与 manifest raw_sha256[{key}] 不符')
         with tempfile.TemporaryDirectory(prefix='surge-zip-') as tmp:
             out = Path(tmp) / 'release.zip'
             r = subprocess.run([sys.executable, '-B', str(SCRIPTS / 'package_release.py'), str(out)],
@@ -1479,8 +1511,13 @@ class SurgeReleaseSnapshotTest(unittest.TestCase):
             with zipfile.ZipFile(out) as archive:
                 for name in names:
                     self.assertEqual((skill / name).read_bytes(), archive.read(name))
-                for name in absent:
-                    self.assertNotIn(name, archive.namelist())
+                for rel in sorted(self.ORIGINALS):
+                    if fetched:
+                        # 取件态：见类注释——排除表不含这三条路径，故它们进包且字节等于盘上字节。
+                        self.assertEqual((skill / rel).read_bytes(), archive.read(rel))
+                    else:
+                        # 公开态：原件不在技能目录，ZIP 里也不得出现这三条路径。
+                        self.assertNotIn(rel, archive.namelist())
                 self.assertFalse(any(name.endswith(('.pyc', '.log', '.pem')) for name in archive.namelist()))
             r = subprocess.run([sys.executable, '-B', str(SCRIPTS / 'package_release.py'),
                                 str(skill / 'not-allowed.zip')], env=offline_env(),
