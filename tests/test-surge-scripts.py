@@ -84,7 +84,7 @@
     断言三份原件**进包**且归档字节等于盘上字节——依据 `package_release.py` 的 `collect()`：
     排除表只含目录名／后缀／名单（`__pycache__`、`.pem`、`secrets.env` 等），不含这三条路径，
     故 `build()` 会把它们一并归档。部分在位或在位但哈希不符 ⇒ `self.fail()` 显式失败，不 skip。
-    例数不变（一例换一例，仍 78）。
+    例数不变（一例换一例）。
 """
 import contextlib
 import errno
