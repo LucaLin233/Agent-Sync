@@ -19,8 +19,8 @@ description: 已部署 LobeHub 2.x CE：Agent/模型、权限/渠道/开关、Sk
 - 使用或评估 CLI/HTTP、批量与自动化、设备端凭据环境时，必须在操作/建议/结论前完整读取 `references/access.md`；中途涉及先补读。仅只读加载规则本身不触发本资源，仍守既定安全与授权边界。
 
 ## 依据
-- 官方文档即仓库 `docs/**`（`usage/**` 平台功能与权限、`self-hosting/**` 部署与实例配置），按实例版本 tag 取原文 `raw.githubusercontent.com/lobehub/lobehub/v2.3.1/docs/<路径>`（或 lobehub.com/docs）；平台机制、变量含义与开关表按文档查，正文只留本实例坐标、实测与文档不认的坑；CLI 语法/参数/退出码以本机 `lh <cmd> --help`、`lh man <cmd>` 为准（0.0.74），不复制帮助。
-- 公开 API 参考文档未覆盖（`/trpc/lambda/<router>.<procedure>` 用法见 `luno-lobehub/references/access.md`）；网关地址、令牌与 JWKS 分工见文档 v2.3.1 `self-hosting/platform/docker-compose.mdx`〈Agent Gateway〉。
+- 官方文档即仓库 `docs/**`（`usage/**` 平台功能与权限、`self-hosting/**` 部署与实例配置），按实例版本 tag 取原文 `raw.githubusercontent.com/lobehub/lobehub/<当次已核实例版本tag>/docs/<路径>`（或 lobehub.com/docs）；平台机制、变量含义与开关表按文档查，正文只留本实例坐标、实测与文档不认的坑；CLI 语法/参数/退出码以本机 `lh <cmd> --help`、`lh man <cmd>` 为准，不复制帮助。
+- 公开 API 参考文档未覆盖（`/trpc/lambda/<router>.<procedure>` 用法见 `luno-lobehub/references/access.md`）；网关地址、令牌与 JWKS 分工见对应实例版本文档 `self-hosting/platform/docker-compose.mdx`〈Agent Gateway〉。
 
 ## 方法
 - 区分执行设备、目标实例与请求链路；核对版本、镜像 digest、Compose、环境变量、日志、端点与实际结果。
