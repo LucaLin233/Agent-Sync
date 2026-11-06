@@ -24,6 +24,7 @@
 - 停用与删除不是同一动作：停用可回滚，删除/撤销不可回滚；报告里必须写清做的是哪一种。
 - 续页依 `references/interfaces.md`〈分页〉，`--limit` 为每页条数；`data.partial` 或 `data.preparing` 为真先重取，不据此页判断 key 状态或统计条数。
 - 对已撤销 key 不继续尝试启停；遇状态冲突先核当前状态与当次契约，不自动改走其他状态。
+- 本组织用户约定：撤销或删除 provider 或 key 后，只清理本次对象的引用：key ID 从 `upstream_probe.ratio.key_denylist` 移除，provider ID 从 `upstream_probe.ratio.provider_denylist`、`upstream_probe.balance.provider_denylist` 移除；在授权范围内按〈配置继承与恢复〉的数组规则写入并回读全数组，不顺带清理历史失效引用；用户当次明确要求优先。
 
 ## 配置变更前的快照
 
@@ -49,6 +50,7 @@
 ## key 的创建、更新与倍率
 
 - 用户约定（非 CCHP 平台约束）：仅约束本组织内 key 的名称与优先级字段，用户当次对这两项的明确要求优先，不据此推断调度行为。名称用 `厂家-服务商`、不带数字，优先级＝用户确定的名次×10＋厂家位（DeepSeek=1、OpenAI=2、Claude=3，名次从 1 起）。增减服务商导致名次变化时，在授权范围内按新名次整体重排优先级。
+- 本组织用户约定：新建 provider 的 `cost_multiplier_ppm` 设为 1000000（1.0），人工倍率调整只在 key 层进行，不回改已有 provider；本条只定新建初值，不改变自动探测与自动写入策略，要固定 key 的手设倍率仍按本节排除名单规则；用户当次明确要求优先。
 - 创建与更新按输入 schema 重建请求体，不直接回写读取视图；嵌套数组同样只取可写字段，`model_whitelist`／`model_redirects` 中的派生字段也须逐项筛除；密钥来源只有两种：当次授权且已注入的真实密钥，或用户当次明确要求的占位密钥；两者都没有即停止创建。占位分支：值用可辨认的非秘密串（如 `placeholder-<provider>-<YYYYMMDD>`），不取自、不仿写任何真实密钥；创建后立即 `disableProviderKey` 并回读为停用，报告标「占位、未启用」，并说明创建到停用之间可能被调度的风险；真实密钥由用户在控制台替换，或按授权注入后用 `rotateProviderKey` 替换；替换完成（控制台路径以用户告知为准，`rotateProviderKey` 路径以回执与回读为准）前，不对该 key 启用、测活或做链路验证。创建或更新后回读倍率、探测开关、白名单、优先级与状态：请求体不是存储值，不一致时先核来源与审计，不直接归因于自动探测。
 - `model_redirects` 在 0.1.3 的 create／update 输入 schema 里仍是数组字段（至多 500 条）；它与 request overrides 的 `model_redirect` 预置是否同一机制**未核实**，不推定等价、不用一方代替另一方。
 - 倍率与探测字段（`cost_multiplier_ppm`、`upstream_ratio_auto_detect` 及结果字段）按 schema 与实例证据确认；关闭探测后分别验证开关与实际倍率，不把开关等同于倍率已恢复。
@@ -56,6 +58,7 @@
 - CCHP 的组织级单键 `upstream_probe.ratio.auto_apply` 对应面板「自动写入成本倍率」，key 级 `upstream_ratio_auto_detect` 对应「成本倍率自动探测」；倍率探测排除名单为 `upstream_probe.ratio.key_denylist` 与 `upstream_probe.ratio.provider_denylist`，不要与余额探测的 `upstream_probe.balance.*` 混用。`upstream_probe` 定时任务每 30 分钟一轮；实际是否探测、写入须结合开关与排除名单核对。
 - 上述上游成本倍率只影响「价格优先」路由排序，不计入用户账单。要固定某个 key 的手设倍率，须将其加入 `upstream_probe.ratio.key_denylist`，否则仍可能被自动覆盖；写名单仍遵守〈配置继承与恢复〉的数组变更规则。
 - 更新前核对部分更新还是替换：部分更新只提交授权字段；替换须确认能在授权与秘密边界内保留其余字段，否则停止。改后回读，确认未扩大变更范围。
+- 本组织用户约定：provider 下有已启用的 key 后，先查该 provider 的测活任务，缺失才建一条，已有则维护，不另建第二条。任务每小时一次（cron `0 * * * *`）、enabled、不通知；目标只含其下已启用且满足接口状态要求的 key，模型用平台为该 key 派生的测活默认模型（`getProviderKeyLivenessContexts`），不自行指定模型或 endpoint；当次 schema 或派生结果给不出模型时停该项并报。占位 key 按本节停用，换成真实密钥并启用后才加入。key 增减、启停或撤销时同步目标，改后回读任务、targets 与调度；用户当次明确要求优先。
 - 测活目标须为接口允许的状态（本次实测 disabled／revoked 被拒）；不符合即停，不自动启用或换目标；改后回读 targets 与调度。
 
 ## 审计追溯
