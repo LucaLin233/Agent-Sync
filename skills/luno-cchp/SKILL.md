@@ -1,15 +1,15 @@
 ---
 name: luno-cchp
-description: CCHP（Claude Code Hub Plus）控制面操作：通过 cchp CLI 或 Management API 查询用量与请求、管理 provider/key、LLM token、成员配额及导入；不承接通用 Linux/Compose 运维或 Minis 技能登记。
+description: CCHP控制面：用量、请求、provider/key、覆写规则、LLM token、成员配额与导入；非通用运维。
 ---
 # LUNO｜CCHP 控制面
 
 ## 范围
 CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provider 与 provider key、LLM token、成员与配额、CC Hub 导入、少量设置读取。两条入口分支：`cchp` CLI（管理 token；spec 内置于 CLI，可离线查操作）与 Management API（HTTP 直连，只在 CLI 可用且已取得操作契约时用于编排）。网关转发、模型质量、通用 Linux/Compose/网络运维不属本技能；CLI 本体的定位、安装与升级按〈执行位置与版本门槛〉处理。
 
-## 何时用／何时不用
-用：查某实例用量与成本、定位失败请求、看或改 provider／key 状态、处理 LLM token 与配额、导入 CC Hub 数据、核对控制面与账目口径。
-不用：宿主机部署、容器、反向代理、DNS/TLS、防火墙排障（→ `luno-ops`）；Minis 端技能登记与安装（→ `luno-minis`）；LobeHub 实例自身的模型与渠道配置（→ `luno-lobehub`）；CCHP 自身镜像／Compose 升级（→ `luno-ops`）。
+## 相邻领域
+
+宿主机/容器/反代/DNS/TLS/防火墙及CCHP镜像升级归 `luno-ops`；Minis技能登记归 `luno-minis`；LobeHub模型/渠道归 `luno-lobehub`。混合任务取并集，不用控制面技能替代运维。
 
 ## 实例与端点
 管理面 `CCHP_GATEWAY_URL`＋`CCHP_TOKEN`、模型数据面 `CCHP_BASE_URL`＋LLM token 须为当次获准且已注入，两面不得混用；变量用途与错误反例见 `references/interfaces.md`〈实例端点与凭据〉。缺哪个入口或凭据即停其依赖的请求、命令与结论并报变量名；不回退旧地址、不猜子域、不换实例或其他环境。离线分析与另一入口的已授权操作可继续；身份和版本依〈执行位置与版本门槛〉核实。
@@ -26,7 +26,7 @@ CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provi
 ## 执行位置与版本门槛
 - 先定位置：CLI 可按授权安装在多台主机（含 Minis 本机），不预设固定主机；先确认当次执行主机、用户与项目，定位和安装均只在该环境进行。不得据文档或历史结论推断当前实例状态。
 - 再找 CLI：先 `command -v cchp`；未命中不等于未安装，补核该用户的 `$HOME/.local/bin/cchp`、`/usr/local/bin/cchp`、`/opt/homebrew/bin/cchp` 等常见路径及已知自定义安装位置。候选不是穷尽清单；仍未找到时报「当前执行环境未定位到可用 CLI」，不据此断言未安装。找到后以选定入口执行 `version --json`，记录实际路径、CLI 与 spec 版本；后续使用同一入口。
-- 安装／升级仅限当次授权的主机与目录，不改服务端或容器编排。核上游 `CCH-HQ/cchp-cli` 的 `install.sh` 来源及内容，以 `CCHP_VERSION`、`CCHP_INSTALL_DIR` 指定目标版本与获准目录（默认 `$HOME/.local/bin`），核 `checksums.txt` 通过；改前备份将覆盖的旧二进制。默认用明确路径；系统级入口已获授权、目标无冲突且目录在实际 PATH 时才建 `/usr/local/bin/cchp` 软链。改后按实际执行方式（含非交互 SSH）复验入口与 `version --json`；约定裸命令时另核 `command -v cchp` 命中预期路径。失败即停并报告，按备份与既有授权恢复。
+- 安装/升级限获准主机目录，不动服务端/编排。核 `CCH-HQ/cchp-cli` 安装器来源及内容，以CCHP_VERSION/CCHP_INSTALL_DIR明确版本和目录（默认HOME/.local/bin），通过checksums.txt校验；覆盖旧二进制前备份。默认显式路径；系统入口获准、目标无冲突且目录在实际PATH时才建/usr/local/bin/cchp软链。改后按真实调用方式（含非交互SSH）核入口及version --json；约定裸命令另核command -v命中。失败停依赖并按备份/授权恢复。
 - 再定身份与实例：遵守〈认证边界〉，用选定 CLI 执行 `status --json`，核对 server、token 前缀、身份与连通性；与当次授权不符即停。服务端版本（控制台或 `getSystemAbout`，CLI 为 `cchp admin about`）与 CLI／spec 版本一并记录；服务端版本未知，或动作语义依赖未核实的契约时，只做只读，不做依赖该契约的写。
 - 版本门槛：未定位到可用 CLI、版本不符或 spec 与实例不匹配时，停止控制面操作并报缺口，不以 Management API 直连替代；已获授权的 CLI 定位、安装或升级可按本节处理，完成后重新核验前提。
 

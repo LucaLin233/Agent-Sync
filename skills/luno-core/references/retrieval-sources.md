@@ -8,43 +8,33 @@
 
 ### S1
 原文 SHA-256：`150606d9b144863ea8b780fa06bc0f491a29b783f5869451901af50e4f553a7a`。
-- 上游仓库：exa-labs/agent-skills；固定 commit：`aa6d5e6f7315b215c20bf15930367d61f86cc268`。
-- 文件：`skills/build-with-exa/references/search.md`；末次提交日期：2026-10-02T02:21:12Z。
-- 许可：MIT；Copyright (c) 2026 Exa Labs, Inc.。适用完整通知见下节。
+- 上游：`exa-labs/agent-skills` @ `aa6d5e6f7315b215c20bf15930367d61f86cc268`；文件 `skills/build-with-exa/references/search.md`（末次提交 2026-10-02T02:21:12Z）；许可 MIT，Copyright (c) 2026 Exa Labs, Inc.（完整通知见下节）。
 - 精选改写：字段层级、无内容默认、内容模式与缓存/历史条件；未写：不搬参数大表、全产品路由、固定条数与强制用户批准过滤。
-- 追新：`curl -fsS 'https://api.github.com/repos/exa-labs/agent-skills/commits?path=skills/build-with-exa/references/search.md&per_page=1'`；release：`curl -fsS 'https://api.github.com/repos/exa-labs/agent-skills/releases/latest'`。
 
 ### S2
 原文 SHA-256：`08bfdf43c5a2b3652223985aa4738a36714336fac633374aa950c5daa64db5f4`。
-- 上游仓库：exa-labs/agent-skills；固定 commit：`aa6d5e6f7315b215c20bf15930367d61f86cc268`。
-- 文件：`skills/build-with-exa/references/contents.md`；末次提交日期：2026-10-14T07:37:13Z。
-- 许可：MIT；Copyright (c) 2026 Exa Labs, Inc.。适用完整通知见下节。
+- 上游：`exa-labs/agent-skills` @ `aa6d5e6f7315b215c20bf15930367d61f86cc268`；文件 `skills/build-with-exa/references/contents.md`（末次提交 2026-10-14T07:37:13Z）；许可 MIT，Copyright (c) 2026 Exa Labs, Inc.。
 - 精选改写：顶层提取/新鲜度、只选一种模式、逐 URL statuses；未写：不搬 SDK、重复的默认模式；两份参考的默认冲突改为按事实所需选择。
-- 追新：`curl -fsS 'https://api.github.com/repos/exa-labs/agent-skills/commits?path=skills/build-with-exa/references/contents.md&per_page=1'`；release：`curl -fsS 'https://api.github.com/repos/exa-labs/agent-skills/releases/latest'`。
 
 ### S3
 原文 SHA-256：`8dd37283380f7335d03017385f5d8eb9aa43be06c580d32e02f5681b8cb4c363`。
-- 上游仓库：keenableai/keenable-hermes-plugin；固定 commit：`99ddccbd5ba37f3dc3f7b8c8bf24bed01ddf5ac7`。
-- 文件：`skills/keenable-search/SKILL.md`；末次提交日期：2026-10-25T06:38:10Z。
-- 许可：MIT；Copyright (c) 2026 Keenable。适用完整通知见下节。
+- 上游：`keenableai/keenable-hermes-plugin` @ `99ddccbd5ba37f3dc3f7b8c8bf24bed01ddf5ac7`；文件 `skills/keenable-search/SKILL.md`（末次提交 2026-10-25T06:38:10Z）；许可 MIT，Copyright (c) 2026 Keenable。
 - 精选改写：精确引文/冲突才深读、prompt 定向、时间语义、401/429 分流；未写：不搬匿名降级、摘要足够即定论、固定数量、客户端传输与参数表。
-- 追新：`curl -fsS 'https://api.github.com/repos/keenableai/keenable-hermes-plugin/commits?path=skills/keenable-search/SKILL.md&per_page=1'`；release：`curl -fsS 'https://api.github.com/repos/keenableai/keenable-hermes-plugin/releases/latest'`。
 
 ### S4
 原文 SHA-256：`3169a23e86ed0c167814dff0b8f850a092e5dde9eb7af7bf93dea5ec6d5dbc9e`。
-- 上游仓库：keenableai/keenable-hermes-plugin；固定 commit：`99ddccbd5ba37f3dc3f7b8c8bf24bed01ddf5ac7`。
-- 文件：`skills/keenable-research/SKILL.md`；末次提交日期：2026-10-25T06:38:10Z。
-- 许可：MIT；Copyright (c) 2026 Keenable。适用完整通知见下节。
+- 上游：`keenableai/keenable-hermes-plugin` @ `99ddccbd5ba37f3dc3f7b8c8bf24bed01ddf5ac7`；文件 `skills/keenable-research/SKILL.md`（末次提交 2026-10-25T06:38:10Z）；许可 MIT，Copyright (c) 2026 Keenable。
 - 精选改写：已答/冲突/未答状态、只补缺口、边际收益停止、限流不循环；未写：不搬固定 3–6 题、只跟进一次、固定轮数或并发要求。
-- 追新：`curl -fsS 'https://api.github.com/repos/keenableai/keenable-hermes-plugin/commits?path=skills/keenable-research/SKILL.md&per_page=1'`；release：`curl -fsS 'https://api.github.com/repos/keenableai/keenable-hermes-plugin/releases/latest'`。
 
 ### S5
 原文 SHA-256：`0aacd119c70b57144e7358c5829061a0d25a734ea29afb668392861250c9e42f`。
-- 上游仓库：exa-labs/exa-mcp-server；固定 commit：`55cc85c7305117aea538ea0b9dc7d19523be0c6a`。
-- 文件：`skills/search/SKILL.md`；末次提交日期：2026-04-22T04:27:41Z。
-- 许可：MIT；Copyright (c) 2025 Exa Labs。适用完整通知见下节。
+- 上游：`exa-labs/exa-mcp-server` @ `55cc85c7305117aea538ea0b9dc7d19523be0c6a`；文件 `skills/search/SKILL.md`（末次提交 2026-04-22T04:27:41Z）；许可 MIT，Copyright (c) 2025 Exa Labs。
 - 精选改写：Gotchas：相似候选不等于满足条件或验证；未写：不搬厂商独占/禁换源、强制子代理与模型、按 numResults 冒充审过来源数。
-- 追新：`curl -fsS 'https://api.github.com/repos/exa-labs/exa-mcp-server/commits?path=skills/search/SKILL.md&per_page=1'`；release：`curl -fsS 'https://api.github.com/repos/exa-labs/exa-mcp-server/releases/latest'`。
+
+### 追新参数模板（S1–S5 共用，替换原五条逐条 curl）
+- 逐文件最新提交：`curl -fsS 'https://api.github.com/repos/<owner/repo>/commits?path=<path>&per_page=1'`
+- 最新 release：`curl -fsS 'https://api.github.com/repos/<owner/repo>/releases/latest'`
+- `<owner/repo>` 与 `<path>` 取对应 S 条登记；同仓多文件（S1/S2、S3/S4）只换 `path`，跨仓（S5）换仓库与 `path`。404、无 latest tag 的降级与 `git diff <固定commit> <新commit> -- <path>` 核对流程仍按下方原文执行，不因模板合并放宽。
 
 release/latest 返回 404 时，仅记无 latest release，再查同仓库 `/releases?per_page=1`，不得把无 tag 当作无更新。追新先查默认分支 `/commits/HEAD`，再查逐文件 commits；取得新提交后在该上游的独立克隆执行 `git diff <本表固定commit> <新commit> -- <本表文件路径>`，核正文与 LICENSE，不自动覆盖本地取舍。固定日期重查形态为同一 commits 查询加 `&sha=<本表固定commit>`；禁止用目录最后更新日期代替文件日期。
 

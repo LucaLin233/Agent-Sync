@@ -10,7 +10,7 @@
 - `subagents/`：LENS、FORGE 的两端同文，以及 Minis 专用通用执行兜底；第三份不是 FORGE 副本，LobeHub 无该对象。
 - `tools/sync-targets.json`：受管对象、资源与各端身份/落点登记。
 - `tools/`：必要部署、正文判等、资源回读与打包工具；`tests/`：部署、Surge、脱敏、打包和规则守卫反例等六个测试入口和最小调度。它们各自的触发与授权以现役流程及相关规则为准，仓库目录不构成执行授权。
-- [`PENDING.md`](PENDING.md)：当前活动未完成状态；`changelog/`：按日变更记录，一条记录一个文件、文件名 `YYYY-MM-DD.md`（当天已有则追加）。旧历史见旧私有 `LucaLin233/Agent` 的 Git 历史（本仓库为无历史快照，不含该历史）。
+- [`PENDING.md`](PENDING.md)：当前活动未完成状态；`changelog/`：只保留既有历史记录；新批结果只记当批PR，活动未决只记PENDING.md。旧历史见旧私有 `LucaLin233/Agent` 的 Git 历史（本仓库为无历史快照，不含该历史）。
 
 Minis 内置技能（如 `skill-creator`）不是同步对象；模型分组参数、记忆、设备与环境配置不在本仓库备份范围。第三方材料与来源、许可例外见 `skills-sources.md`；`luno-surge` 是自编与官方快照混合来源，详见 `skills/luno-surge/references/SOURCE.md`。
 

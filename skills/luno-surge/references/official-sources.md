@@ -14,27 +14,9 @@
 - 同一 iOS 版本上发布说明与手册冲突时，以发布说明为准并说明差异；只有 Mac 发布说明记录的能力，无 iOS／共享内核证据不得断言 iOS 支持。
 - 版本敏感或易误读的结论记录来源 URL；页面失效时从手册首页或侧栏目录重新定位，不猜 URL，也不用搜索引擎摘要代替官方正文。
 
-## 配置手册入口
+## 配置手册定位
 
-以下路径均相对 `https://manual.nssurge.com/`：
-
-- 平台差异／快速上手：`getting-started/platform-differences.md`、`getting-started/quick-start.md`
-- Profile：`profile/format.md`、`profile/general.md`、`profile/module.md`、`profile/managed-profile.md`、`profile/keystore.md`、`profile/requirement.md`（iOS 5.22.0 / Mac 6.9.0 起支持 `DEVICE_NAME`）
-- 规则：`rules/overview.md`、`rules/domain.md`、`rules/ip.md`、`rules/protocol-and-network.md`、`rules/logical.md`、`rules/ruleset.md`
-- 策略与协议：`policies/overview.md`、`policies/parameters.md`（含 `underlying-proxy` 代理链）、`policies/tls.md`、`policies/udp.md`、`policies/http.md`、`policies/socks5.md`、`policies/shadowsocks.md`、`policies/snell.md`、`policies/vmess.md`、`policies/trojan.md`、`policies/tuic.md`、`policies/hysteria2.md`、`policies/wireguard.md`、`policies/tailscale.md`
-- 策略组：`policy-groups/overview.md`、`policy-groups/select.md`、`policy-groups/url-test.md`、`policy-groups/smart.md`、`policy-groups/policy-including.md`、`policy-groups/parameters.md`
-- DNS／HTTP／脚本：`dns/overview.md`、`http/overview.md`、`http/mitm.md`、`http/url-rewrite.md`、`scripting/overview.md`、`scripting/api.md`
-- 工具与远程控制（同基址）：<https://manual.nssurge.com/tools/cli.md>、<https://manual.nssurge.com/tools/http-api.md>、<https://manual.nssurge.com/tools/dashboard.md>、<https://manual.nssurge.com/tools/testing.md>、<https://manual.nssurge.com/tools/url-scheme.md>
-
-### 正式版 5.22.0 Profile 变化
-
-- `#!REQUIREMENT` 官方变量含 `DEVICE_NAME`（iOS 5.22.0+ / Mac 6.9.0+）：用户设置的设备名，Privacy Mode 下读取结果可能被遮蔽。
-- `#include` 可与 section 内普通内容混排；多个或混合 include 因写回目标不明确，在 UI 中只读。
-- `[Ruleset *]`、`[WireGuard *]`、`[Tailscale *]` detached sections 支持通配 include。
-- inline Ruleset 可引用其他 inline Ruleset，也可引用外部 `RULE-SET`／`DOMAIN-SET`；循环引用被拒绝并给出引用链。
-- Event scripts 新增 `engine-started` 与 `profile-reloaded` 事件。
-
-具体语法以对应官方手册正文和 `surge-cli --check` 结果为准，不据发布说明猜测格式。
+从上节官方Manual入口按本次section/功能定位原文，不在本包缓存逐页目录或旧版变化清单。版本敏感字段、include/分节与模块行为临用核对应平台发布说明及规范正文；目录命中不等于读过原文，取不到即标未核实并停依赖。离线速查减少，不授权猜URL或套其他客户端语法。
 
 ### 本地校验
 

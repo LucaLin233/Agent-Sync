@@ -19,20 +19,9 @@
 - **2026-11-05 Minis 实测（合成样本）**（同上证据层）：`readImage` 返回 `content type=image/png` 的 base64；解码后 75 B，SHA-256 前缀 `57cda64cead0869c` 与沙箱端一致，本机视觉读取通过；仅拿到元数据不算读图成功。
 - **未验证**：系统提示只列服务器名和 note，工具定义按需取得；新会话未复核。截断阈值、超时、lease 到期、`computerUse`／`CU:<worker_id>`、并发和本日 REST Task 均未测。
 
-## 历史版本、镜像能力与成本（不得当作现值）
+## 能力与成本重新取证
 
-- **历史实测（2026-10-18；平台或镜像版本一变即失效）**：console 与 worker 均为 `0.14.1`；终端镜像为 `coolfan1024/onlyboxes-runtime:0.14.1-lobehub`，其内观测为 Ubuntu 24.04.5 LTS／x86_64／glibc 2.39／Python 3.12.3；独立 Python 镜像为 `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`，Debian bookworm slim 仅由 tag 推断，未逐项实测。`onlyboxes-sandbox:0.11.0` 口径作废。
-- **历史实测（2026-10-21；仅复检版本口径与 `readImage`）**：前端构建期兜底为 `0.14.1`（唯一命中，未取运行时值）；沙箱 `os-release` 为 Ubuntu 24.04.5 LTS、Python 3.12.3；终端会话读取 `/tmp` 下 1×1 PNG 返回 inline `image/png`；`CU:<worker_id>` 未测；镜像 tag 与 worker 版本无法从容器内读取。
-- **历史实测（2026-10-18）**：终端镜像有 ffmpeg、LibreOffice、pandoc、numpy、pandas、scipy、matplotlib、gcc／g++／make、node／npm、rg、jq、sqlite3、python3、zip／unzip、git、curl／wget；无 uv、pkg-config、`Python.h`，会话内加装 `python3-dev`／`pkg-config` 与 uv 曾成功。独立 Python 镜像自带 uv，未预装 gcc／编译链、Node／npm、ffmpeg／LibreOffice／numpy 等；曾通过 ffmpeg 转 mp3、soffice 转 PDF、numpy 2.2.6 计算、同 `session_id` 复用与内存上限样本。
-- **历史实测（2026-10-18）**：全新会话中 `apt-get update` 加装开发依赖约 5.6 s、装 uv 约 0.6 s、建 venv 约 0.06 s、源码编译 MarkupSafe 约 1.9 s、装 pandas wheel 约 0.5 s，合计约 10 s；这些是样本，不是安装或缓存承诺。
-- **历史实测（2026-09-17、2026-10-18）**：仅作有限地址／端口和容器隔离观测；独立 Python 曾完整返回 1,048,577 字符；端到端中位数独立 Python 1.86 s、终端 1.77 s，300 万次单线程纯 Python 循环倍率 9.1×、30 次 Python 子进程 4.57×。这些数字不得外推到其他任务、时段、I/O、编译或多线程。
-- **未验证**：当前 Task 镜像的 Python 依赖准备、PEP 723／`uv run`、输出上限、截断规则、图片大小上限和租约边界，均不能用上述历史值代替。
-
-## 历史制稿成品哈希（2026-11-01；不作当前部署判等）
-
-- **历史记录**：`luno-ops/references/onlyboxes.md`：`59a9a3e33d056768bd7dfc4b7f06f2d73f0daffadad07cc3c5c12aac58d1a527`。
-- **历史记录**：`luno-ops/references/execution-environment.md`：`00eb0c3741f898e95e9e012a8a1f38e3e2d13dcf132a95951dd49fde279c1ea8`。
-- **历史记录**：`luno-ops/references/onlyboxes-baseline.md`：`0a4d42578c118b922bd6888be0c87770e9cab3485becc05c56b4dd203ff77a4a`。
+不保留旧镜像包清单、安装耗时、速度倍率、输出上限样本与历史制稿成品哈希。它们不证明当前能力或资源上界；需要时在当次已授权环境核版本、依赖、vCPU/内存/pids/磁盘/输出上限及目标完整回传。未取得当前上界不得准入，不以试跑整个任务替代成本判断。下列未解除的宿主风险仍保留，删除历史性能缓存不代表风险解除。
 
 ## 历史宿主风险与未决选择
 
