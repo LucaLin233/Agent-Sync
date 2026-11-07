@@ -5,9 +5,8 @@ description: 代码编写、修复、重构与审查的实施侧核对：最小�
 
 # LUNO｜代码实施纪律
 
-<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/tdd/SKILL.md、skills/engineering/implement/SKILL.md；2026-11-06 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收〈动手前〉的「沿用领域词表与 ADR 的词汇」「按纵切片而非横向分层推进」与〈改动〉的「不为未出现的用法做投机扩展」、implement 的「收尾时再跑一次完整检查」判据；本批自定判据只有〈动手前〉的「验收落成可判定的结果」与其三步组织（定位约定→定可判定验收→按行为切片推进）；上游原文为英文，改写后按句自查未见与之同形；上游可取；完整许可见 `luno-coding/LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
-<!-- 来源：obra/superpowers@22f0b463e7a5e579904dd6211a520321035526f7；路径：skills/verification-before-completion/SKILL.md；2026-11-06 核对（该文件「Core principle: Evidence before claims, always」与〈Common Failures〉「Tests pass 需 test command output，Previous run／"should pass" 不算」）；MIT，Copyright (c) 2025 Jesse Vincent；精选改写，仅吸收〈交付〉的「附结果证据…不以「应该没问题」或文件已存在代替」一句，对应上游「evidence before claims」「Previous run／『should pass』不足以证明」判据；〈改动〉三条 diff 核对判据为自有流程，不取自上游；上游原文为英文，改写后按句自查未见与之同形；上游可取；完整许可见 `luno-coding/LICENSE.obra-superpowers.txt`；登记见 skills-sources.md。 -->
-<!-- 来源：mattpocock/skills@5beb35b040e3de97e54fa9e386d7e42d15c295c2；路径：skills/engineering/diagnosing-bugs/SKILL.md、skills/engineering/to-tickets/SKILL.md；2026-10-25 本地核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写；完整许可见 `luno-coding/LICENSE.matt-pocock.txt`；上游在线可取性未复核。来源登记见 skills-sources.md。 -->
+<!-- MIT精选改写：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d（2026-11-06）及@5beb35b040e3de97e54fa9e386d7e42d15c295c2（2026-10-25），Copyright (c) 2026 Matt Pocock；obra/superpowers@22f0b463e7a5e579904dd6211a520321035526f7（2026-11-06），Copyright (c) 2025 Jesse Vincent。所取路径与取材边界见skills-sources.md〈执行正文来源详情下沉〉；2026-11-06两来源上游可取，2026-10-25来源在线未复核，不作为当前连通证明；完整许可分别随本包LICENSE.matt-pocock.txt、LICENSE.obra-superpowers.txt分发。 -->
+
 
 ## 范围
 跨语言的代码编写、修改、重构，以及代码审查时的实施侧核对。目标与产物量级、授权与提问、正式审查与分级、CI 与执行环境、规则仓库的测试准入，分别按 `luno-core`、`luno-review`、`luno-ops`、`luno-sync` 原文，本文不复述。
