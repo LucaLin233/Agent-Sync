@@ -26,21 +26,9 @@ iOS改动立即上传iCloud，Dropbox在下次打开App时同步。Surge的iClou
 
 本端入口：`python3 -B scripts/surge_ios.py --confirm-dangerous section replace --input -`；stdin为一份UTF-8 JSON，字段仅name、revision、original、content、backup_dir。写后阶段错误按阶段固定token：读`E_READ_DECODE`／4、写后核验`E_VERIFY_FAILED`／5、写请求`E_REJECTED`／4或`E_WRITE_UNKNOWN`／5（含传输级协议异常，不重试）。本入口的argv形状不合格与stdin不合规都只回固定`E_INPUT`／2且不回显argv，普通`request POST`命中分节路由在JSON解析、取密与联网之前即拒绝。回归为本机合成数据＋本机随机端口夹具（真实子进程入口，含可信CA正向与hostname错配两组TLS用例），不等于设备实测；活动配置变更仍须另有本批授权。
 
-## iOS 端点
+## 端点发现
 
-**Features**：`GET|POST /v1/features/{mitm,capture,rewrite,scripting}`（mitm 返回 `{"enabled":true}`）
-
-**Outbound 与策略**：`GET|POST /v1/outbound`（`direct`/`proxy`/`rule`）、`/v1/outbound/global`（`{"policy":"ProxyA"}`）、`GET /v1/policies`、`/v1/policies/detail?policy_name=…`、`POST /v1/policies/test`（`{"policy_names":[…],"url":"http://bing.com"}`）、`GET /v1/policy_groups`、`/v1/policy_groups/test_results`、`/v1/policy_groups/select?group_name=…`、`POST /v1/policy_groups/select`（`{"group_name":…,"policy":…}`）、`POST /v1/policy_groups/test`（`{"group_name":…}`）
-
-**请求**：`GET /v1/requests/recent`、`/v1/requests/active`、`POST /v1/requests/kill`（`{"id":100}`）
-
-**Profile／DNS／模块**：`GET /v1/profiles/current?sensitive=0`、`POST /v1/profiles/reload`、`POST /v1/dns/flush`、`GET /v1/dns`、`POST /v1/test/dns_delay`、`GET /v1/modules`、`POST /v1/modules`（module 名到布尔值）
-
-**脚本**：`GET /v1/scripting`、`POST /v1/scripting/evaluate`（`script_text`、`mock_type`、`timeout`）、`POST /v1/scripting/cron/evaluate`（`{"script_name":"script1"}`）
-
-**其他**：`POST /v1/stop`、`GET /v1/events`、`/v1/rules`、`/v1/traffic`、`POST /v1/log/level`（`{"level":"verbose"}`）、`GET /v1/mitm/ca`（DER 证书，非 JSON）
-
-**macOS-only，iOS Skill 不用**：`system_proxy`、`enhanced_mode`、profile 列出/切换/检查、设备管理相关端点。
+普通Features、Outbound/策略、请求、Profile/DNS/模块、脚本及事件端点不再在本包复制目录表。实际调用前按当前平台/版本的官方HTTP手册取得method、完整path、输入及结果契约；确认脚本支持该形态，未知即停、不猜路由。不把macOS-only端点套iOS；授权、秘密源头投影、危险操作再次确认及本节安全分节写入例外不变。`/v1/metrics`和policy-descriptor的本地特有说明仍见下节。
 
 ## 用 `policy-descriptor` 测未配置节点
 

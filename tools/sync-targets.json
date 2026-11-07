@@ -116,7 +116,9 @@
         "skills/luno-core/references/retrieval-sources.md",
         "skills/luno-core/references/delegation.md",
         "skills/luno-core/LICENSE.matt-pocock.txt",
-        "skills/luno-core/LICENSE.retrieval-sources.txt"
+        "skills/luno-core/LICENSE.retrieval-sources.txt",
+        "skills/luno-core/references/handoff.md",
+        "skills/luno-core/references/writing-safety.md"
       ],
       "ends": {
         "repo": {
@@ -176,7 +178,8 @@
         "skills/luno-ops/references/onlyboxes-baseline.md",
         "skills/luno-ops/references/onlyboxes.md",
         "skills/luno-ops/references/remote-files-backup.md",
-        "skills/luno-ops/references/service-runtime.md"
+        "skills/luno-ops/references/service-runtime.md",
+        "skills/luno-ops/references/ssh.md"
       ],
       "ends": {
         "repo": {
@@ -391,7 +394,8 @@
         "skills/luno-lobehub/references/skills.md",
         "skills/luno-lobehub/references/knowledge.md",
         "skills/luno-lobehub/references/instance.md",
-        "skills/luno-lobehub/references/access.md"
+        "skills/luno-lobehub/references/access.md",
+        "skills/luno-lobehub/references/agents.md"
       ],
       "ends": {
         "repo": {

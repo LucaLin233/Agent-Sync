@@ -1,6 +1,6 @@
 ---
 name: luno-ops
-description: Linux/Shell/Docker/Compose、网络/代理/Surge、仓库/GitHub（PR/issue/release/Actions）、lint/ShellCheck、脚本修复/CI 排障、Minis 执行环境分流前加载。
+description: Linux/Shell/Docker/Compose、部署与网络代理、GitHub/CI/lint排障、脚本修复及Minis执行环境选址。
 ---
 # LUNO｜Linux Docker 网络与 Surge
 
@@ -23,8 +23,7 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络、代理与 Sur
 - 动手前先定假设与代价：官方文档、上游 issue 或命令帮助能回答的不靠试；远程与生产试验先说明假设、影响与回滚，不在同一现象上反复试。按项目入口与 shebang 选择 lint；ShellCheck 不支持的 shell（如 zsh）不得冒称通过。批量替换先暂存并校验全部源与备份，再逐项切换；失败显式退出并按授权恢复，禁先删后复制，不依赖 `set -e` 或循环尾 `||`。
 - 区分执行设备与目标环境。先确认工作目录、拓扑、版本、症状与成功标准，再取最低证据集——服务状态、近期日志、生效配置、监听端口与进程，涉及网络时加 DNS/TLS 与关键一跳；不做无目标的全量采集，最小修改、分项验证。容器/主机环境与配置文件／env 文件的读取形态（只核**声明的指定键**的存在性与长度）与命令模板见 `references/service-runtime.md`〈服务排障〉。
 - BusyBox/Alpine：`cut -c` 按字节截断多字节字符，验证中文勿用。Minis/iSH 的掩码误改与路径异常细则不重复：涉及时操作或结论前另加载 `luno-minis` 并按入口读运行时资源；非 Minis 目标不必加载。
-- SSH/Shell 探测：非交互 SSH 的 `PATH` 常缺 `/usr/local/bin`、mise 路径，`command -v` 未命中不得据此报未安装；用 `bash -lc '…'` 或直读候选路径（如 `/root/.local/share/mise/installs/node/*/bin/lh`），登录 shell 仍未命中时须补核路径。fish 主机的远端命令须显式用 `sh -c`/`bash -lc` 包裹，不在命令位用 `$( )`。
-- SSH 调用：同主机、同授权范围的同阶段只读步骤尽量批取，分别捕获各步退出码与 stderr，仅输出必要安全错误，不预执行依赖前结果的步骤；同主机写操作串行，读取并发仍守生产取证限制。非交互显式用 `BatchMode=yes` 与 `StrictHostKeyChecking=yes`；主机密钥未知或变更即停，按可信来源核指纹，不用 `no`/`accept-new` 绕过。自动化连接用 `-F none` 隔离本机 SSH 配置，用前核客户端支持，所需主机和跳板参数须在授权内显式提供，身份显式指定当次获准私钥并设 `IdentitiesOnly=yes`、`IdentityAgent=none`，不回退默认私钥或 agent。`ConnectTimeout` 限建连握手，`ServerAlive*` 不作命令截止；总时限按任务另设并给清理留余量。255 或本地超时不足以判定远端未执行，结合必要安全 stderr 与实际状态判断，重试依总控失败处置。
+- SSH连接、非交互命令定位或相关建议/判断前，完整读取 `references/ssh.md`；缺失停依赖，不猜PATH、主机指纹或凭据来源。
 - NUL 分隔数据（如 `git diff --name-only -z`）不得经 shell 变量或命令替换传递；用管道或 Python `subprocess` 的 bytes 输入保留分隔符，否则不得据下游结果认定验证通过。
 - 解析 JSON 前分别捕获 stdout、stderr 与退出码，核 stdout 仅含预期 JSON，不合流解析。heredoc 中需由远端或子进程展开的变量用带引号定界符；确需落脚本时先核写入授权与秘密边界。执行权限按所需主体最小设置并核实际 mode，不把 `+x` 当预期权限。
 

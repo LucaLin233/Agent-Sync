@@ -2,13 +2,7 @@
 
 作用域键是 `<scope_type>:<id>`。合法类型由 `listConfigScopes` 给出（global、organization、team、model、provider_group、provider、provider_key、provider_key_whitelist_rule、provider_endpoint、user、user_key）；带下级实体的键把父级写在 `@` 之后，如 `provider_key:*@provider:<id>`、`user_key:*@user:<id>`。0.1.3 实测的拒收形态：裸 `global` → `config: invalid scope_key`，未知类型 → `config: invalid scope_type`，`organization:` 缺 id → `config: scope_id required for organization`；`global:*` 与 `model:*` 可读。键里不含组织的按 token 所属组织解析；只有平台管理员可用 `--organization-id` 指向别处，本端不指定。示例不是合法集全集；以当次 `getRequestOverrideCatalog --scope` 与报错为准，被拒按 `validation`（422，code 31500）修因，不猜键、不换凭据、不改走直连。
 
-phase 只有 `inbound`、`attempt`、`response`，各自独立成版本。具体 target 能否用取决于 phase，错配由服务端拒绝（`target_unavailable_in_phase`）。下表仅记录本轮实例观测，不是完整合法集；实施前必须读取目标 scope 当次 catalog，按 `targets[].slots/ops` 与 `fields[].slots` 逐项核对，不从表中缺项推断不支持（schema 另含 `plugin` target、catalog 有 `plugins`，下表均未列）：
-
-| phase | 可用 target |
-|---|---|
-| `inbound` | `request.header`、`request.body`、`system_prompt`、`model` |
-| `attempt` | `model`、`system_prompt`、`reasoning`、`service_tier`、`stream`、`upstream.header`、`upstream.body`、`upstream.path`、`upstream.query` |
-| `response` | `response.header`、`response.body` |
+phase为inbound、attempt、response，独立版本。target能否使用取决于phase；错配可被服务端以target_unavailable_in_phase拒绝。实施前读目标scope当前catalog，逐项核targets[].slots/ops及fields[].slots；不缓存某次观测的target矩阵，不从缺项推断不支持，亦不猜plugin等未验证能力。
 
 同一次 catalog 还给出 `fields[]`（可作 `when.field`，含 `slots`）、`operators[]`、`variables[]`、`presets[]` 与 `limits`（`maxRulesPerPhase`／`maxActions`／`maxValueBytes`）；枚举与取值类型以当次 catalog 为准，字段名写错会逐条报 `unknown_field`，不凭猜。
 
@@ -31,19 +25,6 @@ phase 只有 `inbound`、`attempt`、`response`，各自独立成版本。具体
 `lock_all`、`lock` 与 `patches`：`lock_all` 与每条 `Rule.lock` 是锁定声明；被上级锁定的条目在 `effective` 里是 `status=blocked_by_ancestor_lock` 并带 `blockedBy`。`patches` 是 `{id, set:{enabled}}` 列表（`PatchSet` 只有 `enabled`），`effective[].patchOrigin` 非空表示启用态由 patch 决定；校验不查 id 是否存在（实测格式合法但不存在的 id 通过 validate），写前须在 `effective`／`ruleSet` 核到该 id 及 `origin`。两者在实例上的行为未逐项实测，以当次 schema 与回读为准。
 
 版本与恢复：版本是每个 phase 的快照号。`listRequestOverrideRevisions --phase <phase> --scope <scope>` 给 `{version, createdAt, actor, reason, ruleCount}`（无 `pagination` 描述符；完整性按 `references/interfaces.md`〈分页〉判定）；`getRequestOverrideRevision --version <n>` 另给 `document` 与 `lock_all`。`restoreRequestOverrideRevision` 把历史版本内容写成**新的当前版本**（上游 “as a new version”），不退指针、不回滚其他 phase 或该 scope 的其他配置；属 destructive 写，须单独授权，不随常规变更触发，也不当「撤销刚才的改动」的自动步骤。
-
-示例（合成数据；只读或 `--dry-run`）：执行示例命令或展示其返回结果前须完整读取 `references/interfaces.md`，按其安全输出前置核字段白名单及异常出口，按其分页与重试约束核完整性与串行接续；下列命令不是直接展示全量响应的脚本。
-
-```
-cchp api getRequestOverrideRuleSets --scope 'provider_key:*@provider:<id>' --json
-cchp api getRequestOverrideCatalog --scope 'provider_key:*@provider:<id>' --json
-cchp api listRequestOverrideRevisions --phase inbound --scope '<scope>' --json
-cchp api validateRequestOverrides --body-file draft-sample.json --json        # 只跑草稿，不发真实请求
-cchp api patchRequestOverrideRule --phase inbound --rule-id <ruleId> --scope '<scope>' \
-  --body-file patch.json --dry-run --json                                     # patch.json: {"version":3,"enabled":false}
-cchp api saveRequestOverrideRuleSet --phase inbound --scope '<scope>' \
-  --body-file ruleset.json --dry-run --json                                   # 需 version／lock_all／rules／patches
-```
 
 两个相邻入口别混：
 - LLM token 自己的覆写走 `getMyKeyRequestOverrides`／`saveMyKeyRequestOverrides`／`validateMyKeyRequestOverrides`，路径是 `/api/account/api-keys/{keyId}/request-overrides`，只有 inbound 与 response；这里的 keyId 是 **LLM token**，不是 provider key，不能当 provider key 的覆写入口。

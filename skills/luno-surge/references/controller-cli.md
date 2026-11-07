@@ -41,6 +41,5 @@ Surge iOS Protocol 25 仍接受旧式 `{"argv":[...]}` JSON 请求，但正式�
 
 多数命令透明转发；status、version、mode、features、策略组、rule match/explain、DNS lookup/trace、modules、GeoIP、performance 与 macOS VMNET 等常用命令有可读格式化，其余打印美化 JSON——脚本与精确 Controller 数据用 `--raw`。
 
-- Protocol 23 新增 `vmnet status|arp|ndp|ra`（官方发布说明口径）：本客户端透传并可渲染，但 VMNET 后端仅 macOS，iOS 应答 `Unsupported command`。
-- Protocol 24 引入 `restart-engine`；正式版 Surge iOS 5.22.0 保留该行为。与 `reload` 不同，它完整重启引擎、关闭活动连接、清除缓存与临时规则，走普通命令传输并可能在重启前/中返回 `{"result":"success"}`。不凭协议号推断发布说明之外的能力。
+- VMNET、restart-engine的平台/协议门槛和历史验证仅按 `references/platform-compatibility.md`；reload与完整重启不等价，不因成功回执忽略连接、缓存和临时规则副作用。
 - `--check <path>`／`-c <path>` 用 Surge 官方 beta HTTPS 校验服务（`https://services.nssurge.com/v1/config/validate`），因 iSH 无自带 macOS 本地解析器。只读显式指定的 UTF-8 文件，POST JSON `profile` 字段，按官方 CLI 打印 `OK` 或 `Failed: ...` 并以 0/1 退出。**这是上传**：绝不隐式替换或上传活动 profile；profile 可能含服务器地址、订阅 URL、用户名、密码、PSK 等秘密，先告警并在必要时脱敏。

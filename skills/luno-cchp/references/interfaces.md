@@ -44,9 +44,7 @@ CLI 不可用、版本不符或 spec 与实例不匹配时，按 `luno-cchp/SKIL
 
 ## 列表与完整性
 
-列表默认一页。某操作的分页样式、续页旗标、limit 参数、next 字段与条目路径，先查 `cchp commands show <operationId> --json` 的 `pagination` 描述符；升级后重核，不从历史操作名或相邻响应推断。结果中的 `pagination` 依操作给出 `pages`、`items`、`has_more`、`truncated` 及 cursor/page 续页信息。
-
-`partial` 或 `preparing` 为真时，该页不足以充当完整视图；先重取或按当次契约消解。无 `pagination` 描述符、无续页旗标或没有 next 字段，均不证明响应完整；按筛选、数量上限与返回契约核对目标集合，不能确认完整性时停止依赖写入。多页抓取遵循当前命令的 `--page-limit`／`--max-items` 与不透明 cursor，保持筛选条件不变，串行翻页；命中上限或 `truncated` 为真时报告部分结果。限流按 `hint` 有界等待，不并行重试。
+分页与目标集合完整性统一按下文〈分页〉；升级重核描述符，不从相邻响应或旧操作名推断。
 
 ## 错误与退出码
 
@@ -76,9 +74,11 @@ CLI 不可用、版本不符或 spec 与实例不匹配时，按 `luno-cchp/SKIL
 
 ## 分页
 
-每个操作的续页参数与 next／items 路径只认 `cchp commands show <operationId> --json` 的 `pagination` 描述符；本文件不维护逐操作分页表。游标不透明，只能在同一筛选条件下传回；不构造或跨查询复用。无续页不代表完整，不能确认完整性时停止依赖写入。
+默认一页。以当前 `cchp commands show <operationId> --json` 的pagination描述符确定items/next路径、cursor/page及旗标；schema/契约升级重核。cursor不透明，只在同一筛选条件下传回，不构造或跨查询复用。
 
-只读查询按当前操作支持的 `--page-limit`／`--max-items` 串联翻页，不并行抓页；`rate_limited` 按 `hint` 等待。`--timeout`（默认 60 秒）约束整次运行含多页；到点返回的部分结果带 warning 与续页信息，部分结果不等于完整结果，报数必须说明。
+`partial`/`preparing`须重取或按当次契约消解；无描述符、next或续页旗标均不证明完整。按筛选、返回数量/上限及契约核目标集合；不能确认完整性即停依赖写入。只读按支持的 `--page-limit`/`--max-items` 串行翻页，命中上限或truncated时报部分结果。限流按hint有界等待，不并行抓页/重试。
+
+`--timeout`默认60秒，含多页整次运行；到期的warning和续页信息不等于完整结果，报数说明覆盖范围。
 
 ## 流式与下载例外
 

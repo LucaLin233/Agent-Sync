@@ -28,18 +28,17 @@
 
 ## 配置变更前的快照
 
-- 按待改字段建立最小恢复清单：provider 自身字段取列表项或详情；涉及 key 时，已知 key ID 用 `getProviderKeysByIds --key-ids <keyId>` 定向读取，只有不知道 ID 时才用 `listProviderKeyPage` 定位、再按 ID 定向重读；涉及 endpoint／限额策略时查其对应读取操作；系统配置用 `getSystemConfig` 按相关 scope 读取自有覆盖、继承来源与生效值。不把单份 provider 列表当完整配置快照，也不扫描无关 scope。
-- 列表没翻完（`pagination.has_more` 为真）或 `partial`／`preparing` 未消解时，只能称「已取的这部分」，不得称快照完整；快照里写明取了哪些页、哪些 key ID。
-- 快照只投影已确认非秘密的恢复必需字段，记录对象、scope、版本、时间与覆盖存在性；回滚体按输入 schema 重建，原无覆盖者按契约移除覆盖，不把 effective 值写成本地覆盖。关键字段无法取得或秘密不可恢复时，说明恢复缺口并停止依赖写入；含秘密的完整恢复备份另按 `luno-core`〈授权与安全〉与 `luno-ops` 的备份资源执行，不用脱敏快照冒充完整备份。
+按待改字段建立非秘密恢复清单：provider取列表/详情；key已知ID用 `getProviderKeysByIds --key-ids <keyId>`，未知才用 `listProviderKeyPage` 定位再按ID重读；endpoint/限额查对应操作，系统配置按相关scope查 `getSystemConfig` 的自有覆盖、继承与effective，不扫无关scope，不用provider列表冒充全快照。记录对象、scope、版本、时间、覆盖存在性及已取页/key ID；has_more未完或partial/preparing未消解只报部分，不能确认完整性即停依赖写入。
+
+仅投影已确认非秘密、恢复必需字段；关键字段缺失或秘密无法恢复即说明缺口并停依赖写入。含秘密的完整备份另走core/ops受控归档，不用脱敏快照冒充可恢复备份。回滚体按输入schema重建；原无覆盖按契约移除，不把effective写成本地覆盖。
 
 ## 配置继承与恢复
 
-- 改配置前按具体键核对作用域、继承来源、合并规则与生效值，不从同名或相邻键外推；`saveSystemConfig` 的合并/替换语义、`removeKeys` 与 `getSystemConfig` 的 `values`／`origins`／`overriddenKeys` 含义均以当次契约为准，不把返回视图当待写全集。
-- 仅关闭某个 key 时先确认该键支持 key 级覆盖及其关闭语义；provider 级修改先确认影响范围与授权，无法确认即停。移除本地覆盖后核对覆盖已移除、最终值与来源，本地键消失不等于恢复默认。
-- `getConfigM2Page` 的参数、字段与 `reason`（如 `DEFAULT`／`MERGED`）按当次契约定。变更后核本地覆盖、effective 与 origin，不以回执代替回读；会话复用类开关改动前先读默认与现状，恢复 provider 级默认时区分「移除覆盖」与「值等于默认」，未达到不报完成。
-- 会话复用另核 provider 与 key 的组合判定，不假定下级 true 可抵消上级 false；仅调整某个 key 时只写当次授权的 key 级配置，若须改变 provider 前提则停该项并说明影响。
-- 本组织用户约定：会话复用只对名次 1 的 key 开启（名次沿用〈key 的创建、更新与倍率〉约定）；其余 key 不设 key 级覆盖、继承组织配置并核实为关闭；用户当次明确要求优先，执行仍遵守本节的作用域、组合判定与授权边界。
-- 数组配置先核合并／替换语义；替换式写入须读全目标数组，在现值上仅增删授权项、去重并保留其余项。提交前重核现值，有变化即重算，改后比对全数组；不能确认完整读取或并发保护时停止依赖写入。此规则同样适用于组织级 `upstream_probe.balance.provider_denylist`；探测超时或地址为空只触发诊断，不自动授权停探测或改变组织配置。
+逐键核scope、继承来源、合并/替换语义及生效值；`saveSystemConfig`、`removeKeys`、`getSystemConfig`的values/origins/overriddenKeys和 `getConfigM2Page` 的参数/字段/reason只认当次契约，不从同名/相邻键外推、不回写读取全集。变更后回读自有覆盖、effective、origin；键消失或值等于默认不证明覆盖已移除，恢复默认须核最终值与来源。
+
+仅改key先核支持key级覆盖及关闭语义；provider级修改先核影响与授权。会话复用先读默认/现状，再核provider×key组合，不假定下级true抵消上级false；需要改变未授权provider前提即停该项。组织约定保留：仅名次1的key开会话复用，其他key无本地覆盖、继承组织且核为关；名次见〈key 的创建、更新与倍率〉，用户当次明确要求优先。
+
+数组先核合并/替换；替换须完整读目标数组，在现值仅增删授权项、去重并保留其余。提交前重读现值，变化即重算；改后比对全数组。无法确认完整读取或并发保护即停依赖写入，包括组织级 `upstream_probe.balance.provider_denylist`；探测超时或地址为空只触发诊断，不授予停探测/改组织配置。其他ratio/balance denylist及撤销后只清本次对象的约定按对应业务节保留。
 
 ## provider 与 endpoint 的创建
 

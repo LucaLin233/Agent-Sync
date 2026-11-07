@@ -1,6 +1,6 @@
 ---
 name: luno-surge
-description: 创建、审查、解释、修复和诊断 Surge 配置与运行状态；用户给配置、模块、日志、报错、截图，或要求通过 CLI/External Controller 实查、控制 Surge 时使用。
+description: Surge配置、模块、规则、脚本与日志诊断；CLI/External Controller状态检查和控制。默认iOS。
 ---
 
 # Surge（iOS-first）
@@ -50,6 +50,6 @@ Controller 不可用或需 `/v1/*`／Prometheus：先完整读 `references/http-
 
 ## 7. 交付
 
-安装／验收时读 `references/SOURCE.md` 的〈安装与验收〉；取源、追新或官方导入时读〈官方上游定位与更新核对〉、`references/upstream-manifest.json` 及〈导入与失败恢复〉；打包／投递时读〈打包与投递〉；模块推送时读〈模块推送〉。这些分支仍须遵守〈通用门禁〉；暂存落点授权、内容／模式漂移即停、失败恢复与公开发布另授权不得省略。同步人工合并，禁整体覆盖入口／短覆盖层。只用 `scripts/package_release.py` 打包，禁含凭据、profile、抓包、请求正文、数据库、运行输出。`references/upstream-SKILL.md` 同样只在部署取件后存在，仅上游对照／官方导入审查时读，未装入即停；官方来源、包身份／版本与哈希追新信息以 `references/SOURCE.md` 与 `references/upstream-manifest.json` 的登记为准。
+安装/验收、取源/追新/官方导入、打包/投递、模块推送前，读 `references/SOURCE.md`〈分支索引〉〈通用门禁〉及对应完整分支；取源另读 `references/upstream-manifest.json`，插件开发按既定触发读原件。官方 `references/upstream-SKILL.md` 只在上游对照/导入审查时读，部署取件未装入即停；包身份、版本和哈希以SOURCE及manifest为准。人工合并覆盖层，不整体覆盖入口。只用现有专用打包器，不含凭据、profile、抓包、请求正文、数据库或运行输出；暂存授权、内容/模式漂移停止、失败恢复及公开发布授权不可省略。
 
-交结论、修改/操作、验证、回滚/注意；区分实操／建议、规则推演／端到端成功、版本快照／当前实测。
+交结论、实际修改/操作、验证与回滚注意；区分建议/实操、规则推演/端到端成功、版本快照/当前实测。
