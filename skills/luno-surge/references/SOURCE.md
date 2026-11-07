@@ -61,13 +61,12 @@
 - 只用 `scripts/package_release.py` 打包，ZIP 根不带顶层目录；过滤敏感目录／后缀，拒绝符号链接与非常规条目，命中私钥块或 token 前缀即中止。不得包含凭据、profile、抓包、请求正文、数据库或运行输出。
 - `tools/deploy_skill.py` 对 `skills/luno-surge` 固定使用本专用打包器；通用工具和专用工具的收集、秘密检查、ZIP 布局不得分叉。候选哈希门禁、源端复核、平台资源逐字节回读与失败分级按工具和 `luno-sync` 执行，不修改脚本实现。
 - 本批正文、覆盖层、来源登记或许可附件变化会改变 ZIP 内容及其摘要，可能触发 `deploy_skill.py` 的候选摘要门禁、平台 `zipFileHash` 判等和资源清单断言；`tests/test-surge-scripts.py` 仍须核官方原件 manifest、`REVIEWED_SHA256`／`ADAPTED_SHA256` 与专用打包器约束。审批后重新计算待发布 Git blob、ZIP 和平台资源摘要，并按登记更新；不得为保旧摘要改回正文或修改脚本断言。
-- 平台投递使用获准的私有 R2／`lh skill install` 流程，更新后回读实际 identifier、内容、元数据和资源；公开副本 `LucaLin233/Proxy` 的 `surge/skill/` 及 ZIP 另需公开仓库／发布授权，不由本仓库同步授权推出。预签名 URL及临时凭据不得写入回复、日志或文件。
+- 平台投递使用获准的私有 R2／`lh skill install` 流程，更新后回读实际 identifier、内容、元数据和资源。预签名 URL及临时凭据不得写入回复、日志或文件。
 
 ## 模块推送
 
 - 只推自有仓库 `LucaLin233/Proxy` 的 Surge 模块源；推送前读 `luno-ops/references/github.md`，凭据不进命令行，结果以 `gh api` 回读为准，CDN 延迟不算成功。推送与发布仍分别需要授权。
 - Git推送仅依 `luno-core/SKILL.md`〈授权与安全〉窄例外，条件不满足即停。
-- 公开安装副本不证明当前 LobeHub 条目来源；更新公开副本须单独授权并用原打包器生成。
 
 ## 第三方精选补充
 
