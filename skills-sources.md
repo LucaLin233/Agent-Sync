@@ -73,3 +73,19 @@
   3. **逗号/分号是「其余裸值」的终止符**（仅限三态中的第 ③ 类）：该分支的尾随内容视为独立字段而保留，故契约**禁止**在这一分支用 `,`/`;` 在值里承载凭据（`Authorization: <标记>,SECRET` 不在覆盖内）。**带方案词的字段（第 ② 类）取整行抹除**，不适用本条——`Authorization: Bearer <值>,status=502` 里的 `status=502` 同样会被抹掉，同行诊断须移到独立行或独立结构化字段。生产者无法保证时应先解析／规范化认证字段，或拒绝输出该歧义段。
   4. **多行结构化值与上述「同一行」不冲突**：规则 2 约束的是**裸值**；`{"auth":\n"值"}` 这种键与值之间换行缩进的引号值属规则 ① 的覆盖范围，正常脱敏。
   5. 生产者不满足上述任一条时，须先解析／规范化认证字段再调用脱敏，或拒绝输出歧义段。
+
+## 执行正文来源详情下沉
+
+2026-11-08：以下保留core/review/coding的完整来源说明，供分批压缩运行正文时引用；仅来源元信息整理，不改变取材或许可结论。对应正文实际下沉后，本节为详情位置；必要署名/许可与指针留在正文。既有历史位置描述不作为现役加载要求；不声称本轮重新访问上游。
+
+<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/triage/SKILL.md、skills/engineering/triage/AGENT-BRIEF.md、skills/engineering/triage/OUT-OF-SCOPE.md；2026-11-05 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收按行为概念查既有实现与拒绝理由的判据；上游可取；完整许可见 `luno-core/LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
+
+来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，evidence-chain-builder/SKILL.md；2026-10-25 本地核对；本地维护者已决定按 MIT 处理；上游根 LICENSE 与 README 的许可标注不一致仍保留；精选改写，不采用打分脚本或二分标签门禁；在线可取性未复核。 适用版权行与本地维护决定仍在本包 `references/code-review.md`〈MIT 通知与本地维护决定〉，完整 MIT 正文见 `luno-review/LICENSE.openminis.txt`；溯源或再分发核对前完整读取；代码审查与 CI 的既定必读触发不变。
+
+来源：mattpocock/skills@5beb35b040e3de97e54fa9e386d7e42d15c295c2，路径 `skills/productivity/grilling/SKILL.md`；2026-10-25 本地核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收提问依赖分层，不采用 design tree 全量穷举或自动派子代理；完整许可见 `luno-review/LICENSE.matt-pocock.txt`；上游在线可取性未复核。来源登记见 skills-sources.md。
+
+<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/tdd/SKILL.md、skills/engineering/implement/SKILL.md；2026-11-06 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收〈动手前〉的「沿用领域词表与 ADR 的词汇」「按纵切片而非横向分层推进」与〈改动〉的「不为未出现的用法做投机扩展」、implement 的「收尾时再跑一次完整检查」判据；本批自定判据只有〈动手前〉的「验收落成可判定的结果」与其三步组织（定位约定→定可判定验收→按行为切片推进）；上游原文为英文，改写后按句自查未见与之同形；上游可取；完整许可见 `luno-coding/LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
+
+<!-- 来源：obra/superpowers@22f0b463e7a5e579904dd6211a520321035526f7；路径：skills/verification-before-completion/SKILL.md；2026-11-06 核对（该文件「Core principle: Evidence before claims, always」与〈Common Failures〉「Tests pass 需 test command output，Previous run／"should pass" 不算」）；MIT，Copyright (c) 2025 Jesse Vincent；精选改写，仅吸收〈交付〉的「附结果证据…不以「应该没问题」或文件已存在代替」一句，对应上游「evidence before claims」「Previous run／『should pass』不足以证明」判据；〈改动〉三条 diff 核对判据为自有流程，不取自上游；上游原文为英文，改写后按句自查未见与之同形；上游可取；完整许可见 `luno-coding/LICENSE.obra-superpowers.txt`；登记见 skills-sources.md。 -->
+
+<!-- 来源：mattpocock/skills@5beb35b040e3de97e54fa9e386d7e42d15c295c2；路径：skills/engineering/diagnosing-bugs/SKILL.md、skills/engineering/to-tickets/SKILL.md；2026-10-25 本地核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写；完整许可见 `luno-coding/LICENSE.matt-pocock.txt`；上游在线可取性未复核。来源登记见 skills-sources.md。 -->
