@@ -30,23 +30,27 @@ squash 尾行等于 Author、平台合并无需作者行）与普通提交去重
 与 surge 同源断言，其余增量是 S1／S3／G5 覆盖本身，减体积只能减覆盖——是否接受由用户裁定。
 降级路径：只跑 `group identity`／`group surge` 定向回归，不删判据。
 
+本批（LENS 署名，基线 `8813c1c`）体积与净差（本机实测 `wc -c`，UTF-8 原始字节）：本文件 45,638 → 48,910 B（+3,272）；用例入口 64 → 70（`rg -c '^\s+def test_'` 现读；新增 6 个方法、改 2 个既有方法体，旧 `test_lowercase_name` 未改）。发布者已按「同族增量 ≤5,120 B」原则允许本批必要同族增量，本批同族增量 3,272 B 在限内；不新增常跑项，本文件第 5 列仍为 0、仅 identity 定向运行。降级路径同上：只跑 `group identity` 定向回归，不删例、不以 mock 替换真实边界。
+
 判据（每条都断言**可复核的退出码／输出事实**，不做源码计数对账）：
-  1 正控：LUNO｜LUNO、FORGE｜FORGE、FORGE 作者＋LUNO 提交、合法 `Co-authored-by`、
-    `--allow-empty` 空范围一律 rc=0。
+  1 正控：LUNO｜LUNO、FORGE｜FORGE、FORGE 作者＋LUNO 提交、LENS 作者＋FORGE 代提交、
+    合法 `Co-authored-by`（LUNO／LENS 两种共同作者）、`--allow-empty` 空范围一律 rc=0。
   2 平台合并**只凭可信签名豁免**：假签名头、无签名、真签名但签发者不是 web-flow 钥、
     单父、committer 非 `GitHub` → 均 rc=1；真实 GitHub 平台合并提交（仓库内 `3ca8abd`
     原始对象，运行时可得才跑）→ rc=0 且报 `platform`；platform 分支仍核对 `Co-authored-by`。
     验签**只认退出码**：指纹在固定集合内、输出含 `VALIDSIG`，但 rc=1／rc=2 → 不豁免
     （rc=0 同输出为豁免正控）；测试内临时钥的**真实**签名（有效钥→豁免正控；过期钥
     → rc≠0 且按普通提交拒绝，即使其指纹临时放进集合）；旧钥指纹已不在固定集合内。
-  3 身份负控：错误邮箱、`FORGE` 名配 LUNO 邮箱、小写 `forge`／`Luno`（大小写敏感）、
-    正确 Author＋错误 Committer → rc=1 且报对应字段。
+  3 身份负控：错误邮箱、`FORGE` 名配 LUNO 邮箱、`LENS` 名配 LUNO 邮箱、
+    LENS 作者名大小写变体（`lens`／`Lens`／`leNs`，邮箱仍为 LENS 正确地址，单故障注入）、
+    小写 `forge`／`Luno`（大小写敏感）、正确 Author＋错误 Committer → rc=1 且报对应字段。
   4 尾部署名负控：畸形（无 `<…>`）、身份不在表内 → rc=1；普通提交的尾行与 Author 相同 → rc=1；
     同一身份的重复尾行按并集去重 → rc=0。squash 提交另有 4b：尾行可与 Author 相同、重复按去重。
     无空格／Tab 分隔仍能解析（合法身份 rc=0、非法身份 rc=1）；续行与混合 trailer 下
     畸形值不回退为「无签名」而是判违规；正文中段（非尾部 trailer 块）的同一行不参与解析，
     与 git `interpret-trailers` 口径一致。
-  5 规则单真源：规则文件缺失／缺〈Git 提交署名〉段／身份重复／方括号占位形态／
+  5 规则单真源：规则文件缺失／缺〈Git 提交署名〉段／身份重复（三身份逐个）／三身份任意两者
+    同邮箱（LUNO×FORGE、LUNO×LENS、FORGE×LENS）／LENS 身份缺失／方括号占位形态／
     邮箱两侧带空白 → rc=2；现役身份是不可路由的本地地址（域名无点）须被接受；
     且**不回退**（不读环境或 git config）；另证规则改动即时生效（无缓存、无上次身份沿用）。
   6 环境负控：无效 rev、空范围（未给 `--allow-empty`）→ rc=2；浅克隆 → rc=2。
