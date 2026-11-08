@@ -20,7 +20,7 @@ Minis 内置技能（如 `skill-creator`）不是同步对象；模型分组参�
 
 ## 授权、同步与恢复
 
-操作规则对象或仓库前，完整读取**当前生效**的 `luno-sync/SKILL.md` 和 `luno-sync/references/sync-workflow.md`，再按入口加载命中资源；权限和审批以用户当次授权及现役规则为准。正文改动须独立预审与实施差分独立验收；每会话使用独立副本/分支、原生 PR，收口者串行合并并同步本批对象。必要测试与按需 MCP 核验按现役流程执行；对象身份唯一真源为 `tools/sync-targets.json`，部署写前回读目标，不再自动三副本互校或全量同名发现；不得把工具存在视为许可。
+操作规则对象或仓库前，完整读取**当前生效**的 `luno-sync/SKILL.md` 和 `luno-sync/references/sync-workflow.md`，再按入口加载命中资源；权限和审批以用户当次授权及现役规则为准。正文改动按sync-workflow风险分级：非行为低风险一次独立差分验收，其他先独立预审再差分独立验收；每会话使用独立副本/分支、原生 PR，收口者串行合并并同步本批对象。必要测试与按需 MCP 核验按现役流程执行；对象身份唯一真源为 `tools/sync-targets.json`，部署写前回读目标，不再自动三副本互校或全量同名发现；不得把工具存在视为许可。
 
 恢复先确认所需对象、版本与目标实际生效状态：从经核实的仓库版本或备份取对应文件，覆写前保存目标的真实前态及将变更的资源和元数据，核可读和权限；遵循对应端受支持入口写入，再逐端回读。正文及资源按现役字节契约比较，变化的 name/description 等字段另核；`soul.body` 与带 frontmatter 的磁盘文件分别核对；LENS/FORGE 和 Minis 兜底分别按其登记字段恢复。文件存在、HTTP 成功或 PR 已合并均不能代替回读。失败只停相关对象，保留前态与恢复入口，未回读即未完成。
 
@@ -36,7 +36,7 @@ Checks 仅当次授权临时使用 `GH_TOKEN_CLASSIC`；不改变默认 `$GH_TOK
 
 ## 保留测试与资源
 
-`sh tests/run-tests.sh full` 登记六个测试入口；`group deploy,surge,privacy,gate,pack` 或 `case <文件名>` 定向运行；`select-paths` 从 stdin 接收 NUL 分隔路径、输出 selector JSON，`select` 读取该 JSON 并去重运行。纯正文或无专项命中只运行 smoke（结构守卫），不把它当成六个专项已通过。规则正文保留结构守卫及两阶段独立审查；不再受逐字锚点约束，防弱化依赖两阶段独立审查，改加载边／资源边须同批更新 `tools/rule-claims.tsv`。`tools/sync-all.sh` 只运行结构守卫与包内校验，不访问生效端。
+`sh tests/run-tests.sh full` 登记六个测试入口；`group deploy,surge,privacy,gate,pack` 或 `case <文件名>` 定向运行；`select-paths` 从 stdin 接收 NUL 分隔路径、输出 selector JSON，`select` 读取该 JSON 并去重运行。纯正文或无专项命中只运行 smoke（结构守卫），不把它当成六个专项已通过。规则正文保留结构守卫及风险分级对应的独立审查/验收；不受逐字锚点约束，结构通过不证明行为无弱化，改加载边／资源边须同批更新 `tools/rule-claims.tsv`。`tools/sync-all.sh` 只运行结构守卫与包内校验，不访问生效端。
 结构守卫 `tools/check-rules.py` 的退出码固定为 **0＝无问题／1＝结构错误（阻断）／2＝仅提示（不阻断）／3＝检查不完整（阻断）**。两处消费口径**不同且均为现状**：`tools/sync-all.sh` 按 0／2 放行（rc=2 的提示**保留输出但非阻断**）；`tests/run-tests.sh` 把**任何非零**（含 rc=2 的提示）记为 FAIL，即当前测试门禁要求**零提示**——这是更严的门禁，不是与 sync-all 的矛盾，也不因本说明放宽。`tests/test-check-rules.sh` 以 0／1／2／3 四态回归固定该语义。
 
 按未暂存变更选路：`git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths`。删除的文件不参与选路；现存未登记的测试路径仍须拒绝。

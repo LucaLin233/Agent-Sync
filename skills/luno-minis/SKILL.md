@@ -19,8 +19,8 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 ## 资源与触发
 下列为本包必读触发；操作仅 Minis。
-- 技能新建、正文与元数据登记或刷新：`references/configuration.md`〈技能登记〉
-- 客户端配置的读取与写入（`minis-config`、子代理与模型分组、SOUL 与提示词、环境变量与挂载、记忆与真源边界）：`references/configuration.md`
+- 技能新建、正文与元数据登记或刷新：`references/configuration.md`〈配置接口〉〈技能登记〉；涉及写入再读〈目录与持久化（记忆与真源）〉
+- 客户端配置读写：读 `references/configuration.md`〈配置接口〉及命中完整节：子代理/模型→〈子代理与模型〉，SOUL/提示词→〈SOUL 与提示词〉，记忆/真源/环境变量/挂载→〈目录与持久化（记忆与真源）〉，技能登记/刷新→〈技能登记〉。SOUL或技能写入另连读〈目录与持久化（记忆与真源）〉；跨项取并集，无法确定分支则全文。
 - 本端记忆写入／整理后的条目格式体检、条目压缩前后的标识保全校验及相关规划判断，或记忆日志自动注入、注入截断与容量评估：`references/memory.md`
 - 使用 Minis 文件编辑工具前的串行与失配复核、上下文卸载与压缩、会话结果截断、跨会话目录与挂载读写边界、隐私掩码、独立 Shell 进程、后台调度、工具连接异常：`references/runtime.md`
 - 归档会话、判断会话归属或用 `minis-sessions-cli update --group` 改派前：`references/runtime.md`〈会话归组〉

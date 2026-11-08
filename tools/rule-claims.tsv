@@ -4,13 +4,13 @@ prompt/LUNO.md	luno-core	必需加载	核心入口加载
 subagents/LENS.md	luno-core	必需加载	核心入口加载
 subagents/FORGE.md	luno-core	必需加载	核心入口加载
 subagents/minis-general-fallback.md	luno-core	必需加载	核心入口加载
-prompt/LUNO.md	luno-memory	必需加载	记忆前置加载（常驻）
-skills/luno-core/SKILL.md	luno-memory	必需加载	记忆前置加载（core）
+prompt/LUNO.md	luno-memory	必需加载	记忆操作与事故/复发/固化/规则缺口；普通纠正不触发
+skills/luno-core/SKILL.md	luno-memory	必需加载	记忆操作与事故/复发/固化/规则缺口；普通纠正不触发
 skills/luno-ops/SKILL.md	luno-sync	必需加载	规则仓库前置加载
 skills/luno-core/SKILL.md	luno-sync	必需加载	同步前置加载（core）
 skills/luno-core/SKILL.md	references/retrieval.md	资源必需	资源加载边（core·检索）
-skills/luno-core/SKILL.md	references/delegation.md	资源必需	资源加载边（core·派发）
-skills/luno-memory/SKILL.md	references/maintenance.md	资源必需	资源加载边（memory·维护）
+skills/luno-core/SKILL.md	references/delegation.md	资源条件	仅实际派发/受派、独立判断或非低风险任务读取对应完整分支
+skills/luno-memory/SKILL.md	references/maintenance.md	资源必需	实际记忆操作、事故/复发、固化候选或疑似规则缺口；普通纠正不触发
 skills/luno-lobehub/SKILL.md	references/skills.md	资源条件	资源加载边（入口·skills）
 skills/luno-lobehub/SKILL.md	references/knowledge.md	资源条件	资源加载边（入口·knowledge）
 skills/luno-lobehub/SKILL.md	references/instance.md	资源条件	资源加载边（入口·instance）
