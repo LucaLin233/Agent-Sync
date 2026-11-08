@@ -24,4 +24,10 @@
 - URL 的路径、查询或片段里含有凭据、userinfo、令牌或签名参数、个人或内部信息的，私网或本地地址，以及依赖登录态的页面，都不得转发；不附带浏览器 Cookie 或认证头。转发授权或目标是否公开不明确时，不用这个回退，也不借代理绕过访问控制。
 - 返回结果要核对目标、关键段落和日期；不把代理生成的摘要、拦截页或缓存当作完整的最新原文。上面的检索顺序和秘密边界不变。
 
-来源与许可：S1–S5 及 OpenMinis 的 MIT 精选改写；Copyright (c) 2026 Exa Labs, Inc.；Copyright (c) 2025 Exa Labs；Copyright (c) 2026 Keenable；Copyright (c) 2026 OpenMinis；完整 MIT 通知见 ../LICENSE.retrieval-sources.txt。溯源、追新、取材边界或再分发核对时完整读取 `references/retrieval-sources.md`，普通检索不自动加载；历史证据不证明当前工具可用。
+来源与许可：S1–S5 及 OpenMinis 的 MIT 精选改写；Copyright (c) 2026 Exa Labs, Inc.；Copyright (c) 2025 Exa Labs；Copyright (c) 2026 Keenable；Copyright (c) 2026 OpenMinis；完整 MIT 通知见 ../LICENSE.retrieval-sources.txt。完整档案见仓库 skills-sources.md〈luno-core〉及〈追新核对〉；溯源、追新或再分发前读取登记，按固定提交逐文件核正文与许可，不自动覆盖本地取舍。登记不可读就停止依赖它的判断；普通检索不加载档案，历史记录不证明当前工具可用。
+
+## 来源维护（仅溯源、追新或再分发核对）
+
+先查默认分支的commits/HEAD，再按登记路径查逐文件commits；文件日期取committer日期，按固定提交复查时加sha，不以目录日期代替。releases/latest返回404只记无latest release，再查releases?per_page=1，不能据此判无更新。取得新提交后，在获准的独立上游克隆中用固定提交与新提交逐文件diff，核正文和LICENSE，不自动覆盖本地取舍。
+
+无仓库的文档页按登记URL重取并比较快照，取回日不冒充发布日期；再分发许可未裁定时只改写接口事实，不转载正文或套用技能MIT。历史出网/鉴权记录不证明当前工具、另一端继承或真实任务质量，也不授予删除或部署权限。

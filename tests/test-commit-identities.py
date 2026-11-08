@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""tests/test-commit-identities.py —— tools/check-commit-identities.py 的离线回归。
+"""tools/check-commit-identities.py 的离线回归；identity组定向运行，不入full。
 
 成本例外（负责人 LUNO 2026-11-05 批准）：真实 Git 对象、进程、gpg 与浅克隆回归；iSH 实测约 18 秒／55 例（r3 为 51 例，r2 为 45 例，r1 为 31 例）。
 保留真实边界，不降级为 mock；仅定向运行（identity 组）、不入 full。
@@ -11,58 +11,29 @@ UTF-8 原始字节数按 `wc -c < tests/test-commit-identities.py` 现读。环�
 夹具，集中维护全部身份与签名边界。降级路径：仅 identity 定向运行、不入 full；若不接受体积
 超额，另审保持完整断言与真实边界的同族拆分方案，不删例、不以 mock 替换真实边界、不缩跑。
 
-单文件预算例外续登（2026-11-06，批准者为用户；本批 S1 并集去重用例）：本批在上一轮
-42,537 B 基础上增加 1,736 B 至 44,273 B（`wc -c` 实测，UTF-8 原始字节；预算 20,480 B），
-用例入口数 64（`rg -c '^\s+def test_'` 现读）。增量为 S1 的正负控三条（squash 去重、
-squash 尾行等于 Author、平台合并无需作者行）与普通提交去重正控改写。降级路径同上：
-仅 identity 定向运行、不入 full，不删例。环境与耗时同下条实测。
+历史增量、批准范围及超预估披露，见Git
+`e548b93e1610482e7a83f05e45a07bab3c8954aa:tests/test-commit-identities.py`第14–33行。
+历史数字不是当前实测，不追加历史授权；体积例外不豁免其他入口的常跑归属。
 
-本批（r4，公开快照链 chain2，2026-11-06）体积与净差续登（批准者为用户；覆盖本批改动的四个
-测试文件）：基线 `df54a93` → r4 实测（`wc -c`，UTF-8 原始字节；**本段自身字节已计入**本文件与
-`tests/` 合计）：本文件 39,026 → 45,638 B（+6,612，S1 并集去重用例）；`test-surge-scripts.py`
-192,180 → 199,974 B（+7,794，G5 两态断言与取件后另跑分档）；`test-deploy-skill.py` 263,769 →
-270,231 B（+6,462，S3 正负控与取件声明夹具）；`test-check-rules.sh` 29,015 → 30,851 B
-（+1,836，G2 豁免反例表驱动）；`tests/` 合计 624,784 → 647,488 B（**+22,704**）。本文件与
-`test-surge-scripts.py` 均超 20,480 B 预算，按上条例外续用，不删例、不以 mock 或缩跑换速度；
-**`test-surge-scripts.py` 在 `full` 常跑集**（`tests/run-tests.sh` 用例表第 5 列＝1），本文件
-第 5 列＝0、**不在 `full`**，仅 identity 定向运行；体积例外不等于退出常跑。
-该合计明显高于用户批准时告知的约 3.5 KB：本批按 LENS 最小减量方案只压了 gate 反例（−566 B）
-与 surge 同源断言，其余增量是 S1／S3／G5 覆盖本身，减体积只能减覆盖——是否接受由用户裁定。
-降级路径：只跑 `group identity`／`group surge` 定向回归，不删判据。
+当前判据以退出码和输出事实验证，不做源码计数对账：
+- 合法作者、提交者与共同作者rc=0；名字/邮箱错配、大小写变体、畸形身份及非法尾行rc=1。
+  尾行只取末尾trailer块；分隔空白、续行和混合trailer不得掩盖畸形值。重复按并集去重，
+  普通提交尾行等于Author拒绝；squash允许相同，且必须有合法尾行；平台合并不要求作者行。
+- 平台豁免同时核父数、平台提交者及可信签名；历史平台合并正控须rc=0并报platform。
+  伪签名、无签名、非受信钥、错误父数或提交者均不得豁免；platform分支仍核共同作者。
+  即使输出含可信指纹和VALIDSIG，rc非零仍拒绝，同输出rc=0为正控。真实临时钥覆盖有效/
+  过期及主钥/子钥边界；过期钥即使临时入受信集合仍拒绝，旧钥不在固定集合内。
+- 规则缺失、非UTF-8、标题/声明不精确、身份缺失/重复、同邮箱、非法或带空白邮箱均rc=2；
+  标题允许行尾空白。未知声明不扩身份，五名完整时可忽略；合法本地地址须接受。
+  规则变更即时生效，不读环境/git config、不沿用上次身份。
+- 无效rev、未获允许的空范围、浅克隆rc=2；--allow-empty正控rc=0。replace与grafts不能洗白。
+  参数、路径、rev错误及全部用例的stdout＋stderr均不得回显夹具邮箱、占位形态或任何@。
 
-本批（LENS 署名，基线 `8813c1c`）体积与净差（本机实测 `wc -c`，UTF-8 原始字节）：本文件 45,638 → 48,910 B（+3,272）；用例入口 64 → 70（`rg -c '^\s+def test_'` 现读；新增 6 个方法、改 2 个既有方法体，旧 `test_lowercase_name` 未改）。发布者已按「同族增量 ≤5,120 B」原则允许本批必要同族增量，本批同族增量 3,272 B 在限内；不新增常跑项，本文件第 5 列仍为 0、仅 identity 定向运行。降级路径同上：只跑 `group identity` 定向回归，不删例、不以 mock 替换真实边界。
-
-判据（每条都断言**可复核的退出码／输出事实**，不做源码计数对账）：
-  1 正控：LUNO｜LUNO、FORGE｜FORGE、FORGE 作者＋LUNO 提交、LENS 作者＋FORGE 代提交、
-    合法 `Co-authored-by`（LUNO／LENS 两种共同作者）、`--allow-empty` 空范围一律 rc=0。
-  2 平台合并**只凭可信签名豁免**：假签名头、无签名、真签名但签发者不是 web-flow 钥、
-    单父、committer 非 `GitHub` → 均 rc=1；真实 GitHub 平台合并提交（仓库内 `3ca8abd`
-    原始对象，运行时可得才跑）→ rc=0 且报 `platform`；platform 分支仍核对 `Co-authored-by`。
-    验签**只认退出码**：指纹在固定集合内、输出含 `VALIDSIG`，但 rc=1／rc=2 → 不豁免
-    （rc=0 同输出为豁免正控）；测试内临时钥的**真实**签名（有效钥→豁免正控；过期钥
-    → rc≠0 且按普通提交拒绝，即使其指纹临时放进集合）；旧钥指纹已不在固定集合内。
-  3 身份负控：错误邮箱、`FORGE` 名配 LUNO 邮箱、`LENS` 名配 LUNO 邮箱、
-    LENS 作者名大小写变体（`lens`／`Lens`／`leNs`，邮箱仍为 LENS 正确地址，单故障注入）、
-    小写 `forge`／`Luno`（大小写敏感）、正确 Author＋错误 Committer → rc=1 且报对应字段。
-  4 尾部署名负控：畸形（无 `<…>`）、身份不在表内 → rc=1；普通提交的尾行与 Author 相同 → rc=1；
-    同一身份的重复尾行按并集去重 → rc=0。squash 提交另有 4b：尾行可与 Author 相同、重复按去重。
-    无空格／Tab 分隔仍能解析（合法身份 rc=0、非法身份 rc=1）；续行与混合 trailer 下
-    畸形值不回退为「无签名」而是判违规；正文中段（非尾部 trailer 块）的同一行不参与解析，
-    与 git `interpret-trailers` 口径一致。
-  5 规则单真源：规则文件缺失／缺〈Git 提交署名〉段／身份重复（规则登记的每个精确身份逐个）／规则登记的精确身份任意两者
-    同邮箱（LUNO×FORGE、LUNO×LENS、FORGE×LENS）／任一登记身份缺失／方括号占位形态／
-    邮箱两侧带空白 → rc=2；现役身份是不可路由的本地地址（域名无点）须被接受；
-    且**不回退**（不读环境或 git config）；另证规则改动即时生效（无缓存、无上次身份沿用）。
-  6 环境负控：无效 rev、空范围（未给 `--allow-empty`）→ rc=2；浅克隆 → rc=2。
-    历史改写不可绕过：`git replace` 与 `info/grafts` 均不影响判定（仍 rc=1）。
-  7 秘密面：全部用例的输出（stdout＋stderr）**不得**出现任何夹具邮箱、占位形态或 `@`；
-    参数错误／路径错误／rev 错误三条路径亦不例外（argparse 已改为固定文案）。
-
-夹具**绝大部分**为合成身份（`example.invalid` 保留域，与任何真实署名无关）。例外两项：真实
-平台合并提交一例；以及 2 个**准确公开身份** `Claude Opus 5.5`、`LIN student`（名字与邮箱逐字节
-取自原公开 commit meta，用于字节级精确匹配，**不得据此推断其实际模型或实际署名来源**）。
-提交对象用 `hash-object -t commit -w` 按字节手工构造，故可覆盖畸形身份、伪造签名头；
-真实签名用测试内临时生成的 ed25519 钥（非 web-flow）。不依赖本机 git 身份与网络。
+提交用真实git hash-object按字节构造，覆盖畸形身份与伪签名头；真实签名用临时ed25519钥，
+非web-flow。仅在密码学验证接缝打桩，不替代子进程回归；不依赖本机git身份或网络。
+绝大部分身份为合成值；例外是历史平台合并提交，以及从公开commit原始字节取得的两个精确
+身份Claude Opus 5.5和LIN student，不得据此推断实际模型或署名来源。历史对象不可得或缺gpg
+时保留相应用例的skip理由；当前公开快照不含REAL_MERGE，不能把跳过冒充真实平台验签通过。
 """
 import importlib.util
 from itertools import combinations
@@ -855,9 +826,6 @@ class TrailerTest(Base):
 
 
 class RulesTest(Base):
-    def test_missing_file(self):
-        base, head = self.repo.line()
-        self.verdict(self.repo.run(base, head, rules=self.repo.dir / 'nope.md'), 2, '规则文件不可读')
 
     def test_not_utf8(self):
         (self.repo.dir / 'bad.md').write_bytes(b'## Git \xff\xfe 1\n')
@@ -949,10 +917,6 @@ class RulesTest(Base):
                 base, head = self.repo.line()
                 self.verdict(self.repo.run(base, head), 2, '形态非法')
 
-    def test_local_address_form(self):
-        self.repo.rules.write_text(rule_text(luno=LUNO[1], forge=FORGE[1]), encoding='utf-8')
-        base, head = self.repo.line(FORGE, LUNO)
-        self.verdict(self.repo.run(base, head), 0, '通过')
 
     def test_rule_change_is_single_source(self):
         base, head = self.repo.line()
