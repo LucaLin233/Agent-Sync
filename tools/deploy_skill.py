@@ -29,6 +29,7 @@ import hashlib
 import http.client
 import importlib
 import importlib.util
+import inspect
 import io
 import json
 import logging
@@ -210,6 +211,10 @@ def read_backup(dir_abs, base, published, want_hash):
                     break
                 chunks.append(chunk)
             blob = b"".join(chunks)
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or _ident(st) != published[0]
+                    or st.st_uid != published[1] or stat.S_IMODE(st.st_mode) != ROLLBACK_MODE):
+                raise Fail(STAGE_ROLLBACK, "回滚包读后身份／权限变化：未上传")
         except OSError as exc:
             raise Fail(STAGE_ROLLBACK, "回滚包读取失败（%s）：未上传" % exc.__class__.__name__)
         finally:
@@ -218,8 +223,9 @@ def read_backup(dir_abs, base, published, want_hash):
             st2 = os.stat(base, dir_fd=dfd, follow_symlinks=False)
         except OSError as exc:
             raise Fail(STAGE_ROLLBACK, "回滚包路径复核失败（%s）：未上传" % exc.__class__.__name__)
-        if _ident(st2) != published[0]:
-            raise Fail(STAGE_ROLLBACK, "回滚包路径已不再指向刚发布的文件：未上传")
+        if (not stat.S_ISREG(st2.st_mode) or _ident(st2) != published[0]
+                or st2.st_uid != published[1] or stat.S_IMODE(st2.st_mode) != published[2]):
+            raise Fail(STAGE_ROLLBACK, "回滚包路径已不再绑定刚发布的普通文件：未上传")
     finally:
         os.close(dfd)
     if sha256(blob) != want_hash:
@@ -276,7 +282,6 @@ class CliRunner(object):
     def __init__(self, argv, origin, key):
         self.argv = list(argv)
         self.records = []          # [(label, path, (dev, ino), uid, mode)]，创建顺序
-        self.by_path = {}          # 已记录路径 → 创建身份（子路径删除前复核）
         self.root = None
         self.closed = False
         self.remote_write = False  # 局部最小标记：仅用于“只清理失败”的 rc 归属
@@ -305,7 +310,6 @@ class CliRunner(object):
         if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o700:
             raise CleanupRefused("创建归属或权限异常", path)
         self.records.append((label, path, _ident(st), st.st_uid, stat.S_IMODE(st.st_mode)))
-        self.by_path[path] = (_ident(st), st.st_uid, stat.S_IMODE(st.st_mode))
         log("临时%s：path=%s %s" % (label, path, _id_text(st)))
 
     def close_quiet(self):
@@ -332,22 +336,19 @@ class CliRunner(object):
             self.check_dir(st, (ident, uid, mode), path, "路径被替换")
         name = os.path.basename(self.root)
         rec_root = (self.records[0][2], self.records[0][3], self.records[0][4])
+        if not (getattr(shutil.rmtree, "avoids_symlink_attacks", False)
+                and "dir_fd" in inspect.signature(shutil.rmtree).parameters):
+            raise CleanupRefused("运行时缺 fd 锚定无跟随删除能力", self.root)
         try:
             pfd = os.open(os.path.dirname(self.root) or ".", DIR_FLAGS)
         except OSError:
             raise CleanupRefused("父目录不可达", self.root)
         try:
             self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根被替换")
-            fd = os.open(name, DIR_FLAGS, dir_fd=pfd)
             try:
-                self.check_dir(os.fstat(fd), rec_root, self.root, "根 fd 身份不符")
-                self.purge(fd, self.root, rec_root, 0)
-            finally:
-                os.close(fd)
-            self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根删除前被替换")
-            os.rmdir(name, dir_fd=pfd)
-        except OSError as exc:
-            raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)
+                shutil.rmtree(name, dir_fd=pfd)
+            except OSError as exc:
+                raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)
         finally:
             os.close(pfd)
         self.verify_absent()
@@ -359,58 +360,6 @@ class CliRunner(object):
                 or st.st_uid != rec[1] or stat.S_IMODE(st.st_mode) != rec[2]
                 or st.st_uid != os.geteuid()):
             raise CleanupRefused(why, path)
-
-    def bind(self, path, rec):
-        """破坏动作前复核路径仍绑定该已核对象：重绑定立即拒删，不沿旧 fd 清空原树。"""
-        try:
-            st = os.lstat(path)
-        except FileNotFoundError:
-            raise CleanupRefused("路径已消失", path)
-        except OSError:
-            raise CleanupRefused("路径绑定不可达", path)
-        self.check_dir(st, rec, path, "路径被重绑定")
-
-    def purge(self, fd, path, rec, depth):
-        """每个破坏动作前先核当前目录及已记录祖先的路径绑定；重绑定立即拒删。"""
-        if depth > 32:
-            raise CleanupRefused("目录层级过深", path)
-        self.bind(path, rec)
-        for entry in sorted(os.listdir(fd)):
-            child = os.path.join(path, entry)
-            self.bind(path, rec)
-            st = os.lstat(entry, dir_fd=fd)
-            if stat.S_ISLNK(st.st_mode):
-                raise CleanupRefused("子项为软链", child)
-            if st.st_uid != os.geteuid():
-                raise CleanupRefused("子项归属不符", child)
-            crec = self.by_path.get(child)
-            if crec is not None:
-                self.check_dir(st, crec, child, "已记录子路径被替换")
-            if stat.S_ISDIR(st.st_mode):
-                sub = os.open(entry, DIR_FLAGS, dir_fd=fd)
-                try:
-                    if _ident(os.fstat(sub)) != _ident(st):
-                        raise CleanupRefused("子目录被替换", child)
-                    self.purge(sub, child, crec or (_ident(st), st.st_uid,
-                                                    stat.S_IMODE(st.st_mode)), depth + 1)
-                finally:
-                    os.close(sub)
-                if _ident(os.lstat(entry, dir_fd=fd)) != _ident(st):
-                    raise CleanupRefused("子目录删除前被替换", child)
-                self.fsop(os.rmdir, "目录", child, entry, dir_fd=fd)
-            elif stat.S_ISREG(st.st_mode):
-                if _ident(os.lstat(entry, dir_fd=fd)) != _ident(st):
-                    raise CleanupRefused("文件删除前被替换", child)
-                self.fsop(os.unlink, "文件", child, entry, dir_fd=fd)
-            else:
-                raise CleanupRefused("子项类型不支持", child)
-
-    @staticmethod
-    def fsop(op, kind, child, entry, dir_fd):
-        try:
-            op(entry, dir_fd=dir_fd)
-        except OSError as exc:
-            raise CleanupRefused("删除%s失败 %s" % (kind, exc.__class__.__name__), child)
 
     def verify_absent(self):
         """逐精确记录路径不跟随 lstat 裁定：仅 FileNotFoundError 算不存在。"""

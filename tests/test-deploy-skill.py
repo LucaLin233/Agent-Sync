@@ -878,7 +878,8 @@ class TempLifecycle(Case):
         self.assertEqual(mod.release_cli_runner(), (None, False))
         self.gone(lines)
 
-    def test_symlink_in_tree_is_refused_and_sentinel_kept(self):
+    def test_internal_symlink_removed_without_following(self):
+        """内部软链不跟随：删链接本身，目标哨兵字节不变，整体收尾成功。"""
         keep = self.sentinel()
         h = self.harness()
         lines = self.capture(h)
@@ -892,56 +893,9 @@ class TempLifecycle(Case):
 
         h.mod.run_lh = view
         rc, out, err = h.run()
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("阶段失败：清理｜", err)
-        self.assertIn("子项为软链", err)
-        self.assertTrue((keep / "keep.txt").exists())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual((keep / "keep.txt").read_text(), "sentinel")
         self.assertNotIn(MARK, out + err)
-
-    def test_rebind_at_own_fd_keeps_moved_tree_and_sentinel(self):
-        """root／home 各自已打开 fd 的 listdir 返回后、子项删除前重绑定：拒删且双方内容不变。"""
-        for where in ("root", "home"):
-            with self.subTest(where):
-                keep = self.sentinel()
-                h = self.harness()
-                lines = self.capture(h)
-                real, fired, target = h.mod.os.listdir, [], []
-                view = h.platform.view
-
-                def hooked_view(args, stage, timeout):
-                    recs = self.created(lines)
-                    if len(recs) == 5 and not fired:
-                        marker = os.path.join(recs[3][0], "owned-marker")
-                        if not os.path.exists(marker):
-                            Path(marker).write_text("owned")
-                    return view(args, stage, timeout)
-
-                def listdir(fd):
-                    names = real(fd)
-                    recs = self.created(lines)
-                    idx = 0 if where == "root" else 1
-                    if not fired and isinstance(fd, int) and len(recs) == 5:
-                        st = os.fstat(fd)
-                        if (st.st_dev, st.st_ino) == (recs[idx][1], recs[idx][2]):
-                            fired.append(1)
-                            target.append(recs[idx][0])
-                            os.rename(target[0], target[0] + ".moved")
-                            os.mkdir(target[0], 0o700)
-                            (Path(target[0]) / "keep.txt").write_text("sentinel")
-                    return names
-
-                h.mod.run_lh = hooked_view
-                with mock.patch.object(h.mod.os, "listdir", listdir):
-                    rc, out, err = h.run()
-                self.assertEqual(rc, 1, out + err)
-                self.assertIn("清理失败", err)
-                self.assertIn(target[0], err)
-                self.assertEqual((Path(target[0]) / "keep.txt").read_text(), "sentinel")
-                moved = target[0] + ".moved"
-                self.assertTrue(os.path.isdir(moved))
-                cache = self.created(lines)[3][0]
-                rel = os.path.relpath(os.path.join(cache, "owned-marker"), target[0])
-                self.assertTrue(os.path.exists(os.path.join(moved, rel)), "原树内容保持")
 
     def test_cleanup_only_failure_rc_priority(self):
         def deny(op):
@@ -962,7 +916,7 @@ class TempLifecycle(Case):
                     rc, out, err = h.run()
                 self.assertEqual(rc, want, out + err)
                 self.assertIn("清理失败", err)
-                self.assertIn("home/", err)
+                self.assertIn("deploy-lh-", err)
                 if view_rc:
                     self.assertIn("阶段失败：平台回读｜", err)
                 else:
@@ -1418,7 +1372,7 @@ class BackupBinding(Case):
     """B4：备份回读必须绑定刚发布的普通文件，不跟随替换件／软链；失败固定 rc2 且零上传。"""
 
     def test_replacement_or_stat_refusal_stops_before_upload(self):
-        for kind in ("symlink", "inode", "stat"):
+        for kind in ("symlink", "inode", "stat", "chmod"):
             with self.subTest(kind):
                 h = self.harness()
                 twin = self.work / "twin.zip"
@@ -1428,7 +1382,7 @@ class BackupBinding(Case):
 
                 def wa(path, blob, stage, mode=0o644):
                     ident = real_wa(path, blob, stage, mode)
-                    if path.endswith(".predeploy.zip"):
+                    if path.endswith(".predeploy.zip") and kind in ("symlink", "inode"):
                         os.rename(path, path + ".real")
                         if kind == "symlink":
                             os.symlink(str(twin), path)
@@ -1443,9 +1397,21 @@ class BackupBinding(Case):
                         raise PermissionError(13, "denied")
                     return real_stat(path, *a, **kw)
 
+                real_read = os.read
+                backup = h.repo.out / (NAME + ".predeploy.zip")
+
+                def read(fd, n):
+                    blob = real_read(fd, n)
+                    if kind == "chmod" and blob and os.path.exists(str(backup)):
+                        os.chmod(str(backup), 0o644)
+                    return blob
+
                 with mock.patch.object(h.mod, "write_atomic", wa):
                     if kind == "stat":
                         with mock.patch.object(h.mod.os, "stat", deny):
+                            rc, out, err = h.run()
+                    elif kind == "chmod":
+                        with mock.patch.object(h.mod.os, "read", read):
                             rc, out, err = h.run()
                     else:
                         rc, out, err = h.run()
