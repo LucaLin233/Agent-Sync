@@ -34,4 +34,4 @@
 - 撤脚本步骤或删脚本后，须**逐个跑受影响的 `group`／`case`**——不在常跑集的用例会静默损坏。
 
 ## 登记
-新增或退休本类按需资源时，同步 `README.md` 资源清单、`skills/luno-sync/SKILL.md` 触发句、`tools/rule-claims.tsv` 加载边／资源边及 `tools/sync-targets.json` 的资源清单；义务块须存在且非空，正文不再受逐字固定期望约束，防弱化依赖改稿独立预审与实施差分独立验收；改加载边／资源边仍须同批更新 `tools/rule-claims.tsv`。只改用例内容且不改变入口或常跑集时，无需改动技能正文。
+新增或退休本类按需资源时，同步 `README.md` 资源清单、`skills/luno-sync/SKILL.md` 触发句、`tools/rule-claims.tsv` 加载边／资源边及 `tools/sync-targets.json` 的资源清单；义务块须存在且非空，正文不再受逐字固定期望约束，防弱化依赖本包sync-workflow所定风险分级的独立审查/验收；改加载边／资源边仍须同批更新 `tools/rule-claims.tsv`。只改用例内容且不改变入口或常跑集时，无需改动技能正文。
