@@ -1164,7 +1164,7 @@ class LauncherTrust(Case):
         self.assertEqual(h.repo.artifacts(), [key_of(NAME)], "只有本地候选包，伪 lh 未被执行")
 
     def test_non_allowlisted_path_shapes_are_refused(self):
-        h = self.harness()
+        """每种 PATH 形态一个独立 Harness，避免前子例的夹具／调用记录污染后一子例。"""
         similar = self.work / "usr" / "local" / "bin2"      # 相似前缀目录
         write(similar / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
         cwd = self.work / "cwd"
@@ -1175,16 +1175,24 @@ class LauncherTrust(Case):
         try:
             for label, path in (("prefix", "%s:/usr/bin:/bin" % similar),
                                 ("relative", "rel-bin:/usr/bin:/bin"),
-                                ("empty segment", ":/usr/bin:/bin"),
-                                ("no lh", "/usr/bin:/bin")):
+                                ("empty segment", ":/usr/bin:/bin")):
                 with self.subTest(label):
-                    self.assertTrue(path.startswith("/usr") or
-                                    shutil.which("lh", path=path), "攻击入口确实能被 which 命中")
+                    h = self.harness()
+                    self.assertTrue(shutil.which("lh", path=path), "攻击入口确实能被 which 命中")
                     h.env["PATH"] = path
                     self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-                    self.assertEqual((h.platform.views, h.s3.gets), ([], []))
+                    self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets,
+                                      h.platform.requests), ([], [], [], []))
         finally:
             os.chdir(old)
+
+    def test_no_lh_on_path_is_refused(self):
+        h = self.harness()
+        h.env["PATH"] = "/usr/bin:/bin"
+        self.assertIsNone(shutil.which("lh", path=h.env["PATH"]), "该 PATH 确实没有 lh")
+        self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
+        self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets, h.platform.requests),
+                         ([], [], [], []))
 
     def test_allowlisted_entry_and_legal_symlink_still_work(self):
         h = self.harness()
@@ -1214,19 +1222,24 @@ class LauncherTrust(Case):
                 self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets,
                                   h.platform.requests), ([], [], [], []))
 
-    def test_non_executable_guard_branch(self):
-        """isfile/access 守卫：本机 iSH 对 0644 仍判 X_OK（真实执行位未测），
-        故用受控注入把该入口判为不可执行，确定性走到原守卫并保留精确 Fail；产品安全逻辑不改。"""
+    def test_non_executable_real_target_guard_branch(self):
+        """可信入口为软链；只把「真实目标」判为不可执行：which(entry) 仍精确命中，
+        产品走 realpath 后的 isfile/access 守卫并固定 Fail。产品安全逻辑不改。"""
         h = self.harness()
-        plain = self.work / "plain"
-        write(plain / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        entry = str(plain / "lh")
-        h.mod.CLI_LAUNCHERS = (entry,)
-        h.env["PATH"] = "%s:/usr/bin:/bin" % plain
-        self.assertEqual(entry, shutil.which("lh", path=h.env["PATH"]), "命中该入口")
+        inst = self.work / "opt" / "lobehub"
+        write(inst / "cli", "#!/bin/sh\nexit 0\n", mode=0o755)
+        entry, target = inst / "lh", str(inst / "cli")
+        entry.symlink_to(inst / "cli")
+        h.mod.CLI_LAUNCHERS = (str(entry),)
+        h.env["PATH"] = "%s:/usr/bin:/bin" % inst
+        self.assertEqual(str(entry), shutil.which("lh", path=h.env["PATH"]), "which 选中入口")
         real_access = h.mod.os.access
-        with mock.patch.object(h.mod.os, "access",
-                               lambda path, mode: False if path == entry else real_access(path, mode)):
+
+        def access(path, mode):
+            return False if path == target else real_access(path, mode)
+        with mock.patch.object(h.mod.os, "access", access):
+            self.assertEqual(str(entry), shutil.which("lh", path=h.env["PATH"]),
+                             "注入不影响 which 对入口的命中（仅真实目标为 False）")
             self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
         self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets, h.platform.requests),
                          ([], [], [], []))
