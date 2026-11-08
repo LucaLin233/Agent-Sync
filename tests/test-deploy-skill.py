@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -781,6 +782,249 @@ class ControlledCli(Case):
         self.assertNotIn(MARK, out + err)
 
 
+# ── 临时根生命周期 ───────────────────────────────────────────────────────────
+
+class TempLifecycle(Case):
+    """D2：临时根身份、共用 close、拒删与错误优先级。"""
+
+    LINE = re.compile(r"临时(\S+)：path=(\S+) dev=(\d+) ino=(\d+) uid=(\d+) mode=(\d+)")
+
+    def capture(self, h):
+        lines, mod, real = [], getattr(h, "mod", h), None
+
+        def log(line):
+            lines.append(line)
+            real(line)
+
+        real = mod.log
+        mod.log = log
+        return lines
+
+    def created(self, lines):
+        return [(m.group(2), int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6), 8))
+                for m in map(self.LINE.match, lines) if m]
+
+    def gone(self, lines, n=5):
+        found = self.created(lines)
+        self.assertEqual(len(found), n)
+        for path, _d, _i, _u, _m in found:
+            self.assertFalse(os.path.lexists(path))
+
+    def sentinel(self):
+        self.n += 1
+        keep = self.work / ("sentinel%d" % self.n)
+        keep.mkdir()
+        (keep / "keep.txt").write_text("sentinel")
+        return keep
+
+    def test_creation_identity_and_cleanup(self):
+        h = self.harness()
+        lines = self.capture(h)
+        seen, real = [], h.platform.view
+
+        def view(args, stage, timeout):
+            if not seen:
+                for path, dev, ino, uid, mode in self.created(lines):
+                    st = os.lstat(path)
+                    seen.append((st.st_dev, st.st_ino, st.st_uid, stat.S_IMODE(st.st_mode)))
+                    self.assertEqual(seen[-1], (dev, ino, uid, mode))
+                    self.assertEqual(mode, 0o700)
+            return real(args, stage, timeout)
+
+        h.mod.run_lh = view
+        rc, out, err = h.run()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(seen), 5)
+        self.gone(lines)
+
+    def test_partial_construction_failure_closes(self):
+        h = self.harness()
+        lines = self.capture(h)
+        real, calls = os.mkdir, []
+
+        def mkdir(path, mode=0o777, **kw):
+            calls.append(path)
+            if len(calls) == 3:
+                raise OSError(13, "denied")
+            return real(path, mode, **kw)
+
+        with mock.patch.object(h.mod.os, "mkdir", mkdir):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("无法建立受控 CLI 环境", err)
+        self.gone(lines, 2)
+
+    def test_business_failure_and_timeout_keep_primary(self):
+        h = self.harness()
+        lines = self.capture(h)
+        h.platform.view_rc = 1
+        rc, out, err = h.run()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("阶段失败：平台回读｜", err)
+        self.gone(lines)
+
+        repo = self.repo()
+        mod = load(TOOL, "deploy_skill_timeout")
+        mod.CLI_LAUNCHERS = (str(repo.bin / "lh"),)
+        lines = self.capture(mod)
+        with mock.patch.dict(os.environ, {"PATH": "%s:/usr/bin:/bin" % repo.bin}, clear=True):
+            mod.freeze_cli_runner(ORIGIN, "k")
+        with mock.patch.object(mod.CliRunner, "call",
+                               side_effect=subprocess.TimeoutExpired(["lh"], 1)):
+            with self.assertRaises(mod.Fail) as ctx:
+                mod.run_lh(["skill", "view"], mod.STAGE_PLATFORM, 1.0)
+        self.assertEqual(ctx.exception.rc, 2)
+        self.assertIn("超过剩余预算", ctx.exception.detail)
+        self.assertEqual(mod.release_cli_runner(), (None, False))
+        self.gone(lines)
+
+    def test_internal_symlink_removed_without_following(self):
+        """内部软链不跟随：删链接本身，目标哨兵字节不变，整体收尾成功。"""
+        keep = self.sentinel()
+        h = self.harness()
+        lines = self.capture(h)
+        real, fired = h.platform.view, []
+
+        def view(args, stage, timeout):
+            if not fired:
+                fired.append(1)
+                os.symlink(str(keep), os.path.join(self.created(lines)[1][0], "link"))
+            return real(args, stage, timeout)
+
+        h.mod.run_lh = view
+        rc, out, err = h.run()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual((keep / "keep.txt").read_text(), "sentinel")
+        self.assertNotIn(MARK, out + err)
+
+    def test_parent_fd_lstat_failure_maps_to_fixed_cleanup(self):
+        """第二次父 fd 相对根 lstat 的 PermissionError 不得逸出：固定清理 rc，不覆盖主错。"""
+        real_lstat = os.lstat
+
+        def deny():
+            fired = []
+
+            def lstat(path, *a, **kw):
+                if kw.get("dir_fd") is not None and not fired:
+                    fired.append(1)
+                    raise PermissionError(13, "denied")
+                return real_lstat(path, *a, **kw)
+
+            return lstat
+
+        for branch, fail, want in (("readonly", True, 2), ("view-fail", True, 2),
+                                   ("upload", True, 1), ("readonly", False, 0),
+                                   ("view-fail", False, 2), ("upload", False, 0)):
+            with self.subTest((branch, fail)):
+                h = self.harness()
+                if branch == "readonly":
+                    blob = h.candidate_blob()
+                    h.s3.objects[key_of(NAME)] = blob
+                    h.platform.adopt(blob)
+                if branch == "view-fail":
+                    h.platform.view_rc = 1
+                if fail:
+                    with mock.patch.object(h.mod.os, "lstat", deny()):
+                        rc, out, err = h.run()
+                else:
+                    rc, out, err = h.run()
+                self.assertEqual(rc, want, out + err)
+                self.assertNotIn("Traceback", err)
+                self.assertNotIn(MARK, out + err)
+                if fail:
+                    self.assertIn("清理失败", err)
+                    self.assertNotIn("PermissionError: [Errno", err, "不丢原异常自由报文")
+                    if branch == "upload":
+                        self.assertEqual(h.s3.puts, [key_of(NAME)])
+                    else:
+                        self.assertEqual(h.s3.puts, [])
+                    if branch == "view-fail":
+                        self.assertIn("阶段失败：平台回读｜", err)
+
+    def test_cleanup_only_failure_rc_priority(self):
+        def deny(op):
+            real = getattr(os, op)
+
+            def call(path, *a, **kw):
+                if kw.get("dir_fd") is not None:
+                    raise PermissionError(13, "denied")
+                return real(path, *a, **kw)
+
+            return call
+
+        for view_rc, want in ((0, 1), (1, 2)):
+            with self.subTest(view_rc):
+                h = self.harness()
+                h.platform.view_rc = view_rc
+                with mock.patch.object(h.mod.os, "rmdir", deny("rmdir")):
+                    rc, out, err = h.run()
+                self.assertEqual(rc, want, out + err)
+                self.assertIn("清理失败", err)
+                self.assertIn("deploy-lh-", err)
+                if view_rc:
+                    self.assertIn("阶段失败：平台回读｜", err)
+                else:
+                    self.assertIn("阶段失败：清理｜", err)
+
+        h = self.harness()
+        real_lstat = os.lstat
+
+        def deny(path, *a, **kw):
+            try:
+                return real_lstat(path, *a, **kw)
+            except FileNotFoundError:
+                raise PermissionError(13, "denied")
+
+        with mock.patch.object(h.mod.os, "lstat", deny):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("核验不可达", err, "lexists 语义被拒：底层 lstat EACCES 不算 absent")
+
+    def test_recorded_mode_change_is_refused(self):
+        for where in ("root", "home"):
+            with self.subTest(where):
+                h = self.harness()
+                lines = self.capture(h)
+                seen = []
+                real_close = h.mod.CliRunner.close
+
+                def close(runner):
+                    seen.append(runner.records[0 if where == "root" else 1][1])
+                    os.chmod(seen[-1], 0o755)
+                    return real_close(runner)
+
+                with mock.patch.object(h.mod.CliRunner, "close", close):
+                    rc, out, err = h.run()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("清理失败", err)
+                self.assertIn(seen[-1], err)
+                self.assertTrue(os.path.isdir(seen[-1]), "变权限后拒删，不 chmod 补救")
+                os.chmod(seen[-1], 0o700)
+
+    def test_dangling_symlink_at_recorded_path_counts_as_present(self):
+        h = self.harness()
+        lines = self.capture(h)
+        root = []
+
+        real = os.rmdir
+
+        def rmdir(path, *a, **kw):
+            out = real(path, *a, **kw)
+            recs = self.created(lines)
+            if not root and kw.get("dir_fd") is not None and recs and \
+                    path == os.path.basename(recs[0][0]):
+                root.append(recs[0][0])
+                os.symlink("/nonexistent-d1d2", root[0])
+            return out
+
+        with mock.patch.object(h.mod.os, "rmdir", rmdir):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("路径仍存在", err)
+        self.assertTrue(os.path.islink(root[0]))
+        os.unlink(root[0])
+
+
 # ── 部署流程 ─────────────────────────────────────────────────────────────────
 
 class DeployFlow(Case):
@@ -788,12 +1032,21 @@ class DeployFlow(Case):
 
     def test_happy_path(self):
         h = self.harness()
+        rollback = h.repo.out / (NAME + ".predeploy.zip")
+        seen = []
+        put = h.s3.put_object
+
+        def watch(**kw):
+            seen.append((os.stat(str(rollback)).st_mode & 0o7777, sha(rollback.read_bytes())))
+            return put(**kw)
+
+        h.s3.put_object = watch
         rc, out, err = h.run()
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(h.s3.puts, [key_of(NAME)])
-        rollback = h.repo.out / (NAME + ".predeploy.zip")
         self.assertEqual(rollback.read_bytes(), h.pre_blob)
-        self.assertEqual(os.stat(str(rollback)).st_mode & 0o7777, 0o644)
+        self.assertEqual(os.stat(str(rollback)).st_mode & 0o7777, 0o600, "自动备份 0600")
+        self.assertEqual(seen, [(0o600, sha(h.pre_blob))])
         installs = h.platform.kinds("install")
         self.assertEqual([r["payload"] for r in installs], [{"url": h.fetched_urls[0]}])
         self.assertEqual(installs[0]["headers"]["X-API-Key"], API_KEY)
@@ -1137,6 +1390,79 @@ class AtomicWrite(Case):
         self.assertEqual(ctx.exception.rc, 2)
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["a.zip"])
+
+    def test_caller_mode_before_publish_and_failure_old(self):
+        mod = load(TOOL, "deploy_skill_atomic_mode")
+        target = self.work / "b.zip"
+        target.write_bytes(b"old")
+        os.chmod(str(target), 0o640)
+        mod.write_atomic(str(target), b"new", mod.STAGE_ROLLBACK, 0o600)
+        self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
+                         (b"new", 0o600))
+        mod.write_atomic(str(target), b"pkg", mod.STAGE_PACK)
+        self.assertEqual(os.stat(str(target)).st_mode & 0o7777, 0o644)
+        for op in ("fchmod", "replace"):
+            with mock.patch.object(mod.os, op, side_effect=OSError("nope")):
+                with self.assertRaises(mod.Fail):
+                    mod.write_atomic(str(target), b"x", mod.STAGE_ROLLBACK, 0o600)
+            self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
+                             (b"pkg", 0o644))
+            self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["b.zip"])
+
+
+# ── 备份回读身份绑定 ─────────────────────────────────────────────────────────
+
+class BackupBinding(Case):
+    """B4：备份回读必须绑定刚发布的普通文件，不跟随替换件／软链；失败固定 rc2 且零上传。"""
+
+    def test_replacement_or_stat_refusal_stops_before_upload(self):
+        for kind in ("symlink", "inode", "stat", "chmod"):
+            with self.subTest(kind):
+                h = self.harness()
+                twin = self.work / "twin.zip"
+                twin.write_bytes(h.pre_blob)
+                os.chmod(str(twin), 0o600)
+                real_wa = h.mod.write_atomic
+
+                def wa(path, blob, stage, mode=0o644):
+                    ident = real_wa(path, blob, stage, mode)
+                    if path.endswith(".predeploy.zip") and kind in ("symlink", "inode"):
+                        os.rename(path, path + ".real")
+                        if kind == "symlink":
+                            os.symlink(str(twin), path)
+                        else:
+                            os.replace(str(twin), path)
+                    return ident
+
+                real_stat = os.stat
+
+                def deny(path, *a, **kw):
+                    if kw.get("dir_fd") is not None:
+                        raise PermissionError(13, "denied")
+                    return real_stat(path, *a, **kw)
+
+                real_read = os.read
+                backup = h.repo.out / (NAME + ".predeploy.zip")
+
+                def read(fd, n):
+                    blob = real_read(fd, n)
+                    if kind == "chmod" and blob and os.path.exists(str(backup)):
+                        os.chmod(str(backup), 0o644)
+                    return blob
+
+                with mock.patch.object(h.mod, "write_atomic", wa):
+                    if kind == "stat":
+                        with mock.patch.object(h.mod.os, "stat", deny):
+                            rc, out, err = h.run()
+                    elif kind == "chmod":
+                        with mock.patch.object(h.mod.os, "read", read):
+                            rc, out, err = h.run()
+                    else:
+                        rc, out, err = h.run()
+                self.assertEqual(rc, 2, out + err)
+                self.assertIn("回滚包", err)
+                self.assertEqual((h.s3.puts, h.platform.requests), ([], []))
+                self.assertNotIn(MARK, out + err)
 
 
 # ── 启动器信任：PATH 只用于选择已知安装入口 ──────────────────────────────────
