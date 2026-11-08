@@ -45,9 +45,9 @@ OPS_RUNTIME, HUB_INSTANCE, HUB_ENTRY = (TEMPLATE_FILES[k] for k in ('ops-runtime
 ANCHORS = {
     'ops-entry': ['references/service-runtime.md', '声明的指定键'],
     'ops-runtime': ['docker exec', 'sh -c', 'len=%s', 'awk -F=', 'length(substr($0,index($0,"=")+1))',
-                    "jq '{port: .server.port", 'docker compose config --quiet', '缺接口即停依赖'],
+                    "jq '{port: .server.port", 'docker compose config --quiet', '没有这类接口就停止依赖'],
     'hub-instance': ['information_schema.columns', 'SELECT', '人已确认的列白名单', 'LIMIT'],
-    'minis-config': ['筛选／分页只缩小记录集，不替代字段投影', '字段形态与路径写法'],
+    'minis-config': ['筛选和分页只缩小记录集，不能代替字段投影', '字段形态和路径写法'],
 }
 FORBIDDEN = (
     ('env', re.compile(r'(?<![\w./-])env(?![\w-])')),
@@ -125,8 +125,8 @@ DECL_CUES = {
     'env': ('声明的指定键',),
     'config': ('声明的指定键', '声明的字段路径'),
     'db': ('人已确认的列白名单', '列名与类型元数据'),
-    'platform': ('按字段', '读技能的可用路径'),
-    'compose': ('配置持有端已有的投影接口',),
+    'platform': ('按字段',),
+    'compose': ('配置持有方已有的投影接口',),
 }
 # 只有这些声明语可贡献具体字段名；其余只声明占位符（往白名单小句塞具体列名仍判越范围）
 CONCRETE_CUES = dict(DECL_CUES, db=('列名与类型元数据',))

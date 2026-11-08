@@ -19,7 +19,7 @@
 - **`KEY_VAULTS_SECRET`** 必须和已有的加密数据配对，不能直接替换。确需轮换或迁移时，先核实当前版本支持的恢复或重加密方案，做好配对备份并取得明确授权；没确认可恢复之前不改。变量含义见文档 `self-hosting/environment-variables/`（改 `AUTH_COOKIE_PREFIX` 会作废会话，`JWKS_KEY` 用于 OIDC 和内部 JWT）。
 - **S3/R2 报 Unauthorized**：服务端 S3 请求的 AWS SDK 401，优先查目标桶的凭据和权限；list、view、doctor 正常不排除存储故障；不借用没核过目标桶授权的其他端凭据。
 - **网关鉴权**：网关模式需要 `ENABLE_AGENT_GATEWAY` 和 `AGENT_GATEWAY_URL` 同时配置，令牌和 JWKS 不一致就会握手失败。升级后出现 JWKS 配对告警时，先核对当前版本的匹配判据（含公钥参数和 kid 的处理）；启动告警不单独证明密钥配错或网关拒签，健康检查通过也不证明鉴权通过。没有真实的网关鉴权请求时，标「网关拒签未实测」，不能只凭告警更换密钥。
-- **查库、导表、导配置**按 `luno-core`〈秘密面〉的源头投影，排除 `providers.key`、`KEY_VAULTS_SECRET` 和 JWKS 私钥。先取列名和类型元数据（`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '<schema>' AND table_name = '<表>' ORDER BY ordinal_position`），据此写出**人已确认的列白名单**再取数（`SELECT <列1>, <列2> FROM <表> WHERE <条件> LIMIT <n>`）。禁止 `SELECT *`、`row_to_json` 等整行转 JSON 再减列，以及整体 dump（`pg_dump` 只用于完整恢复备份，按〈秘密面〉③ 放受控位置）。凭据列的诊断陷阱见 `references/skills.md`。
+- **查库、导表、导配置**按 `luno-core`〈秘密面〉的源头投影，排除 `providers.key`、`KEY_VAULTS_SECRET` 和 JWKS 私钥。先取列名与类型元数据（`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '<schema>' AND table_name = '<表>' ORDER BY ordinal_position`），据此写出**人已确认的列白名单**再取数（`SELECT <列1>, <列2> FROM <表> WHERE <条件> LIMIT <n>`）。禁止 `SELECT *`、`row_to_json` 等整行转 JSON 再减列，以及整体 dump（`pg_dump` 只用于完整恢复备份，按〈秘密面〉③ 放受控位置）。凭据列的诊断陷阱见 `references/skills.md`。
 
 ## 检索、暴露面与负载
 

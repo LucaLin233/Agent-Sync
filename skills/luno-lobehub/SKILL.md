@@ -33,7 +33,7 @@ description: 已部署LobeHub 2.x CE的Agent/模型、权限渠道、Skill/MCP�
 ## 平台层
 
 - **入口**：公网入口取环境变量 `LOBEHUB_SERVER`，实例坐标见 `references/instance.md`；宿主机和入口地址按当次的连接参数和实际注入值确定。**`LOBEHUB_SERVER` 未设置或为空时，停止依赖这个入口的 CLI 命令、平台读写和发布**，报告变量名和本端的设置入口；不回退旧域名、不猜子域、不读已保存的登录态补地址、不换实例，也不因此自动 `lh login`。离线核对正文和资源可以继续。
-- **读技能**：`lh skill view <id> --json content,name,description` 按字段只读回读；资源和细则见 `references/skills.md`。
+- **读技能**：按字段只读回读，如 `lh skill view <id> --json content,name,description`；资源和细则见 `references/skills.md`。
 - **权限与渠道**：角色有 Owner、Member、Viewer（Viewer 不能聊天）；Skill 和连接器只有创建者或 Owner 能编辑；渠道的全局 Allowed Users 优先于 DM/Group 策略。
 - **功能缺失**：用户说某功能「没反应」，先看角色和 `FEATURE_FLAGS`（不支持 `all`），再怀疑实例层。
 

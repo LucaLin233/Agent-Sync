@@ -8,8 +8,8 @@
 - **校验和生效分开**：配置先通过 `nginx -t` 才 reload；`restart` 和 `reload` 语义不同，不能互相代替。凡是让改动生效的命令都算变更，按本技能〈安全与测试〉确认后执行。
 - **最小闭环**：最小改动 → 分项验证 → 通过就收口。只有验证失败或命中事先约定的回滚判据时才回滚，并且限在既有授权内（需要用改前备份时，先读 `references/remote-files-backup.md` 的〈备份〉）。同一现象两次没有新进展、需要扩权或越界、证据不足时停下报告缺口；「没有进展」指的是**这条路径**取不到新证据，授权允许时可以换另一条有依据的路径。
 - **读环境和配置只取声明的键**：只核声明的指定键是否存在和长度，不取全量再脱敏。
-  - 容器或主机环境，在容器内只输出键名、长度和是否已设值：`docker exec <容器> sh -c 'for k in "$@"; do eval "v=\${$k}"; printf "%s len=%s state=%s\n" "$k" "${#v}" "$([ -n "$v" ] && echo set || echo unset)"; done' sh API_KEY DB_PASSWORD`
-  - 普通的非凭据配置文件或 env 文件，只列键名 `awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{print $1}' <文件>`，或只取指定键的长度 `awk -F= '$1=="KEY"{print $1, length(substr($0,index($0,"=")+1))}' <文件>`（按第一个 `=` 之后的整段计长，值里含 `=` 也不会算错）。
+  - 容器或主机环境：按声明的指定键，在容器内只输出键名、长度和是否已设值，如 `docker exec <容器> sh -c 'for k in "$@"; do eval "v=\${$k}"; printf "%s len=%s state=%s\n" "$k" "${#v}" "$([ -n "$v" ] && echo set || echo unset)"; done' sh API_KEY DB_PASSWORD`
+  - 普通的非凭据配置文件或 env 文件，只列键名 `awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/{print $1}' <文件>`，或只取声明的指定键的长度 `awk -F= '$1=="KEY"{print $1, length(substr($0,index($0,"=")+1))}' <文件>`（按第一个 `=` 之后的整段计长，值里含 `=` 也不会算错）。
   - **已确认不含凭据的 JSON 配置**，用目标上已有的工具（新安装另行确认）按逐个声明的字段路径投影：`jq '{port: .server.port, log_level: .logging.level}' <文件>`。
   - 凭据 env 文件不由助手解析取值，只通过配置持有方已有的投影接口核验（如 `docker compose config --quiet` 只校验可解析，`docker compose config --services` 只列服务名）；没有这类接口就停止依赖它的部分并报告缺口。
   - 不用 `env`、`printenv`，不取 `docker inspect` 的 `.Config.Env` 全量，不整文件 `cat`。
