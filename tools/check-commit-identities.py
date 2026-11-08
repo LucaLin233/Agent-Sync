@@ -3,13 +3,13 @@
 
 判据（全部为**可复核的字节事实**，不做启发式猜测）：
   1．身份单真源：从 `--rules` 指定的规则文件（默认 `skills/luno-core/references/delegation.md`）
-     〈Git 提交署名〉段**磁盘 bytes** 取 `LUNO <…>` 与 `FORGE <…>` 各一处，构成两个精确身份对。
+     〈Git 提交署名〉段**磁盘 bytes** 取 `LUNO <…>`、`FORGE <…>` 与 `LENS <…>` 各一处，构成三个精确身份对。
      段缺失、身份缺失／重复、形态非法（无 `@`、含邮箱字符集外字符＝方括号等占位形态、两侧
      带空白）、读取失败 → 非零退出（**不回退**：不读环境变量、不读 git config、不沿用上一提交
      身份）。规则值**不做 strip 归一化**：任何多余空白即判形态非法。
   2．逐提交：`git rev-list <base>..<head>` 的每个提交读 `git cat-file commit` **原始字节**，
      按提交对象的 author／committer 行解析「名 + 邮箱」bytes，须**精确等于**（大小写敏感）
-     LUNO 或 FORGE。
+     LUNO、FORGE 或 LENS。
   3．平台合并**只凭可信签名豁免**：须同时满足
      ① 父 ≥ 2；
      ② committer 行精确等于平台提交者 `GitHub <noreply@github.com>`（该地址是 GitHub 的公开
@@ -32,7 +32,7 @@
      个提交，PR 内原始提交不在该范围（也未取 `refs/pull/*`），故无法机械比对作者全集；边界
      由合并时的人工自核（规则〈Git 提交署名〉）与 PR 事件对原提交的逐个核对共同保证。
   4．`Co-authored-by:` 取自消息**尾部 trailer 块**（交由 `git interpret-trailers --parse` 解析，
-     与 git 自身口径一致）：格式须为 `Name <email>`，身份须精确等于 LUNO／FORGE 之一。
+     与 git 自身口径一致）：格式须为 `Name <email>`，身份须精确等于 LUNO／FORGE／LENS 之一。
      编写身份按 Author 与尾部署名的并集去重：普通提交的尾行**不得**与 Author 相同（判违规），
      squash 提交放行；同一身份的重复尾行按去重处理，不判违规。
   5．环境不可信即停：rev 非法、`rev-list` 失败、浅克隆、对象缺失、规则文件不可读／非 UTF-8、
@@ -58,7 +58,7 @@ from pathlib import Path
 
 DEFAULT_RULES = 'skills/luno-core/references/delegation.md'
 SECTION_TITLE = 'Git 提交署名'
-NAMES = (b'LUNO', b'FORGE')
+NAMES = (b'LUNO', b'FORGE', b'LENS')
 # 身份行形态：`author NAME <EMAIL> 1700000000 +0800`
 IDENT_LINE = re.compile(rb'^(.*?) <([^<>]*)> (\d+) ([+-]\d{4})$')
 # 邮箱字符集限定得比 RFC 窄：任何方括号／尖括号／空白／中文占位形态一律判为非法。
@@ -158,8 +158,11 @@ def read_rules(path):
             raise Env('规则〈%s〉段 %s 身份形态非法（占位、带空白或非邮箱）'
                       % (SECTION_TITLE, label))
         pairs[name] = value
-    if pairs[b'LUNO'] == pairs[b'FORGE']:
-        raise Env('规则〈%s〉段两个身份指向同一邮箱' % SECTION_TITLE)
+    seen = {}
+    for name, value in pairs.items():
+        if value in seen:
+            raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）' % (SECTION_TITLE, len(pairs)))
+        seen[value] = name
     return Rules(pairs)
 
 
