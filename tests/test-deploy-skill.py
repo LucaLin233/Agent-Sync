@@ -898,31 +898,50 @@ class TempLifecycle(Case):
         self.assertTrue((keep / "keep.txt").exists())
         self.assertNotIn(MARK, out + err)
 
-    def test_rebind_after_check_keeps_replacement(self):
+    def test_rebind_at_own_fd_keeps_moved_tree_and_sentinel(self):
+        """root／home 各自已打开 fd 的 listdir 返回后、子项删除前重绑定：拒删且双方内容不变。"""
         for where in ("root", "home"):
             with self.subTest(where):
                 keep = self.sentinel()
                 h = self.harness()
                 lines = self.capture(h)
                 real, fired, target = h.mod.os.listdir, [], []
+                view = h.platform.view
 
-                def listdir(fd, _h=h, _l=lines, _f=fired, _t=target, _w=where):
+                def hooked_view(args, stage, timeout):
+                    recs = self.created(lines)
+                    if len(recs) == 5 and not fired:
+                        marker = os.path.join(recs[3][0], "owned-marker")
+                        if not os.path.exists(marker):
+                            Path(marker).write_text("owned")
+                    return view(args, stage, timeout)
+
+                def listdir(fd):
                     names = real(fd)
-                    if not _f and isinstance(fd, int):
-                        _f.append(1)
-                        _t.append(self.created(_l)[0 if _w == "root" else 1][0])
-                        os.rename(_t[0], _t[0] + ".moved")
-                        os.mkdir(_t[0], 0o700)
-                        (Path(_t[0]) / "keep.txt").write_text("sentinel")
+                    recs = self.created(lines)
+                    idx = 0 if where == "root" else 1
+                    if not fired and isinstance(fd, int) and len(recs) == 5:
+                        st = os.fstat(fd)
+                        if (st.st_dev, st.st_ino) == (recs[idx][1], recs[idx][2]):
+                            fired.append(1)
+                            target.append(recs[idx][0])
+                            os.rename(target[0], target[0] + ".moved")
+                            os.mkdir(target[0], 0o700)
+                            (Path(target[0]) / "keep.txt").write_text("sentinel")
                     return names
 
+                h.mod.run_lh = hooked_view
                 with mock.patch.object(h.mod.os, "listdir", listdir):
                     rc, out, err = h.run()
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn("清理失败", err)
                 self.assertIn(target[0], err)
-                self.assertTrue((Path(target[0]) / "keep.txt").exists())
-                self.assertTrue(os.path.isdir(target[0] + ".moved"))
+                self.assertEqual((Path(target[0]) / "keep.txt").read_text(), "sentinel")
+                moved = target[0] + ".moved"
+                self.assertTrue(os.path.isdir(moved))
+                cache = self.created(lines)[3][0]
+                rel = os.path.relpath(os.path.join(cache, "owned-marker"), target[0])
+                self.assertTrue(os.path.exists(os.path.join(moved, rel)), "原树内容保持")
 
     def test_cleanup_only_failure_rc_priority(self):
         def deny(op):
@@ -950,11 +969,62 @@ class TempLifecycle(Case):
                     self.assertIn("阶段失败：清理｜", err)
 
         h = self.harness()
-        with mock.patch.object(h.mod.os.path, "lexists",
-                               side_effect=PermissionError(13, "denied")):
+        real_lstat = os.lstat
+
+        def deny(path, *a, **kw):
+            try:
+                return real_lstat(path, *a, **kw)
+            except FileNotFoundError:
+                raise PermissionError(13, "denied")
+
+        with mock.patch.object(h.mod.os, "lstat", deny):
             rc, out, err = h.run()
         self.assertEqual(rc, 1, out + err)
-        self.assertIn("核验不可达", err)
+        self.assertIn("核验不可达", err, "lexists 语义被拒：底层 lstat EACCES 不算 absent")
+
+    def test_recorded_mode_change_is_refused(self):
+        for where in ("root", "home"):
+            with self.subTest(where):
+                h = self.harness()
+                lines = self.capture(h)
+                seen = []
+                real_close = h.mod.CliRunner.close
+
+                def close(runner):
+                    seen.append(runner.records[0 if where == "root" else 1][1])
+                    os.chmod(seen[-1], 0o755)
+                    return real_close(runner)
+
+                with mock.patch.object(h.mod.CliRunner, "close", close):
+                    rc, out, err = h.run()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("清理失败", err)
+                self.assertIn(seen[-1], err)
+                self.assertTrue(os.path.isdir(seen[-1]), "变权限后拒删，不 chmod 补救")
+                os.chmod(seen[-1], 0o700)
+
+    def test_dangling_symlink_at_recorded_path_counts_as_present(self):
+        h = self.harness()
+        lines = self.capture(h)
+        root = []
+
+        real = os.rmdir
+
+        def rmdir(path, *a, **kw):
+            out = real(path, *a, **kw)
+            recs = self.created(lines)
+            if not root and kw.get("dir_fd") is not None and recs and \
+                    path == os.path.basename(recs[0][0]):
+                root.append(recs[0][0])
+                os.symlink("/nonexistent-d1d2", root[0])
+            return out
+
+        with mock.patch.object(h.mod.os, "rmdir", rmdir):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("路径仍存在", err)
+        self.assertTrue(os.path.islink(root[0]))
+        os.unlink(root[0])
 
 
 # ── 部署流程 ─────────────────────────────────────────────────────────────────
@@ -1340,6 +1410,49 @@ class AtomicWrite(Case):
             self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
                              (b"pkg", 0o644))
             self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["b.zip"])
+
+
+# ── 备份回读身份绑定 ─────────────────────────────────────────────────────────
+
+class BackupBinding(Case):
+    """B4：备份回读必须绑定刚发布的普通文件，不跟随替换件／软链；失败固定 rc2 且零上传。"""
+
+    def test_replacement_or_stat_refusal_stops_before_upload(self):
+        for kind in ("symlink", "inode", "stat"):
+            with self.subTest(kind):
+                h = self.harness()
+                twin = self.work / "twin.zip"
+                twin.write_bytes(h.pre_blob)
+                os.chmod(str(twin), 0o600)
+                real_wa = h.mod.write_atomic
+
+                def wa(path, blob, stage, mode=0o644):
+                    ident = real_wa(path, blob, stage, mode)
+                    if path.endswith(".predeploy.zip"):
+                        os.rename(path, path + ".real")
+                        if kind == "symlink":
+                            os.symlink(str(twin), path)
+                        else:
+                            os.replace(str(twin), path)
+                    return ident
+
+                real_stat = os.stat
+
+                def deny(path, *a, **kw):
+                    if kw.get("dir_fd") is not None:
+                        raise PermissionError(13, "denied")
+                    return real_stat(path, *a, **kw)
+
+                with mock.patch.object(h.mod, "write_atomic", wa):
+                    if kind == "stat":
+                        with mock.patch.object(h.mod.os, "stat", deny):
+                            rc, out, err = h.run()
+                    else:
+                        rc, out, err = h.run()
+                self.assertEqual(rc, 2, out + err)
+                self.assertIn("回滚包", err)
+                self.assertEqual((h.s3.puts, h.platform.requests), ([], []))
+                self.assertNotIn(MARK, out + err)
 
 
 # ── 启动器信任：PATH 只用于选择已知安装入口 ──────────────────────────────────

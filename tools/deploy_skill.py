@@ -157,7 +157,11 @@ def read_bytes(path):
 
 
 def write_atomic(path, blob, stage, mode=0o644):
-    """同目录临时文件 → 调用点 mode（发布前落实，默认 0644）→ os.replace；失败不覆盖已有产物。"""
+    """同目录临时文件 → 调用点 mode（发布前落实，默认 0644）→ os.replace；失败不覆盖已有产物。
+
+    返回刚发布文件的身份 (dev, ino, uid, mode)，取自发布前仍打开的临时 fd 的 fstat，
+    不按发布后的路径重新取身份。
+    """
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), prefix=".deploy-",
@@ -167,6 +171,7 @@ def write_atomic(path, blob, stage, mode=0o644):
             fh.flush()
             os.fchmod(fh.fileno(), mode)
             os.fsync(fh.fileno())
+            st = os.fstat(fh.fileno())
         os.replace(tmp, path)
         tmp = None
     except OSError as exc:
@@ -177,6 +182,49 @@ def write_atomic(path, blob, stage, mode=0o644):
                 os.unlink(tmp)
             except OSError:
                 sys.stderr.write("[deploy] 警告：临时文件残留：%s\n" % os.path.basename(tmp))
+    return (_ident(st), st.st_uid, stat.S_IMODE(st.st_mode))
+
+
+def read_backup(dir_abs, base, published, want_hash):
+    """在已核输出目录 fd 下 O_NOFOLLOW 打开备份：同一 fd 核身份并读 bytes，另核路径仍绑定该身份。"""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        dfd = os.open(dir_abs, DIR_FLAGS)
+    except OSError as exc:
+        raise Fail(STAGE_ROLLBACK, "回滚包回读失败（输出目录 %s）：未上传" % exc.__class__.__name__)
+    try:
+        try:
+            fd = os.open(base, flags, dir_fd=dfd)
+        except OSError as exc:
+            raise Fail(STAGE_ROLLBACK, "回滚包回读失败（打开 %s）：未上传" % exc.__class__.__name__)
+        try:
+            st = os.fstat(fd)
+            if (not stat.S_ISREG(st.st_mode) or _ident(st) != published[0]
+                    or st.st_uid != published[1] or stat.S_IMODE(st.st_mode) != published[2]
+                    or stat.S_IMODE(st.st_mode) != ROLLBACK_MODE):
+                raise Fail(STAGE_ROLLBACK, "回滚包不是刚发布的普通文件，或身份／权限不符：未上传")
+            chunks = []
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            blob = b"".join(chunks)
+        except OSError as exc:
+            raise Fail(STAGE_ROLLBACK, "回滚包读取失败（%s）：未上传" % exc.__class__.__name__)
+        finally:
+            os.close(fd)
+        try:
+            st2 = os.stat(base, dir_fd=dfd, follow_symlinks=False)
+        except OSError as exc:
+            raise Fail(STAGE_ROLLBACK, "回滚包路径复核失败（%s）：未上传" % exc.__class__.__name__)
+        if _ident(st2) != published[0]:
+            raise Fail(STAGE_ROLLBACK, "回滚包路径已不再指向刚发布的文件：未上传")
+    finally:
+        os.close(dfd)
+    if sha256(blob) != want_hash:
+        raise Fail(STAGE_ROLLBACK, "回滚包实读 bytes／sha256 与平台部署前哈希不一致（未上传）")
+    return blob
 
 
 # ── 受控 CLI ─────────────────────────────────────────────────────────────────
@@ -257,7 +305,7 @@ class CliRunner(object):
         if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o700:
             raise CleanupRefused("创建归属或权限异常", path)
         self.records.append((label, path, _ident(st), st.st_uid, stat.S_IMODE(st.st_mode)))
-        self.by_path[path] = _ident(st)
+        self.by_path[path] = (_ident(st), st.st_uid, stat.S_IMODE(st.st_mode))
         log("临时%s：path=%s %s" % (label, path, _id_text(st)))
 
     def close_quiet(self):
@@ -274,33 +322,29 @@ class CliRunner(object):
         self.closed = True
         if not self.records:
             raise CleanupRefused("缺创建身份记录", self.root)
-        for _l, path, ident, _u, _m in self.records:
+        for _l, path, ident, uid, mode in self.records:
             try:
                 st = os.lstat(path)
             except FileNotFoundError:
                 continue
             except OSError:
                 raise CleanupRefused("身份核验不可达", path)
-            if _ident(st) != ident or stat.S_ISLNK(st.st_mode):
-                raise CleanupRefused("路径被替换", path)
+            self.check_dir(st, (ident, uid, mode), path, "路径被替换")
         name = os.path.basename(self.root)
-        root_id = self.records[0][2]
+        rec_root = (self.records[0][2], self.records[0][3], self.records[0][4])
         try:
             pfd = os.open(os.path.dirname(self.root) or ".", DIR_FLAGS)
         except OSError:
             raise CleanupRefused("父目录不可达", self.root)
         try:
-            if _ident(os.lstat(name, dir_fd=pfd)) != root_id:
-                raise CleanupRefused("根被替换", self.root)
+            self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根被替换")
             fd = os.open(name, DIR_FLAGS, dir_fd=pfd)
             try:
-                if _ident(os.fstat(fd)) != root_id:
-                    raise CleanupRefused("根 fd 身份不符", self.root)
-                self.purge(fd, self.root, 0)
+                self.check_dir(os.fstat(fd), rec_root, self.root, "根 fd 身份不符")
+                self.purge(fd, self.root, rec_root, 0)
             finally:
                 os.close(fd)
-            if _ident(os.lstat(name, dir_fd=pfd)) != root_id:
-                raise CleanupRefused("根删除前被替换", self.root)
+            self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根删除前被替换")
             os.rmdir(name, dir_fd=pfd)
         except OSError as exc:
             raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)
@@ -308,31 +352,55 @@ class CliRunner(object):
             os.close(pfd)
         self.verify_absent()
 
-    def purge(self, fd, path, depth):
-        """只经已核身份的目录 fd 操作：不跟随软链、删除前复核身份，异常即停并报精确残留。"""
+    @staticmethod
+    def check_dir(st, rec, path, why):
+        """完整身份：目录类型、dev/ino、创建 uid、创建 mode、当前删除资格（同 euid）。"""
+        if (stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or _ident(st) != rec[0]
+                or st.st_uid != rec[1] or stat.S_IMODE(st.st_mode) != rec[2]
+                or st.st_uid != os.geteuid()):
+            raise CleanupRefused(why, path)
+
+    def bind(self, path, rec):
+        """破坏动作前复核路径仍绑定该已核对象：重绑定立即拒删，不沿旧 fd 清空原树。"""
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            raise CleanupRefused("路径已消失", path)
+        except OSError:
+            raise CleanupRefused("路径绑定不可达", path)
+        self.check_dir(st, rec, path, "路径被重绑定")
+
+    def purge(self, fd, path, rec, depth):
+        """每个破坏动作前先核当前目录及已记录祖先的路径绑定；重绑定立即拒删。"""
         if depth > 32:
             raise CleanupRefused("目录层级过深", path)
+        self.bind(path, rec)
         for entry in sorted(os.listdir(fd)):
             child = os.path.join(path, entry)
+            self.bind(path, rec)
             st = os.lstat(entry, dir_fd=fd)
             if stat.S_ISLNK(st.st_mode):
                 raise CleanupRefused("子项为软链", child)
             if st.st_uid != os.geteuid():
                 raise CleanupRefused("子项归属不符", child)
-            if child in self.by_path and _ident(st) != self.by_path[child]:
-                raise CleanupRefused("已记录子路径被替换", child)
+            crec = self.by_path.get(child)
+            if crec is not None:
+                self.check_dir(st, crec, child, "已记录子路径被替换")
             if stat.S_ISDIR(st.st_mode):
                 sub = os.open(entry, DIR_FLAGS, dir_fd=fd)
                 try:
                     if _ident(os.fstat(sub)) != _ident(st):
                         raise CleanupRefused("子目录被替换", child)
-                    self.purge(sub, child, depth + 1)
+                    self.purge(sub, child, crec or (_ident(st), st.st_uid,
+                                                    stat.S_IMODE(st.st_mode)), depth + 1)
                 finally:
                     os.close(sub)
                 if _ident(os.lstat(entry, dir_fd=fd)) != _ident(st):
                     raise CleanupRefused("子目录删除前被替换", child)
                 self.fsop(os.rmdir, "目录", child, entry, dir_fd=fd)
             elif stat.S_ISREG(st.st_mode):
+                if _ident(os.lstat(entry, dir_fd=fd)) != _ident(st):
+                    raise CleanupRefused("文件删除前被替换", child)
                 self.fsop(os.unlink, "文件", child, entry, dir_fd=fd)
             else:
                 raise CleanupRefused("子项类型不支持", child)
@@ -345,13 +413,15 @@ class CliRunner(object):
             raise CleanupRefused("删除%s失败 %s" % (kind, exc.__class__.__name__), child)
 
     def verify_absent(self):
+        """逐精确记录路径不跟随 lstat 裁定：仅 FileNotFoundError 算不存在。"""
         for _l, path, _i, _u, _m in self.records:
             try:
-                gone = not os.path.lexists(path)
+                os.lstat(path)
+            except FileNotFoundError:
+                continue
             except OSError:
                 raise CleanupRefused("删除后核验不可达", path)
-            if not gone:
-                raise CleanupRefused("路径仍存在", path)
+            raise CleanupRefused("路径仍存在", path)
 
     def call(self, args, timeout):
         return subprocess.run(self.argv + list(args), stdout=subprocess.PIPE,
@@ -1042,16 +1112,10 @@ def run_deploy(cfg, repo, out_abs, src_abs, pack, dedicated, blob, digest, membe
     if sha256(rollback) != pre_hash:
         raise Fail(STAGE_ROLLBACK, "同 key 现存对象与平台部署前 zipFileHash 不一致；回滚能力不成立，停止部署")
     rollback_path = os.path.join(out_abs, name + ".predeploy.zip")
-    write_atomic(rollback_path, rollback, STAGE_ROLLBACK, ROLLBACK_MODE)
-    back = read_bytes(rollback_path)
-    if len(back) != len(rollback) or sha256(back) != pre_hash:
-        raise Fail(STAGE_ROLLBACK, "回滚包实读 bytes／sha256 与平台部署前哈希不一致（未上传）")
-    back_mode = stat.S_IMODE(os.stat(rollback_path).st_mode)
-    if back_mode != ROLLBACK_MODE:
-        raise Fail(STAGE_ROLLBACK, "回滚包最终 mode 为 %04o，不是 %04o（未上传）"
-                    % (back_mode, ROLLBACK_MODE))
-    log("回滚包：%s（只读备份，实读 bytes/sha256＝部署前 zipFileHash，mode=%04o）"
-        % (rollback_path, back_mode))
+    published = write_atomic(rollback_path, rollback, STAGE_ROLLBACK, ROLLBACK_MODE)
+    read_backup(out_abs, os.path.basename(rollback_path), published, pre_hash)
+    log("回滚包：%s（只读备份，同一 fd 核身份并实读 bytes/sha256＝部署前 zipFileHash，mode=%04o）"
+        % (rollback_path, ROLLBACK_MODE))
 
     mark_remote_write()
     storage.upload(key, blob)
