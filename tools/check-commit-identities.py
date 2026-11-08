@@ -3,13 +3,13 @@
 
 判据（全部为**可复核的字节事实**，不做启发式猜测）：
   1．身份单真源：从 `--rules` 指定的规则文件（默认 `skills/luno-core/references/delegation.md`）
-     〈Git 提交署名〉段**磁盘 bytes** 取 `LUNO <…>`、`FORGE <…>` 与 `LENS <…>` 各一处，构成三个精确身份对。
+     〈Git 提交署名〉段**磁盘 bytes** 取**规则登记的每个精确身份**（完整声明 `Name <email>`）各一处，构成精确身份对集合；数量随规则登记变化，不在本文件硬写。
      段缺失、身份缺失／重复、形态非法（无 `@`、含邮箱字符集外字符＝方括号等占位形态、两侧
      带空白）、读取失败 → 非零退出（**不回退**：不读环境变量、不读 git config、不沿用上一提交
      身份）。规则值**不做 strip 归一化**：任何多余空白即判形态非法。
   2．逐提交：`git rev-list <base>..<head>` 的每个提交读 `git cat-file commit` **原始字节**，
      按提交对象的 author／committer 行解析「名 + 邮箱」bytes，须**精确等于**（大小写敏感）
-     LUNO、FORGE 或 LENS。
+     规则登记的某个精确身份。
   3．平台合并**只凭可信签名豁免**：须同时满足
      ① 父 ≥ 2；
      ② committer 行精确等于平台提交者 `GitHub <noreply@github.com>`（该地址是 GitHub 的公开
@@ -32,7 +32,7 @@
      个提交，PR 内原始提交不在该范围（也未取 `refs/pull/*`），故无法机械比对作者全集；边界
      由合并时的人工自核（规则〈Git 提交署名〉）与 PR 事件对原提交的逐个核对共同保证。
   4．`Co-authored-by:` 取自消息**尾部 trailer 块**（交由 `git interpret-trailers --parse` 解析，
-     与 git 自身口径一致）：格式须为 `Name <email>`，身份须精确等于 LUNO／FORGE／LENS 之一。
+     与 git 自身口径一致）：格式须为 `Name <email>`，身份须精确等于规则登记的某个精确身份。
      编写身份按 Author 与尾部署名的并集去重：普通提交的尾行**不得**与 Author 相同（判违规），
      squash 提交放行；同一身份的重复尾行按去重处理，不判违规。
   5．环境不可信即停：rev 非法、`rev-list` 失败、浅克隆、对象缺失、规则文件不可读／非 UTF-8、
@@ -58,7 +58,7 @@ from pathlib import Path
 
 DEFAULT_RULES = 'skills/luno-core/references/delegation.md'
 SECTION_TITLE = 'Git 提交署名'
-NAMES = (b'LUNO', b'FORGE', b'LENS')
+NAMES = (b'LUNO', b'FORGE', b'LENS', b'Claude Opus 5.5', b'LIN student')
 # 身份行形态：`author NAME <EMAIL> 1700000000 +0800`
 IDENT_LINE = re.compile(rb'^(.*?) <([^<>]*)> (\d+) ([+-]\d{4})$')
 # 邮箱字符集限定得比 RFC 窄：任何方括号／尖括号／空白／中文占位形态一律判为非法。
@@ -123,6 +123,14 @@ class Rules:
 
 
 def read_rules(path):
+    """只认**精确整行标题**与**反引号包裹的完整身份声明** `Name <email>`。
+
+    节标题必须整行等于 `## <SECTION_TITLE>`（不做包含匹配，`## Git 提交署名示例`
+    与 `##非Git提交署名` 都不算）；名字允许含空格，取反引号内**完整**名字与邮箱，
+    绝不按后缀/包含匹配截取（`NotLIN student`、`Fake LIN student`、前后空白变体
+    都不会被当成登记身份）。节标题允许**行尾空白**（`rstrip` 后整行相等即可），
+    但身份字段不 strip：名字与邮箱两侧多余空白即形态非法。
+    """
     try:
         raw = path.read_bytes()
     except OSError:
@@ -132,9 +140,10 @@ def read_rules(path):
     except UnicodeError:
         raise Env('规则文件不是 UTF-8')
     lines = text.split('\n')
+    heading = '## ' + SECTION_TITLE
     start = None
     for i, line in enumerate(lines):
-        if line.lstrip().startswith('#') and SECTION_TITLE in line:
+        if line.rstrip() == heading:
             start = i
             break
     if start is None:
@@ -144,24 +153,28 @@ def read_rules(path):
         if line.lstrip().startswith('#'):
             break
         body.append(line)
-    section = '\n'.join(body).encode('utf-8')
+    section = '\n'.join(body)
     pairs = {}
-    for name in NAMES:
-        found = re.findall(re.escape(name) + rb' <([^<>\n]*)>', section)
-        label = name.decode('ascii')
-        if not found:
-            raise Env('规则〈%s〉段缺少 %s 身份（不回退）' % (SECTION_TITLE, label))
-        if len(found) > 1:
-            raise Env('规则〈%s〉段 %s 身份重复（%d 处，不回退）' % (SECTION_TITLE, label, len(found)))
-        value = found[0]          # 不 strip：两侧空白即形态非法，避免把脏值悄悄归一化
+    for name, value in ((m.group(1).encode('utf-8'), m.group(2).encode('utf-8'))
+                        for m in re.finditer(r'`([^`<>\n]+) <([^`<>\n]*)>`', section)):
+        if name not in NAMES:
+            continue
+        if name in pairs:
+            raise Env('规则〈%s〉段 %s 身份重复（%d 处，不回退）'
+                      % (SECTION_TITLE, name.decode('utf-8'), 2))
         if not EMAIL.match(value):
             raise Env('规则〈%s〉段 %s 身份形态非法（占位、带空白或非邮箱）'
-                      % (SECTION_TITLE, label))
+                      % (SECTION_TITLE, name.decode('utf-8')))
         pairs[name] = value
+    for name in NAMES:
+        if name not in pairs:
+            raise Env('规则〈%s〉段缺少 %s 身份（不回退）'
+                      % (SECTION_TITLE, name.decode('utf-8')))
     seen = {}
     for name, value in pairs.items():
         if value in seen:
-            raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）' % (SECTION_TITLE, len(pairs)))
+            raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）'
+                      % (SECTION_TITLE, len(pairs)))
         seen[value] = name
     return Rules(pairs)
 
