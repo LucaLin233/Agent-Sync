@@ -1,21 +1,19 @@
-<!-- 来源：anthropics/knowledge-work-plugins@d3ee81913e5e179273313345847a2a4f42449bd2（2026-09-11）；Apache-2.0，完整原许可见 ../LICENSE.code-review.txt；精选改写上游四维与输出要素，架构维、依赖纪律、结构整改及诚实分歧为自撰或扩写；仅对已核原文补许可，原市场整包许可未决，GitHub 长版未整体采用，上游在线可取性未复核；历史取证待移至来源登记，见 skills-sources.md。 -->
-<!-- 来源：mattpocock/skills@5beb35b040e3de97e54fa9e386d7e42d15c295c2；路径：skills/engineering/tdd/SKILL.md；2026-10-25 本地核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收期望值独立来源判据，不据此强制 TDD；完整许可见 `../LICENSE.matt-pocock.txt`；上游在线可取性未复核。来源登记见 skills-sources.md。 -->
-<!-- 来源（本次比照）：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/code-review/SKILL.md；2026-11-05 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅补代码双轴的本次比照来源，不冒充旧 pin，不替代五维、授权或独立审查；上游可取；完整许可见 `../LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
 # 代码审查检查清单
 
-本资源为代码审查必达清单；通用流程、授权、分级与输出依已加载 `SKILL.md`，本文补代码专属检查与输出增量。实施侧纪律（最小改动、风格继承、只清自引入孤儿、先复现后修复、重构保行为、结果证据）按 `luno-coding` 原文核对，本文不复制两份。
+本文件含改写自 `anthropics/knowledge-work-plugins` 与 `anthropics/claude-plugins-official` 的内容（Apache-2.0，已修改；许可见 `../LICENSE.code-review.txt`、`../LICENSE.anthropic-plugins.txt`）。
+
+这是代码审查的必查清单。通用流程、授权、分级和输出按 `SKILL.md`，这里只补代码专属的检查和输出；实施侧纪律（最小改动、沿用风格、只清自己引入的孤儿代码、先复现后修复、重构保持行为、结果证据）按 `luno-coding` 核对，不在这里重复。
 
 ## 代码双轴与 CI
 
-代码审查双轴默认由同一个 LENS 分别完成；这是检查与报告分轴，不声称独立上下文或并行审查。派发材料给被审版本、比较基线/diff 范围、仓库规范与原始需求的确定性引用。规范按被审目录适用范围核对。Standards 区分成文规范违例、已证实缺陷与启发式气味；气味不能单凭名称阻塞。Spec 逐项检查遗漏、部分/错误实现和范围蔓延；需求来源缺失时只暂停依赖该证据的验收项，用户明确无 spec 时标不适用，不写 Spec 通过。安全、性能、正确性与可维护性覆盖仍保留。
+代码审查的两条轴（Standards 规范、Spec 需求）默认由同一个 LENS 分别完成；这是检查和报告上的分轴，不代表独立上下文或并行审查。派发材料要给出被审版本、比较基线或 diff 范围、仓库规范和原始需求的确定引用；规范按被审目录的适用范围核对。Standards 轴区分成文规范的违例、已证实的缺陷和启发式「气味」，气味不能只凭名称阻塞。Spec 轴逐项检查遗漏、部分或错误的实现和范围蔓延；需求来源缺失时只暂停依赖它的验收项，用户明确说没有 spec 时标「不适用」，不写 Spec 通过。安全、性能、正确性和可维护性的覆盖仍要做。
 
-需求与规范两轴分别交依据、结论及未验证，发现标轴归属，跨轴只引用ID；不再重复报告轴内发现数、最高严重度或优点栏目。整体按必需验收条件及影响定通过/不通过/部分通过/阻塞，不跨轴排名；复审仍交两轴本轮结论。有证据的优点可简记，不强求。
+两条轴分别交出依据、结论和未验证的部分；发现标明属于哪条轴，跨轴只引用 ID，不另报各轴的发现数、最高严重度或优点栏。整体结论按必需的验收条件和影响定为通过、不通过、部分通过或阻塞，不跨轴排名；复审仍交两条轴各自的本轮结论。有证据的优点可以简记，不强求。
 
-CI 核对最新 HEAD、实际套件和日志；GitHub 查询按 `gh pr checks`、`gh run view --log-failed`、`gh run watch --exit-status` 的当前 `--help` 取最小字段，必要时用 `--json`/`--jq` 与经授权的 `gh api --paginate`；watch 外层设有界时限，pending 的退出码 8 不当作失败或通过；绿色不代替完整验收；新增 unittest 用例须核正常入口实跑数与预期用例集合（含跳过项）；CI 不等于生产实测。范围内缺口且有修复授权则由持有该授权的主助理或执行角色继续修复验证。提交后有界等待 CI，期间并行独立审查；代码修复后可重跑。无代码变更时，仅对已确认的 runner 中断、平台故障等瞬时基础设施故障，在既有触发授权内说明依据并预设次数与时限后有界重试；状态不明、非幂等或疑似真实测试失败时先取证，不以重试刷绿，断言不得放宽。
+CI 核对最新的 HEAD、实际运行的套件和日志。GitHub 查询按 `gh pr checks`、`gh run view --log-failed`、`gh run watch --exit-status` 当前的 `--help` 只取最小字段，必要时用 `--json`/`--jq` 和经授权的 `gh api --paginate`；watch 外层要设时限，pending 的退出码 8 既不算失败也不算通过。CI 变绿不代替完整验收，也不等于生产实测；新增 unittest 用例时，要核对正常入口实际跑到的用例数和预期集合（含跳过项）。范围内的缺口如果有修复授权，由持有授权的主助理或执行角色继续修复和验证。提交后有限等待 CI，期间可以并行做独立审查，代码修复后可以重跑。没有代码变更时，只有已确认是 runner 中断、平台故障这类瞬时的基础设施故障，才在既有授权内说明依据、预设次数和时限后有限重试；状态不明、非幂等或疑似真实的测试失败要先取证，不靠重试刷绿，也不放宽断言。
 
 ## 一、五维检查索引
 
-<!-- 来源：anthropics/claude-plugins-official@fa4eb54397ee2faccb6940512a19c017cb1337f3；路径：plugins/code-review/commands/code-review.md、plugins/pr-review-toolkit/agents/silent-failure-hunter.md、plugins/pr-review-toolkit/agents/pr-test-analyzer.md；2026-11-05 核对；Apache-2.0（插件 LICENSE；根与目标路径 NOTICE 实读 404）；精选改写，仅吸收按适用目录核对、具体指出宽泛 catch/fallback 隐藏错误、说明测试建议捕获何种回归的判据；上游可取；完整许可见 `../LICENSE.anthropic-plugins.txt`；登记见 skills-sources.md。 -->
 ### 正确性
 核对需求/spec（来源缺失仅停依赖验收项）、空/null/边界值/整数溢出、错误处理与传播；对宽泛 catch 或多级 fallback 具体指出隐藏的错误与可观察影响；测试是否测行为且能抓回归、off-by-one/竞态/状态一致性/类型安全。
 ### 可读性与简洁
@@ -28,7 +26,6 @@ CI 核对最新 HEAD、实际套件和日志；GitHub 查询按 `gh pr checks`�
 - 同一形状的重复条件（缺模型或分发器；「临时」分支通常是长期债）
 - 非显然逻辑是否有必要的说明，说明是否与实际行为一致
 
-<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/codebase-design/SKILL.md、skills/engineering/codebase-design/DEEPENING.md、skills/engineering/codebase-design/DESIGN-IT-TWICE.md；2026-11-05 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收删除抽象后核复杂度去向与调用方负担的判据；上游可取；完整许可见 `../LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
 ### 架构
 - **结构与依赖**：沿用既有模式，新模式须论证；模块边界清晰、应共享者不重复，依赖无环；抽象层级适当，避免过度设计/耦合。
 - **重构是否降低复杂度**：数读者须同时持有的概念；优先消去整条分支/模式/层次，不只集中原逻辑；删除或合并抽象后，核复杂度移到哪里、调用方是否少持有该概念，避免只是换个位置。
@@ -48,9 +45,7 @@ CI 核对最新 HEAD、实际套件和日志；GitHub 查询按 `gh pr checks`�
 
 发现须有证据并给具名最小改法：合并重复分支、显式分发/类型边界、分离编排与业务、专属逻辑回归所属模块、复用既有helper、删除透传层或拆聚焦模块。仅为参考，不见气味就重构；核复杂度是否真的消失而非搬家。
 
-<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/engineering/improve-codebase-architecture/SKILL.md、skills/engineering/improve-codebase-architecture/HTML-REPORT.md；2026-11-05 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收架构健康评估先按用户痛点与近期高频变更圈定热点的判据；上游可取；完整许可见 `../LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
 ## 四、审查过程要点
-<!-- 来源：obra/superpowers@22f0b463e7a5e579904dd6211a520321035526f7；路径：skills/requesting-code-review/SKILL.md、skills/receiving-code-review/SKILL.md、skills/verification-before-completion/SKILL.md；2026-11-05 核对；MIT，Copyright (c) 2025 Jesse Vincent；精选改写，仅吸收采纳反馈前核当前调用方/平台/既有设计理由、无消费者不扩项的判据；上游可取；完整许可见 `../LICENSE.obra-superpowers.txt`；登记见 skills-sources.md。 -->
 - **先理解上下文与反馈**：这次变更要解决什么、依据哪个需求或任务、预期行为变化是什么；采纳外部反馈前核当前调用方、平台与既有设计理由；无实际消费者时不因反馈自行扩项。架构健康评估先按用户痛点或近期频繁变更圈定热点，再在该范围取证；普通 diff 审查不因此扫描全库历史。
 - **先审测试**：核存在性、行为而非实现、边界、描述性命名及回归捕获；测试建议说明会捕获哪类回归。关键行为或覆盖存疑时，仅在获准隔离副本做定向写入性变异实验：反转条件（去掉取反、`&&` 换 `||`），跑套件并还原副本；先确认变异可达、非等价且确实改变预期行为，不可达或等价不得判缺用例。若仍全绿则发现缺口，指出具体缺失用例。审查者取得隔离根授权可自行实验、不写交付物；未获授权交负责人转授权执行路径，只审阅结果；无授权或环境标测试有效性未验证，其余注明未实验。
 - **期望值来源**：不得按被测代码同算法重算期望值（如 `add(a,b)` 断 `a+b`、同一推导手抄快照、常量等于自己），否则实现与测试可能一起错。期望值须来自需求、可核算实例或独立参考实现；无独立依据标测试有效性缺口，不因套件绿色关闭。
@@ -64,9 +59,3 @@ CI 核对最新 HEAD、实际套件和日志；GitHub 查询按 `gh pr checks`�
 - 无法当批处理的发现按 `luno-core`〈执行闭环〉说明实际处置与责任；只有已授权且确需外部跟踪时建立 issue，不以口头「以后处理」冒充闭环。
 - 分歧优先级：**技术事实与数据 > 风格指南 > 工程设计原则 > 代码库一致性**
 - 作者有完整上下文并坚持时，优雅接受推翻；评代码不评人
-
-## MIT 通知与本地维护决定
-
-OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00；2026-10-25 本地维护者决定按 MIT 处理。上游根 LICENSE 与 README 标 Apache-2.0 的不一致仍保留；本地决定不是法律适用结论，不授权扩大分发；在线可取性未复核。适用于本包 SKILL.md 的 evidence-chain-builder 精选改写；完整 MIT 正文见 `../LICENSE.openminis.txt`（sha256：`2858f336d8173207aa079c4711085a28d22615d464b6a387363f7824116d00f0`）；其他来源许可及缺口不变，既有 Apache-2.0 附件 `../LICENSE.code-review.txt` 原字节保留。
-
-完整 MIT 正文已随本包 `../LICENSE.openminis.txt` 分发；上段保留来源、日期与本地许可决定。

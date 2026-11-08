@@ -5,9 +5,6 @@ description: 代码编写、修复、重构与审查的实施侧核对：最小�
 
 # LUNO｜代码实施纪律
 
-<!-- MIT精选改写：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d（2026-11-06）及@5beb35b040e3de97e54fa9e386d7e42d15c295c2（2026-10-25），Copyright (c) 2026 Matt Pocock；obra/superpowers@22f0b463e7a5e579904dd6211a520321035526f7（2026-11-06），Copyright (c) 2025 Jesse Vincent。所取路径与取材边界见skills-sources.md〈执行正文来源详情下沉〉；2026-11-06两来源上游可取，2026-10-25来源在线未复核，不作为当前连通证明；完整许可分别随本包LICENSE.matt-pocock.txt、LICENSE.obra-superpowers.txt分发。 -->
-
-
 ## 范围
 跨语言的代码编写、修改、重构，以及代码审查时的实施侧核对。目标与产物量级、授权与提问、正式审查与分级、CI 与执行环境、规则仓库的测试准入，分别按 `luno-core`、`luno-review`、`luno-ops`、`luno-sync` 原文，本文不复述。
 

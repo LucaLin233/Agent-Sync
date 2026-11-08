@@ -3,5 +3,4 @@
 
 ## 文章、标题与 SEO
 歧义改变含义时询问。系列统一文风、术语与译名。
-<!-- 来源：mattpocock/skills@4ae2317ddb22b046e26455e4f9c9b3aaaf62212d；路径：skills/in-progress/writing-shape/SKILL.md；2026-11-05 核对；MIT，Copyright (c) 2026 Matt Pocock；精选改写，仅吸收原创/结构编辑先铺受众未知且论证所需概念、无新增作用的段落删并或合并的判据；上游可取；完整许可见 `../LICENSE.matt-pocock.txt`；登记见 skills-sources.md。 -->
 原创/结构编辑先铺读者尚未知且后续论证必需的概念，再推进论点；无新增信息、推理或动作的段落删并。新文章未指定slug用简洁英文（≤60字符，a-z0-9及连字符，去停用词）；现有slug不擅改。摘要不重复开头（宜≤60字），SEO自然覆盖主关键词1–2次、不堆词。

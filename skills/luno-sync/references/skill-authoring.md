@@ -1,6 +1,6 @@
 # 技能编写与结构校验（精选）
 
-来源：openai/skills@49f948faa9258a0c61caceaf225e179651397431（2026-06-24-02:36:12Z）；路径：skills/.system/skill-creator/；Apache-2.0，完整许可见 `../LICENSE.skill-authoring.txt`；**精选改写**，只留技能专属增量；上游可取性：2026-11-05 公开 API 可取。通用书写启发式（披露与共置、删减判据、指针措辞）见 `references/agent-document-writing.md`；本机发布规则（登记刷新、跨端同步、平台安装与授权）见 `luno-minis`、`luno-sync`、`luno-lobehub`。加载本文件不构成执行授权。
+本文件含改写自 `openai/skills` 的 skill-creator 内容（Apache-2.0，已修改；许可见 `../LICENSE.skill-authoring.txt`）。通用书写启发式（披露与共置、删减判据、指针措辞）见 `references/agent-document-writing.md`；本机的发布规则（登记刷新、跨端同步、平台安装与授权）见 `luno-minis`、`luno-sync`、`luno-lobehub`。
 
 ## 自由度选择
 按对输出的**约束强度**选档，判据＝「同一目标有多少条可接受路径」：
@@ -16,7 +16,7 @@
 选择判据：每条信息问「是否每个分支都要」——都要进正文，只有部分分支到就下沉为 `references/`；同一动作要重复且要求一致就固化进 `scripts/`。
 
 ## 目录结构与必填 frontmatter
-以下约束受管自定义技能，不据此判定平台内置技能无效；内置对象不改写、不纳入受管同步门禁。
+以下约束只针对受管的自定义技能：平台内置技能不按此判定无效，也不改写、不纳入受管同步。
 ```
 <skill-name>/
 ├── SKILL.md           入口：frontmatter + 正文
