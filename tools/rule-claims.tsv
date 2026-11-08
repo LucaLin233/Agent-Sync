@@ -100,3 +100,4 @@ skills/luno-lobehub/references/agents.md	luno-core	必需加载	Agent资源前�
 skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
 skills/luno-sync/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
 skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
+skills/luno-minis/SKILL.md	references/session-groups.md	资源条件	资源加载边

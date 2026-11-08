@@ -288,6 +288,7 @@
         "skills/luno-minis/references/configuration.md",
         "skills/luno-minis/references/runtime.md",
         "skills/luno-minis/references/memory.md",
+        "skills/luno-minis/references/session-groups.md",
         "skills/luno-minis/LICENSE.openminis.txt"
       ],
       "ends": {
