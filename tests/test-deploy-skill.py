@@ -30,6 +30,11 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "deploy_skill.py"
+BOOTSTRAP = ("import importlib.util as u, sys\n"
+             "s = u.spec_from_file_location('deploy_skill_main', sys.argv[1])\n"
+             "m = u.module_from_spec(s); s.loader.exec_module(m)\n"
+             "m.CLI_LAUNCHERS = (sys.argv[2],)\n"     # 仅替换信任根，不复制解析算法
+             "sys.exit(m.main(sys.argv[3:]))\n")
 SURGE_PACKER = "skills/luno-surge/scripts/package_release.py"
 
 MARK = "SYNTHETIC-SECRET-9f3c1a7d"   # 只出现在夹具的凭据／签名 URL／原始报文里，绝不允许外流
@@ -131,7 +136,8 @@ class Repo(object):
         base = {"HOME": str(self.root), "TMPDIR": str(self.root),
                 "PATH": "%s:/usr/bin:/bin" % self.bin, "PYTHONPATH": str(self.root / "poison")}
         base.update(env or {})
-        cp = subprocess.run([sys.executable, "-B", str(TOOL)] + argv, cwd=str(self.repo), env=base,
+        cp = subprocess.run([sys.executable, "-B", "-c", BOOTSTRAP, str(TOOL), str(self.bin / "lh")]
+                            + argv, cwd=str(self.repo), env=base,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         return cp.returncode, cp.stdout.decode("utf-8", "replace"), cp.stderr.decode("utf-8", "replace")
 
@@ -334,6 +340,7 @@ class Harness(object):
     def __init__(self, repo, pre_blob=b"pre-deploy-zip-bytes"):
         self.repo, self.pre_blob = repo, pre_blob
         self.mod = load(TOOL, "deploy_skill_under_test")
+        self.mod.CLI_LAUNCHERS = (str(repo.bin / "lh"),)   # 合成信任入口（仅测试接缝）
         self.mod.WRITE_RETRY_DELAYS = (0.0, 0.0)
         self.mod.REPAIR_POLL_DELAYS = (0.0,) * 5
         self.real_open_storage = self.mod.open_storage
@@ -1130,6 +1137,82 @@ class AtomicWrite(Case):
         self.assertEqual(ctx.exception.rc, 2)
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["a.zip"])
+
+
+# ── 启动器信任：PATH 只用于选择已知安装入口 ──────────────────────────────────
+
+def resolve_with(mod, env):
+    with mock.patch.dict(os.environ, env, clear=True):
+        return mod.resolve_cli_argv()
+
+
+class LauncherTrust(Case):
+    """名单外同名可执行文件、shim／mise、非可执行目标一律固定 Fail（平台回读阶段）。"""
+
+    def test_old_rule_accepts_but_allowlist_refuses(self):
+        h = self.harness()
+        rogue = self.work / "rogue-bin"
+        write(rogue / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
+        h.env["PATH"] = "%s:/usr/bin:/bin" % rogue
+        entry = shutil.which("lh", path=h.env["PATH"])
+        real = os.path.realpath(entry)
+        self.assertEqual(str(rogue / "lh"), entry)
+        self.assertTrue(os.path.isfile(real) and os.access(real, os.X_OK), "旧判定接受该伪 lh")
+        self.assertNotIn(real, h.mod.CLI_LAUNCHERS)
+        self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
+        self.assertEqual((h.platform.views, h.s3.gets, h.platform.requests), ([], [], []))
+        self.assertEqual(h.repo.artifacts(), [key_of(NAME)], "只有本地候选包，伪 lh 未被执行")
+
+    def test_non_allowlisted_path_shapes_are_refused(self):
+        h = self.harness()
+        similar = self.work / "usr" / "local" / "bin2"      # 相似前缀目录
+        write(similar / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
+        for label, path in (("prefix", "%s:/usr/bin:/bin" % similar),
+                            ("relative", "rel-bin:/usr/bin:/bin"),
+                            ("empty segment", ":/usr/bin:/bin"),
+                            ("no lh", "/usr/bin:/bin")):
+            with self.subTest(label):
+                h.env["PATH"] = path
+                self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
+                self.assertEqual((h.platform.views, h.s3.gets), ([], []))
+
+    def test_allowlisted_entry_and_legal_symlink_still_work(self):
+        h = self.harness()
+        inst = self.work / "opt" / "lobehub"
+        write(inst / "cli", "#!/bin/sh\nexit 0\n", mode=0o755)
+        (inst / "lh").symlink_to(inst / "cli")
+        h.mod.CLI_LAUNCHERS = (str(inst / "lh"),)
+        h.env["PATH"] = "%s:/usr/bin:/bin" % inst
+        self.assertEqual([str(inst / "cli")], resolve_with(h.mod, h.env), "合法软链解析为真实目标")
+        rc, out, err = h.run()
+        self.assertNotIn("无法解析 lh 启动器", err, "名单内入口不提前拒绝")
+        self.assertTrue(h.platform.views, "冻结后进入平台回读")
+
+    def test_shim_mise_and_non_executable_reach_their_branches(self):
+        h = self.harness()
+        shims = self.work / "mise" / "shims"
+        write(shims / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
+        mise = self.work / "mise" / "bin"
+        write(mise / "mise", "#!/bin/sh\nexit 0\n", mode=0o755)
+        (mise / "lh").symlink_to(mise / "mise")
+        for label, entry in (("shim", shims / "lh"), ("mise", mise / "lh")):
+            with self.subTest(label):
+                h.mod.CLI_LAUNCHERS = (str(entry),)
+                h.env["PATH"] = "%s:/usr/bin:/bin" % entry.parent
+                self.assertEqual((h.platform.views, h.s3.gets), ([], []))
+
+    def test_non_executable_guard_branch(self):
+        """X_OK 语义依平台：iSH 上 0644 仍判可执行，该守卫分支本机不可达，只断言平台事实。"""
+        plain = self.work / "plain"
+        write(plain / "lh", "#!/bin/sh\nexit 0\n", mode=0o644)
+        if os.access(str(plain / "lh"), os.X_OK):
+            self.assertIsNotNone(shutil.which("lh", path=str(plain)), "平台不区分执行位，未伪造")
+            return
+        h = self.harness()
+        h.mod.CLI_LAUNCHERS = (str(plain / "lh"),)
+        h.env["PATH"] = "%s:/usr/bin:/bin" % plain
+        self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
+        self.assertEqual((h.platform.views, h.s3.gets), ([], []))
 
 
 if __name__ == "__main__":

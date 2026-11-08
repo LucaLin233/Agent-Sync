@@ -1527,6 +1527,7 @@ class SectionWriteTest(unittest.TestCase):
         def tls_server():
             server = self.server()
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(cert, key)
             server._server.socket = context.wrap_socket(server._server.socket, server_side=True)
             return server, server._server.server_address[1]

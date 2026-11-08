@@ -66,6 +66,7 @@ WRITE_STAGES = (STAGE_UPLOAD, STAGE_DOWNLOAD, STAGE_INSTALL, STAGE_READBACK, STA
                 STAGE_SNAPSHOT_AFTER)
 
 CLI_PATH_DIRS = ("/usr/local/bin", "/usr/bin", "/bin")
+CLI_LAUNCHERS = tuple(os.path.join(d, "lh") for d in CLI_PATH_DIRS)
 WRITE_PROCEDURES = {"install": "/trpc/lambda/agentSkills.importFromUrl",
                     "edit": "/trpc/lambda/agentSkills.update"}
 WRITE_TIMEOUT = 30.0
@@ -209,10 +210,11 @@ RUNNER = None
 
 
 def resolve_cli_argv():
-    """在原环境把 `lh` 解析为可执行绝对路径一次；shim／mise 一律拒绝。"""
+    """原 PATH 只选择已知安装入口；冻结绝对 argv，拒绝 shim／mise。"""
     path = os.environ.get("PATH")
     entry = shutil.which("lh", path=path) if path else None
-    real = os.path.realpath(entry) if entry else ""
+    trusted_entry = next((p for p in CLI_LAUNCHERS if p == entry), None)
+    real = os.path.realpath(trusted_entry) if trusted_entry else ""
     if (not real or "shims" in real.split(os.sep) or os.path.basename(real) == "mise"
             or not os.path.isfile(real) or not os.access(real, os.X_OK)):
         raise Fail(STAGE_PLATFORM, "无法解析 lh 启动器为可执行绝对路径（或为 shim）：同域前置未通过；"
