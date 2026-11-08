@@ -1,16 +1,11 @@
-# LUNO｜LobeHub Skill 与连接器
+# Skill 与连接器
 
-先取得本包入口必需规则。
-
-## Skill 与连接器
-- **Skill 与连接器**：区分内置工具、市场/用户自定义技能与 Custom MCP；共享范围及 Agent 启用方式按对象类型和当前版本核对，不把连接器的启用方式套用于技能。只改用户指定的层级与启用方式，平台没有的模式不模拟。连接器与 STDIO MCP 的密钥用环境变量传入，不写进内容。
-- **历史诊断陷阱（2026-09-17）**：`user_connectors.credentials` 为禁读列；历史记录显示，对其做 `::jsonb` 强制转换时，Postgres 错误详情会回显原值前缀。任何涉及该列的表达式都不得进入诊断输出，连类型探测也不例外。
-- **新建与更新**：无资源的新技能用 `lh skill create`（参数见 `--help`），无需公网位置。`lh skill install` 的来源类型（GitHub URL/简写、ZIP URL、市场标识符）与 `--branch` 见 `--help`，使用前核当前版本；GitHub 下载整仓 ZIP，技能须在根目录，服务端不读 GitHub token，私有仓库、本地路径、私有 IP 不作可用来源；市场标识符不是 URL。install 既可新建也可更新，不以删除为前置；核当前入口、identifier 与来源，区分同 identifier 包更新与正文资源化，不断言 identifier 一律由 URL 生成；更新后回读 ID。仅无法原位更新且用户明确授权迁移时备份后删重建；旧 ID 不保证恢复，须同步登记。用 `lh skill view <id> --json id,identifier,source,zipFileHash` 等已确认非秘密字段核来源，禁全量读 manifest 致签名 URL 泄漏。
-- **更新时平台把技能拆成独立字段**：`content`（正文）与 `description`、`name` 各自独立，`lh skill edit` 不带 `--description` 只改正文——描述会静默停留在旧文案（本实例曾发生，巡检只比正文未发现）；每次改完须用 `lh skill view <id> --json content,name,description` 分别回读判等：本地正文按规则仓库 `tools/body_contract.py` 提取（去掉有效 frontmatter（含结束分隔行自身行终止符），再去掉其后紧随的至多一个行终止符（若存在）；不泛化删除所有前导空行；无有效 frontmatter 则保留全文；入口校验及边界以实际契约为准），与平台 `content` 的 UTF-8 字节严格相等，不用 strip/rstrip，不规范化 CRLF 或尾 LF；其他端不假定具备该仓库工具，须遵循同一契约。现有巡检将恰少一个尾 LF 列为平台形态差异并**计入 rc=1**（2026-10-02 起；本实例实测 install 会裁尾 LF，须以 `body_bytes` 提取正文再 `lh skill edit -c` 原样补齐，不作通过例外），并非字节相等，当前修改对象须消除此差异。资源按完整相对文件路径逐项 `read-resource` 比原始 bytes；`resources` 顶层目录、ZIP 哈希及正文判等均不代替资源判等。**给 CLI 传带尾换行的正文时禁用 `$(cat …)`／`"$(…)"`**：命令替换会剥掉尾部换行，回读缺一个 LF 会被误判成平台形态差异。改用 `--config-file` 传 JSON（`lh agent edit --config-file`，`{"systemRole": 全文}`）或由脚本直写。
-- **读技能的可用路径**：`lh skill view <id> --json content,name,description` 按字段只读回读（字段语法以 `--help` 为准；技能资源另用 `lh skill resources`）；或由派发方给规则摘要、按执行目标在设备侧按路径只读读取。需要的是规则而不是安装能力时，不必启用任何技能类工具（2026-09-16 实测：平台侧助手在其设备环境执行 `lh skill view` 与 `lh skill resources` 两条命令可用、退出码 0；`read-resource` 未实测）。
-- **登记、启用、加载与行为分别验证**：不得仅因 `lh agent view` 的 `plugins` 缺少技能条目就断言未启用；网页端自定义技能在列也不足以证明已加载或行为生效。按当前版本核对技能暴露机制、目标 Agent 的可用性及实际加载/调用证据；证据不足标“未验证”。重建后回读新 ID，并核对相关引用与目标 Agent 可用性，不预设必须重新绑定或无需关联。
-
-**既有私有资源包投递**（2026-09-20/21 本实例实测）：私有 R2 桶生成约 600 秒有效的预签名 ZIP GET URL，供 `lh skill install` 一次性下载；桶本身不公开，不使用私有仓库直链。更新沿用同一 R2 key；本实例已复现保留 ID，仍须回读 ID，并以已确认版本的本批候选独立核对打包源、完整资源 bytes 与 ZIP/`zipFileHash`；本批预期换包而包哈希未变时，先查原因，不盲重投。预签名 URL 含临时凭据，不进入回复、日志、归档或文件；仅由已核安全通道在授权源与目标间传递，无该通道即暂停投递并交负责人，不改塞 argv 或 tool JSON 规避，也不改用公开对象；生产写入授权与同名核对不豁免。
-
-## 与入口及其它资源的关系
-- 知识库、文档、分块、embedding、检索与平台记忆见 `references/knowledge.md`；实例部署、升级恢复、鉴权、服务栈与异步任务条件见 `references/instance.md`。跨项取并集，不以本资源替代其它资源。
+- **分清对象**：区分内置工具、市场和用户自定义的技能，以及 Custom MCP。共享范围和 Agent 的启用方式按对象类型和当前版本核对，不把连接器的启用方式套到技能上。只改用户指定的层级和启用方式，平台没有的模式不模拟。连接器和 STDIO MCP 的密钥用环境变量传入，不写进内容。
+- **禁读列**（2026-09-17 诊断记录）：`user_connectors.credentials` 是禁读列。对它做 `::jsonb` 强制转换时，Postgres 的错误详情会回显原值前缀；任何涉及这一列的表达式都不能进入诊断输出，包括类型探测。
+- **新建与安装**：没有资源的新技能用 `lh skill create`，不需要公网位置。`lh skill install` 的来源类型（GitHub URL 或简写、ZIP URL、市场标识符）和 `--branch` 见 `--help`，用前核对当前版本。GitHub 来源会下载整个仓库的 ZIP，技能必须在根目录；服务端不读 GitHub token，所以私有仓库、本地路径和私有 IP 都不能作为来源；市场标识符不是 URL。
+- **更新**：`install` 既能新建也能更新，不需要先删除。核对当前的入口、identifier 和来源，分清「同一 identifier 的包更新」和「正文资源化」，不要断言 identifier 一律由 URL 生成；更新后回读 ID。只有无法原位更新、并且用户明确授权迁移时，才备份后删除重建；旧 ID 不保证能恢复，要同步更新登记。核对来源用 `lh skill view <id> --json id,identifier,source,zipFileHash` 等已确认不含秘密的字段，禁止全量读取 manifest（会泄漏签名 URL）。
+- **三个字段分开更新**：平台把技能的 `content`（正文）、`description`、`name` 当独立字段存。`lh skill edit` 不带 `--description` 只改正文，描述会静默停在旧文案（本实例发生过，只比正文的巡检没发现）。每次改完都用 `lh skill view <id> --json content,name,description` 分别回读判等：本地正文按规则仓库 `tools/body_contract.py` 的契约提取，与平台 `content` 的 UTF-8 字节严格相等，不 strip，不归一 CRLF 或末尾换行；没有该仓库工具的端也要遵循同一契约。资源按完整相对路径逐个用 `read-resource` 比较原始字节；资源目录、ZIP 哈希和正文判等都不能代替资源判等。
+- **末尾换行的坑**：本实例实测 `install` 会裁掉正文的末尾换行，要按契约提取正文后用 `lh skill edit -c` 原样补齐。**给 CLI 传带末尾换行的正文时，禁止用 `$(cat …)` 或 `"$(…)"`**：命令替换会剥掉末尾换行。改用 `--config-file` 传 JSON（如 `lh agent edit --config-file` 的 `{"systemRole": 全文}`）或由脚本直接写入。
+- **读技能的途径**：`lh skill view <id> --json content,name,description` 按字段只读回读（字段语法以 `--help` 为准，资源另用 `lh skill resources`）；也可以由派发方给出规则摘要，或在设备侧按路径只读读取。需要的是规则而不是安装能力时，不必启用任何技能类工具（2026-09-16 实测：平台侧助手在其设备上执行 `lh skill view` 和 `lh skill resources` 可用、退出码 0；`read-resource` 未实测）。
+- **登记、启用、加载和行为分别验证**：不能因为 `lh agent view` 的 `plugins` 里没有某个技能就断言它没启用；网页端列出了自定义技能也不能证明已加载或行为生效。按当前版本核对技能的暴露机制、目标 Agent 的可用性和实际的加载或调用证据，证据不足标「未验证」。重建后回读新 ID，并核对相关引用和目标 Agent 的可用性，不预设一定要重新绑定或一定不用。
+- **私有资源包投递**（2026-09-20/21 本实例实测）：私有 R2 桶生成约 600 秒有效的预签名 ZIP GET URL，供 `lh skill install` 一次性下载；桶本身不公开，不用私有仓库直链。更新沿用同一个 R2 key（本实例已复现会保留 ID，但仍要回读 ID），并用已确认版本的候选独立核对打包源、完整资源字节和 ZIP/`zipFileHash`；预期换包但包哈希没变时先查原因，不盲目重投。预签名 URL 含临时凭据，不进入回复、日志、归档或文件，只经已核实的安全通道在授权的源和目标之间传递；没有这样的通道就暂停投递并交负责人，不改塞进 argv 或工具 JSON 规避，也不改用公开对象。生产写入授权和同名核对不豁免。

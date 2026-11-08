@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Read-only recognition of reviewed official raw and historical adapted references.
 
-classify(digest) retains raw/adapted/unknown; neither CLI nor API writes files.
-Historical hashes remain recognition evidence, not official import permission.
+classify(digest) returns raw/adapted/unknown; nothing writes files. Historical hashes
+are recognition evidence, not import permission.
 """
 from pathlib import Path
 import sys
@@ -25,13 +25,6 @@ ADAPTED_SHA256 = {
     '48a99818a4c55698628542da447b45be05ec503872ac578c080621cfe8d77b9f',
     '8fd1defde65d83662f193d872e94af4c9afdc3a94be0c7ab3796444b68f32721',
 }
-
-def adapt_text(text):
-    """Reject the retired generation API, including former no-op inputs."""
-    raise SystemExit(
-        'Reference generation is disabled: command-reference.md is a manually maintained '
-        'overlay; use classify() or the read-only CLI.')
-
 
 def classify(digest):
     """Return 'raw', 'adapted' or 'unknown' for a sha256 hex digest."""

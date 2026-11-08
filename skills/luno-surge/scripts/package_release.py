@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
-"""Build a sanitized, reproducible-ish ZIP of the Surge Skill for sharing.
+"""Build a sanitized, reproducible-ish ZIP of the Surge Skill.
 
-Default output is an out-of-directory, persistent path
-(/var/minis/shared/release/surge-skill-YYYYMMDD.zip); an explicit path argument
-still overrides it, but a path inside the Skill directory is always rejected.
+Default output: /var/minis/shared/release/surge-skill-YYYYMMDD.zip (argument overrides;
+paths inside the Skill directory are rejected). Entries sit at the ZIP root, the layout
+`lh skill install` consumes; no `surge/` prefix.
 
-Archive entries are rooted at the ZIP root (no top-level directory): that is the
-layout `lh skill install` consumes, and the same layout used for the LobeHub
-delivery package. Do not reintroduce a `surge/` prefix.
-
-Two layers, one implementation: `collect(root)` returns the filtered entry list,
-`build(entries)` returns the archive bytes in memory. The CLI (`main`) is a thin
-wrapper that writes those bytes atomically. `tools/deploy_skill.py` reuses the
-same two functions for the Surge path, so filtering, symlink rejection, the
-secret scan and the archived bytes are **one** read per build: what is scanned
-is exactly what is archived.
+`collect(root)` filters entries, `build(entries)` returns archive bytes with one read per
+file, so scanned bytes are archived bytes. `tools/deploy_skill.py` reuses both.
 """
 from __future__ import annotations
 import hashlib, io, os, re, stat, sys, zipfile
@@ -35,15 +27,15 @@ SECRET_PATTERNS=[
 
 
 class ReleaseError(Exception):
-    """收集／构建失败（固定类别；消息只含相对路径与原因，不含文件内容）。"""
+    """消息只含相对路径与原因，不含文件内容。"""
 
 
 class SecretError(ReleaseError):
-    """敏感模式命中：本类只报类别与相对路径，不回显命中值。"""
+    """敏感模式命中：不回显命中值。"""
 
 
 def included(path:Path,root:Path|None=None)->bool:
-    """排除项全部按大小写归一比较（归档仍保留原始路径）。"""
+    """排除项按大小写归一比较。"""
     rel=path.relative_to(SOURCE if root is None else root)
     parts={p.lower() for p in rel.parts}
     return not (parts&{p.lower() for p in EXCLUDED_PARTS}
@@ -54,16 +46,12 @@ def digest(data:bytes)->str: return hashlib.sha256(data).hexdigest()
 
 
 def _walk_error(exc):
-    """os.walk 的 onerror 回调：遍历出错立即上抛，绝不静默跳过目录树。"""
+    """遍历出错即上抛，不静默跳过目录树。"""
     raise ReleaseError(f"Traversal error while collecting release files: {exc}")
 
 
 def collect(root):
-    """收集 root 下应归档的条目，返回按相对路径排序的 [(rel, path)]。
-
-    先拒符号链接（目录与文件，含不跟随）、再拒非常规条目；遍历错误上抛。**无回退**：
-    任一守卫命中即抛 ReleaseError，调用方据类别失败，不产出任何包。
-    """
+    """返回按相对路径排序的 [(rel, path)]；符号链接、非常规条目、遍历错误均抛 ReleaseError。"""
     root=Path(root)
     entries=[]
     for cur,dirs,files in os.walk(root,onerror=_walk_error,followlinks=False):
@@ -88,12 +76,7 @@ def collect(root):
 
 
 def build(entries):
-    """按既有确定性布局构建 ZIP 并返回内存 bytes；每个文件只读一次。
-
-    同一次读取的 bytes 既用于敏感模式检查、也用于归档，故「被检查的」与「被归档的」
-    必然是同一份内容（检查后替换源文件不会让未检 bytes 进包）。命中即抛 SecretError，
-    不回显命中值。
-    """
+    """确定性布局构建 ZIP bytes；每个文件只读一次，同一份 bytes 先扫描再归档。"""
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
         for rel,path in entries:
@@ -102,7 +85,7 @@ def build(entries):
                 if pattern.search(data):
                     raise SecretError(f"Potential secret found in {rel}")
             info=zipfile.ZipInfo(rel,date_time=(2026,1,1,0,0,0))
-            mode=0o755 if os.access(path,os.X_OK) else 0o644
+            mode=0o755 if Path(path).stat().st_mode & 0o111 else 0o644
             info.external_attr=(stat.S_IFREG|mode)<<16
             info.compress_type=zipfile.ZIP_DEFLATED
             archive.writestr(info,data)

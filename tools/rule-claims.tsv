@@ -15,8 +15,6 @@ skills/luno-lobehub/SKILL.md	references/skills.md	资源条件	资源加载边�
 skills/luno-lobehub/SKILL.md	references/knowledge.md	资源条件	资源加载边（入口·knowledge）
 skills/luno-lobehub/SKILL.md	references/instance.md	资源条件	资源加载边（入口·instance）
 skills/luno-lobehub/references/knowledge.md	references/instance.md	资源条件	资源加载边（knowledge→instance）
-skills/luno-lobehub/references/skills.md	references/knowledge.md	资源条件	资源加载边（skills→knowledge）
-skills/luno-lobehub/references/skills.md	references/instance.md	资源条件	资源加载边（skills→instance）
 skills/luno-review/SKILL.md	references/code-review.md	资源条件	资源加载边（review·代码审查/代码判断；CI-only仅读〈代码双轴与 CI〉）
 skills/luno-ops/SKILL.md	references/execution-environment.md	资源必需	资源加载边（ops）
 skills/luno-ops/SKILL.md	references/onlyboxes.md	资源条件	资源加载边（ops·沙箱落地）
@@ -34,7 +32,7 @@ skills/luno-sync/references/test-authoring.md	references/sync-workflow.md	资源
 skills/luno-writing/SKILL.md	references/prose.md	资源条件	资源加载边（writing·prose）
 skills/luno-writing/SKILL.md	references/i18n.md	资源条件	资源加载边（writing·i18n）
 skills/luno-writing/SKILL.md	references/wordpress.md	资源条件	资源加载边（writing·wordpress）
-skills/luno-minis/SKILL.md	references/configuration.md	资源条件	资源加载边（minis 入口·配置）
+skills/luno-minis/SKILL.md	references/configuration.md	资源条件	资源加载边（minis 配置：篇首/配置接口＋命中完整节；SOUL/技能写连读生效真源）
 skills/luno-minis/SKILL.md	references/runtime.md	资源条件	资源加载边（minis 入口·运行时）
 skills/luno-minis/SKILL.md	references/memory.md	资源条件	资源加载边（minis 入口·记忆）
 skills/luno-minis/references/runtime.md	references/memory.md	资源条件	资源加载边（minis 运行时资源）
@@ -50,7 +48,6 @@ skills/luno-surge/SKILL.md	references/platform-compatibility.md	资源必需	资
 skills/luno-surge/SKILL.md	references/diagnostics.md	资源条件	资源加载边（surge·诊断工作流）
 skills/luno-surge/SKILL.md	references/command-reference.md	资源条件	资源加载边（surge·命令参考）
 skills/luno-surge/SKILL.md	references/plugin-authoring.md	资源条件	资源加载边（surge·插件开发；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/SOURCE.md	资源条件	资源加载边（surge SOURCE·自指）
 skills/luno-surge/references/SOURCE.md	references/command-reference.md	资源条件	资源加载边（surge SOURCE·命令参考）
 skills/luno-surge/references/SOURCE.md	references/plugin-authoring.md	资源条件	资源加载边（surge SOURCE·插件开发指南；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/SOURCE.md	references/upstream-SKILL.md	资源条件	资源加载边（surge SOURCE·上游快照；部署时从官方包取件，仓库不含）
@@ -62,30 +59,24 @@ skills/luno-surge/references/diagnostics.md	references/platform-compatibility.md
 skills/luno-sync/SKILL.md	references/skill-authoring.md	资源条件	资源加载边（sync·技能编写与校验）
 skills/luno-sync/references/skill-authoring.md	references/agent-document-writing.md	资源条件	资源加载边（sync 技能编写→书写判据）
 skills/luno-cchp/SKILL.md	references/interfaces.md	资源必需	资源加载边（cchp 入口·接口契约或覆盖规则实际调用）
-skills/luno-cchp/SKILL.md	references/workflows.md	资源条件	资源加载边（cchp 入口·业务动作或覆盖规则写入恢复及跨业务比较）
+skills/luno-cchp/SKILL.md	references/workflows.md	资源条件	资源加载边（cchp 篇首＋命中完整业务节；写入连读组织约定/快照/继承，非全文）
 skills/luno-cchp/references/interfaces.md	references/workflows.md	资源条件	资源加载边（interfaces→workflows）
-skills/luno-cchp/SKILL.md	luno-ops	必需加载	CCHP 生产写入前置加载
 skills/luno-ops/SKILL.md	luno-minis	条件加载	Minis 运行时按需加载（ops）
 skills/luno-core/SKILL.md	luno-minis	条件加载	Minis 运行时按需加载（ops）
 skills/luno-memory/references/maintenance.md	luno-sync	必需加载	固化候选修改前置加载（maintenance）
 skills/luno-ops/references/onlyboxes-baseline.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes-baseline.md→execution-environment.md）
 skills/luno-ops/references/onlyboxes.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes.md→execution-environment.md）
-skills/luno-cchp/SOURCE.md	references/interfaces.md	资源条件	资源加载边（B批 cchp SOURCE.md→interfaces.md）
-skills/luno-cchp/SOURCE.md	references/workflows.md	资源条件	资源加载边（B批 cchp SOURCE.md→workflows.md）
 skills/luno-cchp/references/workflows.md	references/interfaces.md	资源必需	资源加载边（workflows→安全输出与公共分页契约）
 skills/luno-cchp/SKILL.md	references/coverage-rules.md	资源条件	资源加载边（cchp 入口·覆盖规则）
-skills/luno-cchp/references/workflows.md	references/coverage-rules.md	资源条件	资源加载边（workflows→覆盖规则）
 skills/luno-cchp/references/interfaces.md	references/coverage-rules.md	资源条件	资源加载边（interfaces→覆盖规则）
 skills/luno-cchp/references/coverage-rules.md	references/interfaces.md	资源条件	资源加载边（覆盖规则→实际调用输出或接口契约）
 skills/luno-cchp/references/coverage-rules.md	references/workflows.md	资源条件	资源加载边（覆盖规则→跨业务比较或key创建更新）
-skills/luno-cchp/SOURCE.md	references/coverage-rules.md	资源条件	资源加载边（cchp SOURCE.md→覆盖规则）
 skills/luno-surge/SKILL.md	references/upstream-command-reference.md	资源条件	资源加载边（surge·官方命令原件；部署时从官方包取件，仓库不含）
 skills/luno-surge/SKILL.md	references/upstream-SKILL.md	资源条件	资源加载边（surge·上游对照；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/SOURCE.md	references/upstream-command-reference.md	资源条件	资源加载边（surge SOURCE·官方命令原件；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/command-reference.md	references/controller-cli.md	资源条件	资源加载边（surge 覆盖层→客户端）
 skills/luno-surge/references/command-reference.md	references/diagnostics.md	资源条件	资源加载边（surge 覆盖层→诊断）
 skills/luno-surge/references/command-reference.md	references/platform-compatibility.md	资源条件	资源加载边（surge 覆盖层→平台判据）
-skills/luno-core/references/retrieval.md	references/retrieval-sources.md	资源条件	资源加载边（core 检索→来源与许可）
 skills/luno-surge/references/command-reference.md	references/http-api.md	资源条件	资源加载边（surge 覆盖层→安全分节写入）
 skills/luno-surge/references/platform-compatibility.md	references/http-api.md	资源条件	资源加载边（surge 平台判据→安全分节写入）
 skills/luno-surge/references/http-api.md	references/platform-compatibility.md	资源条件	资源加载边（surge HTTP→平台版本权益判据）
@@ -97,8 +88,16 @@ skills/luno-core/SKILL.md	references/handoff.md	资源条件	精简提案新增�
 skills/luno-core/SKILL.md	references/writing-safety.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-lobehub/SKILL.md	references/agents.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-ops/SKILL.md	references/ssh.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-core/references/handoff.md	luno-core	必需加载	交接资源前置
-skills/luno-core/references/writing-safety.md	luno-core	必需加载	写入资源前置
-skills/luno-lobehub/references/agents.md	luno-core	必需加载	Agent资源前置
-skills/luno-ops/references/ssh.md	luno-core	必需加载	SSH资源前置
 skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
+skills/luno-sync/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
+skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
+skills/luno-minis/SKILL.md	references/session-groups.md	资源条件	资源加载边
+skills/luno-lobehub/references/agents.md	references/access.md	资源条件	资源加载边
+skills/luno-lobehub/references/instance.md	references/skills.md	资源条件	资源加载边
+skills/luno-surge/references/platform-compatibility.md	references/diagnostics.md	资源条件	资源加载边
+skills/luno-cchp/SOURCE.md	references/interfaces.md	资源条件	资源加载边（B批 cchp SOURCE.md→interfaces.md）
+skills/luno-cchp/SOURCE.md	references/workflows.md	资源条件	资源加载边（B批 cchp SOURCE.md→workflows.md）
+skills/luno-cchp/SOURCE.md	references/coverage-rules.md	资源条件	资源加载边（cchp SOURCE.md→覆盖规则）
+skills/luno-core/references/retrieval.md	references/retrieval-sources.md	资源条件	资源加载边（core 检索→来源与许可）
+skills/luno-cchp/SKILL.md	luno-ops	必需加载	生产写入或不可逆动作：完整 ops 及命中落位/备份资源
+# 包根来源引用（非普通调用加载边）：skills/luno-cchp/SKILL.md、references/interfaces.md、references/workflows.md → skills/luno-cchp/SOURCE.md；仅溯源/再分发/跟版触发，资源存在与分发由 sync-targets.json resources 登记，当前资源边语法只接受 references/，不伪造新形态。

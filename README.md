@@ -1,44 +1,57 @@
 # Agent-Sync
 
-本公开仓库为 LUNO 的提示词、技能、子代理提供**版本化存档备份和多端同步**。仓库文件是可恢复资产；合并不等于部署成功，`present` 只表示登记的受管落点，不表示已部署或回读通过。Minis 与 LobeHub 是运行端，仓库是管理落点；记忆各端自持，不在此同步。
+本公开仓库为 LUNO 的提示词、技能和子代理提供**版本化的存档备份和多端同步**。Minis 和 LobeHub 是运行端，仓库是管理落点；仓库里的文件是可恢复的资产，但合并不等于部署成功。登记里的 `present` 只表示该端有受管落点，不表示已经部署或回读通过。记忆由各端自己保存，不在这里同步。
 
-## 目录与入口
+## 目录
 
-- `AGENTS.md`：仓库工作入口；先加载当前生效的规则，不以候选覆盖它们。
-- `prompt/LUNO.md`：提示词正文；`prompt/SOUL-frontmatter.yaml`：Minis 文件元信息。两者不可把文件误当 `soul.body` 生效字段。
-- `skills/`：技能正文、包内资源、脚本、上游快照与许可；`skills-sources.md` 登记来源、固定版本、许可和必要恢复线索。
-- `subagents/`：LENS、FORGE 的两端同文，以及 Minis 专用通用执行兜底；第三份不是 FORGE 副本，LobeHub 无该对象。
-- `tools/sync-targets.json`：受管对象、资源与各端身份/落点登记。
-- `tools/`：必要部署、正文判等、资源回读与打包工具；`tests/`：部署、Surge、脱敏、打包和规则守卫反例等六个测试入口和最小调度。它们各自的触发与授权以现役流程及相关规则为准，仓库目录不构成执行授权。
-- [`PENDING.md`](PENDING.md)：当前活动未完成状态；`changelog/`：只保留既有历史记录；新批结果只记当批PR，活动未决只记PENDING.md。旧历史见旧私有 `LucaLin233/Agent` 的 Git 历史（本仓库为无历史快照，不含该历史）。
+- `AGENTS.md`：在仓库里工作的入口。先加载当前生效的规则，不拿候选覆盖它们。
+- `prompt/LUNO.md`：提示词正文；`prompt/SOUL-frontmatter.yaml`：Minis 文件的元信息。两者都不是 `soul.body` 这个生效字段本身。
+- `skills/`：技能正文、包内资源、脚本、上游快照和许可；`skills-sources.md` 登记来源、固定版本、许可和必要的恢复线索。
+- `subagents/`：LENS、FORGE 的两端同文，以及 Minis 专用的通用执行兜底。第三份不是 FORGE 的副本，LobeHub 没有这个对象。
+- `tools/sync-targets.json`：受管对象、资源和各端的身份与落点登记，是对象身份的唯一真源。
+- `tools/`：部署、正文判等、资源回读、打包、结构守卫和署名检查工具；`tests/`：这些工具和规则守卫的回归测试及调度器。工具的触发和授权以现役流程为准，放在仓库里不构成执行授权。
+- [`PENDING.md`](PENDING.md)：当前未完成的事项。`changelog/` 只保留既有的历史记录；新的批次结果只写在当批的 PR 里。更早的历史在旧私有仓库 `LucaLin233/Agent` 的 Git 历史里（本仓库是无历史快照）。
 
-Minis 内置技能（如 `skill-creator`）不是同步对象；模型分组参数、记忆、设备与环境配置不在本仓库备份范围。第三方材料与来源、许可例外见 `skills-sources.md`；`luno-surge` 是自编与官方快照混合来源，详见 `skills/luno-surge/references/SOURCE.md`。
+Minis 内置技能（如 `skill-creator`）不是同步对象；模型分组参数、记忆、设备和环境配置不在备份范围内。
 
 ## 许可
 
-根 `LICENSE` 为 MIT（`Copyright (c) 2026 LucaLin233`），**只覆盖本仓库自有内容**。第三方吸收件、上游快照与随包附件按各自上游许可分发、版权归各上游作者：`skills/<技能>/LICENSE.*.txt` 是对应上游许可全文，来源仓库@固定提交、所取路径与许可状态登记在 `skills-sources.md`；`luno-surge` 的官方分发特例见其包内 `references/SOURCE.md`。再分发前按该登记逐项核对，根许可不替代第三方授权。
+根 `LICENSE` 是 MIT（`Copyright (c) 2026 LucaLin233`），**只覆盖本仓库自有的内容**。第三方吸收件、上游快照和随包附件按各自的上游许可分发、版权归各上游作者：`skills/<技能>/LICENSE.*.txt` 是对应上游许可的全文，来源仓库和固定提交、所取路径和许可状态登记在 `skills-sources.md`；`luno-surge` 是自编和官方快照的混合来源，官方原件的分发方式见其包内的 `references/SOURCE.md`。再分发前按登记逐项核对，根许可不能代替第三方授权。
 
-## 授权、同步与恢复
+## 授权与同步
 
-操作规则对象或仓库前，完整读取**当前生效**的 `luno-sync/SKILL.md` 和 `luno-sync/references/sync-workflow.md`，再按入口加载命中资源；权限和审批以用户当次授权及现役规则为准。正文改动按sync-workflow风险分级：非行为低风险一次独立差分验收，其他先独立预审再差分独立验收；每会话使用独立副本/分支、原生 PR，收口者串行合并并同步本批对象。必要测试与按需 MCP 核验按现役流程执行；对象身份唯一真源为 `tools/sync-targets.json`，部署写前回读目标，不再自动三副本互校或全量同名发现；不得把工具存在视为许可。
+操作规则对象或仓库之前，完整读取**当前生效**的 `luno-sync/SKILL.md` 和 `luno-sync/references/sync-workflow.md`，再按入口加载命中的资源；权限和审批以用户当次的授权和现役规则为准。正文改动按 sync-workflow 的风险分级审查和验收；每个会话用独立的副本或分支和原生 PR，由收口者串行合并并同步变化的对象。部署写入前先回读目标，不做自动的三副本互校或全量同名发现。
 
-恢复先确认所需对象、版本与目标实际生效状态：从经核实的仓库版本或备份取对应文件，覆写前保存目标的真实前态及将变更的资源和元数据，核可读和权限；遵循对应端受支持入口写入，再逐端回读。正文及资源按现役字节契约比较，变化的 name/description 等字段另核；`soul.body` 与带 frontmatter 的磁盘文件分别核对；LENS/FORGE 和 Minis 兜底分别按其登记字段恢复。文件存在、HTTP 成功或 PR 已合并均不能代替回读。失败只停相关对象，保留前态与恢复入口，未回读即未完成。
+Checks 只在当次授权时临时使用 `GH_TOKEN_CLASSIC`：不改变默认的 `$GH_TOKEN`，不把经典令牌用于普通仓库操作，不自动回退；临时覆盖只限进程变量，秘密不回显、不写文件。查询结果为 0 条只表示没有检查记录，不等于 CI 通过；GitHub Actions、Commit Status 和 Check Runs 不能互相冒充。
 
-**未变分支 rc=2 的操作性恢复路径（2026-10-12，复审 S1）**：该分支**不自动修复、也没有 `--force`**。若确认差异**仅为恰少一个尾 LF**：由主助理先核对**目标实例、登记 ID、候选 ZIP 与修复授权**，再从该候选 ZIP 的 `SKILL.md` 按 `body_contract` 提取**完整正文**，用受支持的 `lh skill edit <id> -c <正文>` **原样**提交，随后重新核验全部字段与资源；**不得**用会吞尾换行的 shell 命令替换（如 `$(...)` 命令替换、`echo` 等）来传递正文。其他漂移（描述／正文其它差异／资源路径集或 bytes／同 key 身份）**先诊断**，不盲重投、不改包规避只读分支。
+## 恢复
 
-Checks 仅当次授权临时使用 `GH_TOKEN_CLASSIC`；不改变默认 `$GH_TOKEN`，不将经典令牌用于普通仓库操作，不自动回退。仅获授权的Checks调用临时覆盖进程变量，秘密不回显、不写文件；0条仅表示无检查记录，不等于CI通过。GitHub Actions、Commit Status与Check Runs不互相冒充。
+恢复前先确认需要的对象、版本和目标端实际的生效状态：从经过核实的仓库版本或备份取对应文件，覆写前保存目标真实的前态和将要变更的资源与元数据，确认可读和权限；用对应端受支持的入口写入，再逐端回读。正文和资源按现役的字节契约比较，name、description 等变化的字段另外核对；`soul.body` 和带 frontmatter 的磁盘文件分别核对；LENS/FORGE 和 Minis 兜底各按它们的登记字段恢复。文件存在、HTTP 成功或 PR 已合并都不能代替回读；失败时只停相关对象，保留前态和恢复入口，没有回读就不算完成。
+
+**部署工具「未变分支」rc=2 的恢复**：这个分支不自动修复，也没有 `--force`。如果确认差异**只是恰好少了一个尾部 LF**：先由主助理核对目标实例、登记 ID、候选 ZIP 和修复授权，再从候选 ZIP 的 `SKILL.md` 按 `body_contract` 提取完整正文，用受支持的 `lh skill edit <id> -c <正文>` 原样提交，然后重新核验全部字段和资源。不要用会吞掉尾部换行的 shell 写法（`$(...)` 命令替换、`echo` 等）传递正文。其他漂移（描述、正文的其他差异、资源路径集或字节、同 key 的身份）先诊断，不盲目重投，也不改包来绕过只读分支。
 
 ## 秘密与公开边界
 
-**本仓库为公开快照、不含旧私有仓库历史**（旧历史曾包含连接配置，故按无历史重建）。不得提交 token、私钥、密码、`.env`、数据库/Redis 导出或备份归档，也不得提交一般连接配置与主机清单。非秘密受管对象身份/字段路径及专用巡检目标常量仅限既有窄例外，不含凭据，也不新增连接授权。发现秘密泄漏只报位置与类型、按授权处置和轮换，不复制秘密。
+本仓库是公开快照，不含旧私有仓库的历史（旧历史曾经包含连接配置，所以按无历史重建）。不得提交 token、私钥、密码、`.env`、数据库或 Redis 的导出、备份归档，也不提交一般的连接配置和主机清单。非秘密的受管对象身份、字段路径和专用巡检目标常量只限既有的窄例外，不含凭据，也不新增连接授权。发现秘密泄漏时只报位置和类型，按授权处置和轮换，不复制秘密。
 
-第三方素材、混合来源和许可缺口不因进入本仓库而取得公开或再分发权；拟扩大分发须先核来源许可与用户授权。不得把仓库或共享档案当凭据来源。
+第三方素材、混合来源和许可缺口不因为进了本仓库就取得公开或再分发的权利；要扩大分发，先核对来源许可和用户授权。不得把仓库或共享档案当作凭据来源。
 
-## 保留测试与资源
+## 测试
 
-`sh tests/run-tests.sh full` 登记六个测试入口；`group deploy,surge,privacy,gate,pack` 或 `case <文件名>` 定向运行；`select-paths` 从 stdin 接收 NUL 分隔路径、输出 selector JSON，`select` 读取该 JSON 并去重运行。纯正文或无专项命中只运行 smoke（结构守卫），不把它当成六个专项已通过。规则正文保留结构守卫及风险分级对应的独立审查/验收；不受逐字锚点约束，结构通过不证明行为无弱化，改加载边／资源边须同批更新 `tools/rule-claims.tsv`。`tools/sync-all.sh` 只运行结构守卫与包内校验，不访问生效端。
-结构守卫 `tools/check-rules.py` 的退出码固定为 **0＝无问题／1＝结构错误（阻断）／2＝仅提示（不阻断）／3＝检查不完整（阻断）**。两处消费口径**不同且均为现状**：`tools/sync-all.sh` 按 0／2 放行（rc=2 的提示**保留输出但非阻断**）；`tests/run-tests.sh` 把**任何非零**（含 rc=2 的提示）记为 FAIL，即当前测试门禁要求**零提示**——这是更严的门禁，不是与 sync-all 的矛盾，也不因本说明放宽。`tests/test-check-rules.sh` 以 0／1／2／3 四态回归固定该语义。
+```sh
+sh tests/run-tests.sh            # smoke：只跑结构守卫
+sh tests/run-tests.sh full       # 结构守卫 + gate、privacy、pack、surge、deploy
+sh tests/run-tests.sh group surge,deploy
+sh tests/run-tests.sh case test-redact.py
+sh tests/run-tests.sh list       # 列出入口、分组和是否进 full
+git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths | sh tests/run-tests.sh select
+```
 
-按未暂存变更选路：`git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths`。删除的文件不参与选路；现存未登记的测试路径仍须拒绝。
+- `select-paths` 从 stdin 读 NUL 分隔的变更路径，输出 selector JSON；`select` 读这个 JSON，合并去重后运行。路径到套件的映射在 `tests/test_paths.py`，`run-tests.sh` 头部的说明块必须和 `render-paths` 的输出一致。删除的文件不参与选路，现存但未登记的测试路径会被拒绝。
+- 署名检查的测试（`identity` 组）不进 `full`，改动署名检查器、它的测试或〈Git 提交署名〉规则时由选路触发；没有 gpg 的机器上，涉及真实签名的用例会跳过。
+- 只改正文、没有命中专项时只跑 smoke，不能把它当作各专项都已通过。结构通过不证明行为没有弱化；改加载边或资源边要在同一批更新 `tools/rule-claims.tsv`。
+- 测试在白名单环境里运行：独占的 HOME 和 TMPDIR，调用方的其他环境变量不进入，stdin 固定为 `/dev/null`。
 
-`skills/luno-sync/references/test-authoring.md` 保留测试准入与成本纪律；技能结构校验直接调用 `skills/luno-sync/scripts/quick_validate.py`。
+结构守卫 `tools/check-rules.py` 的退出码固定为 **0 = 无问题，1 = 结构错误（阻断），2 = 仅提示，3 = 检查不完整（阻断）**。`tools/sync-all.sh` 按 0 和 2 放行（rc=2 的提示保留输出但不阻断）；`tests/run-tests.sh` 把任何非零（含 rc=2）都记为 FAIL，也就是测试门禁要求零提示。两者口径不同是有意的，`tests/test-check-rules.sh` 回归固定这四种状态。`tools/sync-all.sh` 只跑结构守卫和包内校验，不访问生效端。
+
+测试的准入和成本纪律见 `skills/luno-sync/references/test-authoring.md`；技能结构校验直接调用 `skills/luno-sync/scripts/quick_validate.py`。

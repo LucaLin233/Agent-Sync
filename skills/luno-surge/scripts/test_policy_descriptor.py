@@ -8,7 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 
-# 脚本可能被 install.sh 以符号链接落到 PATH，故用 realpath 解析同级共享模块所在目录。
+# install.sh 以符号链接落 PATH：按 realpath 找同级共享模块。
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from _privacy import api_base_problem, dumps_redacted, redact_boundary  # noqa: E402
 
@@ -21,11 +21,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class _RedactingParser(argparse.ArgumentParser):
-    """`error()` 先过输出边界再写 stderr。
-
-    `--timeout password=<值>` 这类入参错误由 `argparse` 拼进消息，原样输出会把凭据值写进
-    stderr；覆写 `error()` 使**所有**用法/取值错误同口径脱敏。
-    """
+    """argparse 会把取值拼进错误消息：先脱敏再写 stderr。"""
 
     def error(self, message):
         super().error(redact_boundary(str(message)))
@@ -62,9 +58,7 @@ def main() -> int:
         p.error("SURGE_API_KEY is not set")
     if args.timeout <= 0:
         p.error("--timeout must be positive")
-    # 与 HTTP 回退同口径的远端门禁：scheme／URL userinfo／非本机主机（须 SURGE_ALLOW_REMOTE=1）。
-    # `--api-base` 此前只做 `rstrip`，与 `surge_ios.py` 的 `validate_base()` 不一致，
-    # 会让探测脚本把 X-Key 与节点描述符发到未显式放行的远端。
+    # 与 HTTP 回退同一远端门禁，X-Key 不发往未放行的主机。
     problem = api_base_problem(args.api_base, "--api-base", "SURGE_ALLOW_REMOTE")
     if problem:
         p.error(problem)

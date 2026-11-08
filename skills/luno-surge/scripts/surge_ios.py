@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Control Surge iOS through its localhost HTTP API."""
-import argparse, errno, json, os, posixpath, secrets, ssl, stat, sys
+import argparse, errno, json, os, secrets, stat, sys
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-# 脚本可能被 install.sh 以符号链接落到 PATH，故用 realpath 解析同级共享模块所在目录。
+# install.sh 以符号链接落 PATH：按 realpath 找同级共享模块。
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from _privacy import api_base_problem, dumps_redacted, redact_boundary  # noqa: E402
 
@@ -22,11 +22,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 class _RedactingParser(argparse.ArgumentParser):
-    """`error()` 先过输出边界再写 stderr。
-
-    `argparse` 会把取值原样拼进入参错误消息；不覆写时 `--raw password=<值>` 这类用法／取值
-    错误会把凭据值写进 stderr。子解析器由 `add_subparsers()` 按父解析器类型创建，同口径生效。
-    """
+    """argparse 会把取值拼进错误消息：先脱敏再写 stderr（子解析器同类型继承）。"""
 
     def error(self, message):
         super().error(redact_boundary(str(message)))
@@ -101,7 +97,6 @@ def request(method, path, body=None, dangerous=False, confirm=False):
 
 
 def show(value):
-    """成功路径与 fail() 同口径脱敏：策略/代理响应里的凭据字段不得原样进输出。"""
     if isinstance(value, (dict, list)):
         print(dumps_redacted(value, indent=2, sort_keys=True))
     else:
@@ -185,8 +180,7 @@ def read_section_input(stream):
         except UnicodeEncodeError:
             _stop("E_INPUT", 2)
     name = value["name"]
-    # name 是分节名（如 Rule），不是 header 行：`[Rule]`／`#!include` 两种分隔符写法一律拒绝，
-    # 否则合成入口会把它当成合法节名发出 POST。
+    # name 是节名（如 Rule），不是 `[Rule]`／`#!include` 行。
     if not name or any(ch in name for ch in "\r\n\x00[]") or _reject_section_markup(name):
         _stop("E_INPUT", 2)
     revision = value["revision"]
@@ -202,8 +196,7 @@ def read_section_input(stream):
 
 
 def _section_origin():
-    # urlparse 对畸形方括号 host 抛 ValueError，`.port` 对非法端口抛 ValueError：
-    # 两者都在联网前发生，必须归为固定 E_BASE（否则真实入口退出 1 并以 traceback 回显 BASE）。
+    # 畸形方括号 host／非法端口抛 ValueError：归为固定 E_BASE，不回显 BASE。
     try:
         parsed = urlparse(BASE)
         host = parsed.hostname
@@ -256,8 +249,7 @@ def section_http(method, path, body=None, phase="read"):
             _stop("E_VERIFY_FAILED", 5)
         _stop("E_READ_FAILED", 4)
     except HTTPException:
-        # 传输层协议异常（IncompleteRead／BadStatusLine 等）不是 ValueError/OSError：
-        # 写阶段一律「结果未知」且不重试，读／核验阶段按各自阶段归类，不给 traceback。
+        # IncompleteRead／BadStatusLine 等：写阶段一律「结果未知」且不重试。
         if phase == "post":
             _stop("E_WRITE_UNKNOWN", 5)
         if phase == "verify":
@@ -273,11 +265,8 @@ def section_http(method, path, body=None, phase="read"):
 
 
 def decode_section(raw, phase="read"):
-    """只解码已文档化的 content:string 与 revision:非空 string；未知字段不展示、不参与决策。
-
-    写后阶段（phase="verify"）的坏响应是「写已发生但无法核验」：token/退出码须为
-    E_VERIFY_FAILED/5，不得降级成读失败 4，否则调用方会误判为「没写成」。
-    """
+    """只解码 content:string 与非空 revision:string；写后阶段的坏响应是 E_VERIFY_FAILED/5，
+    不得降级成读失败 4（否则会被误判为没写成）。"""
     token, code = ("E_VERIFY_FAILED", 5) if phase == "verify" else ("E_READ_DECODE", 4)
     try:
         value = json.loads(raw.decode("utf-8"))
@@ -292,12 +281,9 @@ def decode_section(raw, phase="read"):
 
 
 def _open_backup_dir(path):
-    """从 `/` 起逐级 O_DIRECTORY|O_NOFOLLOW 打开，返回持有的末级目录 fd。
+    """从 `/` 起沿目录 fd 逐级 O_DIRECTORY|O_NOFOLLOW 下降，返回末级 fd（防祖先换链竞态）。
 
-    逐级 lstat 后再按完整路径 open 存在祖先符号链接替换竞态（检查后换链，写入落到别处），
-    故这里只沿目录 fd 逐级下降、不再按完整路径重解析，末级 fd 由调用方持有并在其上写文件。
-    歧义分量（`//`、尾斜杠、`.`、`..`、NUL）拒绝；末级须为本用户所有、权限恰为 0700。
-    任何不合格都在联网前抛出，故无效目录不会先 GET 再拒绝。
+    歧义分量（`//`、尾斜杠、`.`、`..`、NUL）拒绝；末级须本用户所有且权限恰为 0700。联网前调用。
     """
     if not isinstance(path, str) or not path or not os.path.isabs(path) or "\x00" in path:
         _stop("E_BACKUP_DIR", 2)
@@ -353,11 +339,8 @@ def _discard_created(dir_fd, filename, ident):
 
 
 def save_section_backup(edit, dir_fd):
-    """在调用方持有的目录 fd 上写实际 GET 原文/revision：0600、O_EXCL、fsync 后读回核对。
-
-    `O_EXCL` 失败（EEXIST）与 fsync／读回失败都在 POST 之前抛出；清理只针对本次创建且
-    dev/ino 仍匹配的文件，绝不 unlink 同名的既有文件。
-    """
+    """在持有的目录 fd 上写 GET 原文/revision：0600、O_EXCL、fsync 后读回核对，均在 POST 前；
+    失败只清理本次创建且 dev/ino 仍匹配的文件。"""
     payload = json.dumps({
         "format": 1,
         "name": edit["name"],
@@ -455,11 +438,7 @@ SECTION_ENTRY_ARGV = ("section", "replace", "--input", "-")
 
 
 def _is_section_entry(argv):
-    """判断本次调用是否落在安全入口（`section …`）：只看首个非选项词。
-
-    argparse 会把不合格取值原样拼进入参错误并回显（含凭据以外的合成哨兵），故安全入口
-    不进 argparse：形状不合一律固定 E_INPUT，不回显任何 argv 片段。
-    """
+    """首个非选项词为 `section` 即走安全入口；不进 argparse，避免回显 argv。"""
     for token in argv:
         if token.startswith("-"):
             continue
@@ -528,11 +507,9 @@ def main():
 
     c = args.command
     if c == "section":
-        # 正常路径已由 main() 的 argv 前置护栏截走；此处仅防御性保底。
         _print_section_stop(SectionStop("E_INPUT", 2))
     if c == "request":
-        # 分节写路由必须在 json 解析、取密与联网之前拒绝：非法 JSON 也只能得到固定 token，
-        # 不能先抛 JSONDecodeError 的 traceback。
+        # 分节写路由先于 JSON 解析、取密与联网拒绝。
         if str(args.method).upper() == "POST" and _section_write_target(args.path):
             fail(E_SECTION_SAFE_ENTRY)
         body = json.loads(args.json_body) if args.json_body else None
