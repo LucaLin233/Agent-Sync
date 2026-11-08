@@ -65,6 +65,7 @@ squash 尾行等于 Author、平台合并无需作者行）与普通提交去重
 真实签名用测试内临时生成的 ed25519 钥（非 web-flow）。不依赖本机 git 身份与网络。
 """
 import importlib.util
+from itertools import combinations
 import os
 import shutil
 import subprocess
@@ -888,7 +889,7 @@ class RulesTest(Base):
         # 两种位置都必须 rc=2，且断言顺序，防止只换期望字符串。
         head_anchor = '## Git 提交署名\n\n'
         tail_anchor = '平台自动生成的合并提交保留平台身份。'
-        names = ('FORGE',) + tuple(n for n, _ in EXTERNAL)
+        names = tuple(n for n, _ in (LUNO, FORGE, LENS) + EXTERNAL)
         for name in names:
             decl = '%s 使用 `%s <>`\n' % (name, name)
             for pos, anchor, want in (('before', head_anchor, '形态非法'),
@@ -1031,11 +1032,11 @@ class ExternalIdentityTest(Base):
         self.verdict(self.repo.run(base, head), 0, '通过')
 
     def test_external_coauthor_ok(self):
-        base = self.repo.commit(OTHER, OTHER)
-        msg = ('subject\n\nCo-authored-by: LUNO <%s>\nCo-authored-by: %s <%s>\n'
-               % (LUNO[1], EXTERNAL[0][0], EXTERNAL[0][1]))
-        head = self.repo.commit(EXTERNAL[1], EXTERNAL[1], message=msg, parents=[base])
-        self.verdict(self.repo.run(base, head), 0, '通过')
+        for pair in EXTERNAL:
+            with self.subTest(coauthor=pair[0]):
+                base, head = self.repo.line(
+                    LUNO, LUNO, message='subject\n\nCo-authored-by: %s <%s>\n' % pair)
+                self.verdict(self.repo.run(base, head), 0, '通过')
 
     def test_forge_not_author_coauthor_ok(self):
         base = self.repo.commit(OTHER, OTHER)
@@ -1045,15 +1046,23 @@ class ExternalIdentityTest(Base):
 
     def test_external_wrong_email_rc1(self):
         for name, mail in EXTERNAL:
-            with self.subTest(name=name):
-                base, head = self.repo.line((name, 'x' + mail[1:]), (name, mail))
-                self.verdict(self.repo.run(base, head), 1, 'author')
+            for old_pair in (LUNO, FORGE, LENS):
+                with self.subTest(new_name=name, old_email_owner=old_pair[0]):
+                    bad = (name, old_pair[1])
+                    self.assertNotEqual(bad, (name, mail))
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
 
     def test_external_wrong_name_rc1(self):
         for name, mail in EXTERNAL:
-            with self.subTest(name=name):
-                base, head = self.repo.line((name + ' ', mail), (name, mail))
-                self.verdict(self.repo.run(base, head), 1, 'author')
+            for old_pair in (LUNO, FORGE, LENS):
+                with self.subTest(new_email_owner=name, old_name=old_pair[0]):
+                    bad = (old_pair[0], mail)
+                    self.assertNotEqual(bad, old_pair)
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
 
     def test_generic_claude_rc1(self):
         base, head = self.repo.line(('Claude', EXTERNAL[1][1]), ('Claude', EXTERNAL[1][1]))
@@ -1065,14 +1074,19 @@ class ExternalIdentityTest(Base):
         self.verdict(self.repo.run(base, head), 1, 'author')
 
     def test_external_case_variants_rc1(self):
-        name, mail = EXTERNAL[0]
-        # 四个变体都必须真正改变字节（域大小写、全大写、名字大小写），不做空操作
-        domain_upper = mail[:mail.rindex('.')] + mail[mail.rindex('.'):].upper()
-        for bad in ((name.lower(), mail), (name.upper(), mail), (name, mail.upper()),
-                    (name, domain_upper)):
-            with self.subTest(bad=bad):
-                base, head = self.repo.line(bad, bad)
-                self.verdict(self.repo.run(base, head), 1, 'author')
+        for name, mail in EXTERNAL:
+            local, domain = mail.split('@', 1)
+            names = (name.lower(), name.upper())
+            if name == 'Claude Opus 5.5':
+                names += ('Claude opus 5.5',)
+            variants = tuple((n, mail) for n in names) + (
+                (name, mail.upper()), (name, local + '@' + domain.upper()))
+            for bad in variants:
+                with self.subTest(identity=name, bad=bad):
+                    self.assertNotEqual(ident(bad), ident((name, mail)))
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
 
     def test_rule_missing_external_rc2(self):
         for idx, (name, _mail) in enumerate(EXTERNAL):
@@ -1083,13 +1097,19 @@ class ExternalIdentityTest(Base):
                 self.verdict(self.repo.run(base, head), 2, '缺少')
 
     def test_rule_same_email_conflict_rc2(self):
-        pairs = ((LUNO, EXTERNAL[0]), (EXTERNAL[0], EXTERNAL[1]))
-        for a, b in pairs:
+        # 五名 literal 夹具的全部十对；不从生产 NAMES 或生产算法构造期望。
+        for a, b in combinations((LUNO, FORGE, LENS) + EXTERNAL, 2):
             with self.subTest(a=a[0], b=b[0]):
-                extra = tuple((n, a[1] if n == b[0] else m) for n, m in EXTERNAL)
-                self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
+                original = rule_text()
+                needle = '`%s <%s>`' % b
+                self.assertEqual(original.count(needle), 1)
+                text = original.replace(needle, '`%s <%s>`' % (b[0], a[1]), 1)
+                self.assertNotEqual(text, original)
+                self.repo.rules.write_text(text, encoding='utf-8')
                 base, head = self.repo.line()
-                self.verdict(self.repo.run(base, head), 2, '同一邮箱')
+                out = self.verdict(self.repo.run(base, head), 2, '同一邮箱')
+                self.assertIn('错误：规则〈Git 提交署名〉段身份指向同一邮箱（5 个身份，不回退）',
+                              out.splitlines())
 
     def test_rule_title_lookalike_rc2(self):
         for heading in ('## Git 提交署名示例', '##非Git提交署名'):
@@ -1101,25 +1121,59 @@ class ExternalIdentityTest(Base):
                 self.verdict(self.repo.run(base, head), 2, '缺少')
 
     def test_rule_external_name_whitespace_rc2(self):
-        # 名字两侧空白不 strip：不是登记身份 → 该精确名缺失（闭锁），而非「未知名一律非法」
-        for bad in (' ' + EXTERNAL[0][0], EXTERNAL[0][0] + ' '):
+        # 姓名不 strip；该精确声明缺失，不把所有未知声明一律判非法。
+        name, mail = EXTERNAL[0]
+        for bad in (' ' + name, name + ' ', ' ' + name + ' '):
             with self.subTest(bad=bad):
+                self.assertNotEqual(bad.encode(), name.encode())
+                extra = ((bad, mail), EXTERNAL[1])
+                self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
+                base, head = self.repo.line()
+                out = self.verdict(self.repo.run(base, head), 2, '缺少')
+                self.assertIn('错误：规则〈Git 提交署名〉段缺少 LIN student 身份（不回退）',
+                              out.splitlines())
+
+    def test_rule_notlin_prefix_rc2(self):
+        for bad in ('NotLIN student', 'Fake LIN student'):
+            with self.subTest(replacement=bad):
                 extra = ((bad, EXTERNAL[0][1]), EXTERNAL[1])
                 self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
                 base, head = self.repo.line()
-                self.verdict(self.repo.run(base, head), 2, '缺少')
-
-    def test_rule_notlin_prefix_rc2(self):
-        extra = (('NotLIN student', EXTERNAL[0][1]), EXTERNAL[1])
-        self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
-        base, head = self.repo.line()
-        self.verdict(self.repo.run(base, head), 2, '缺少')
+                out = self.verdict(self.repo.run(base, head), 2, '缺少')
+                self.assertIn('错误：规则〈Git 提交署名〉段缺少 LIN student 身份（不回退）',
+                              out.splitlines())
 
     def test_rule_unknown_extra_declaration_rc0(self):
-        # 5 个合法声明完整时，节内另有未知完整声明：忽略而不放行（不新增「未知名一律非法」）
+        # 五名合法声明完整时，两种未知声明均忽略；不新增身份、不全拒未知名。
         tail = '平台自动生成的合并提交保留平台身份。'
-        text = rule_text().replace(tail, tail + '\nFake LIN student 使用 `Fake LIN student <x@y>`', 1)
-        self.assertNotEqual(text, rule_text())
-        self.repo.rules.write_text(text, encoding='utf-8')
-        base, head = self.repo.line()
-        self.verdict(self.repo.run(base, head), 0, '通过')
+        for bad in ('NotLIN student', 'Fake LIN student'):
+            with self.subTest(extra=bad):
+                text = rule_text().replace(tail, tail + '\n%s 使用 `%s <x@y>`' % (bad, bad), 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_rule_external_invalid_email_rc2(self):
+        for name, mail in EXTERNAL:
+            for invalid in (PLACEHOLDER, 'address', ''):
+                with self.subTest(identity=name, invalid=invalid):
+                    original = rule_text()
+                    needle = '`%s <%s>`' % (name, mail)
+                    self.assertEqual(original.count(needle), 1)
+                    text = original.replace(needle, '`%s <%s>`' % (name, invalid), 1)
+                    self.assertNotEqual(text, original)
+                    self.repo.rules.write_text(text, encoding='utf-8')
+                    base, head = self.repo.line()
+                    out = self.verdict(self.repo.run(base, head), 2, '形态非法')
+                    self.assertIn('错误：规则〈Git 提交署名〉段 %s 身份形态非法（占位、带空白或非邮箱）'
+                                  % name, out.splitlines())
+
+    def test_rule_title_trailing_whitespace_ok(self):
+        for suffix in (' ', '\t', ' \t '):
+            with self.subTest(suffix=suffix):
+                text = rule_text().replace('## Git 提交署名\n', '## Git 提交署名' + suffix + '\n', 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 0, '通过')
