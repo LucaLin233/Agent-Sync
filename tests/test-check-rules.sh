@@ -178,8 +178,8 @@ shutil.copyfile(ROOT/'tests/test_paths.py',FIX/'tests/test_paths.py')
 (FIX/'poison/json.py').write_text('raise SystemExit("poison:json")\n')
 # 探针：HOME/TMPDIR 须为 runner 本轮独占目录，调用方变量不得进入（空值也算进入）
 (FIX/'tests/probe.sh').write_text('''leak=""
-case ${HOME:-} in */run-tests.*/home) ;; *) leak="$leak HOME" ;; esac
-case ${TMPDIR:-} in */run-tests.*/tmp) ;; *) leak="$leak TMPDIR" ;; esac
+case ${HOME:-} in */run-tests-*/home) ;; *) leak="$leak HOME" ;; esac
+case ${TMPDIR:-} in */run-tests-*/tmp) ;; *) leak="$leak TMPDIR" ;; esac
 for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set ]" && leak="$leak $v"; done
 [ -z "$leak" ] && echo probe:ok || { echo "probe:leak$leak"; exit 1; }
 ''')

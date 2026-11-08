@@ -93,7 +93,8 @@ EOF
     *) usage >&2; exit 2 ;;
 esac
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/run-tests.XXXXXX") || exit 1
+# 目录名不含点：LibreSSL 的 -CAcreateserial 会按路径中第一个点推导序列号文件，写到临时目录之外。
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/run-tests-XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
