@@ -1,22 +1,10 @@
-# 提交署名机械检查（CI 侧复核）。
-#   事件：`pull_request_target`（PR）与 `push` 到 main。
-#   **用 pull_request_target 的理由**：PR 的检查器、规则与公钥必须取自 **base**（main），
-#   否则 PR 自己改检查器／规则就能给自己放行。`pull_request` 的 workflow 与默认 checkout
-#   均来自 PR 合并提交；此处 target 运行默认分支 workflow，并显式 checkout base.sha，
-#   head 侧只 `git fetch` 成对象、只交给检查器 `cat-file` 读 bytes，**绝不 checkout／执行 head 代码**。
-#   PR：按 base.sha..head.sha 核对（逐提交，**不加** `--allow-squash`）。
-#   push 到 main：按 before..after 核对；本仓库只允许 squash 合并，故该路径加 `--allow-squash`
-#   放行「单父＋Committer 为 GitHub web-flow＋验签通过」的 squash 提交，并要求其
-#   `Co-authored-by` 非空且逐条合规；双父平台合并仍走原有豁免（保留，见报告）。
-#   注：squash 的「覆盖 PR 内全部作者」无法在该范围机械核对（PR 原始提交不在 before..after），
-#   由合并时人工自核与 PR 事件逐个核对共同保证。
-#   防绕过：base 缺少检查器／规则／公钥时**直接报错退出 2**，不回落 head（回落等于让 PR 自证）。
-#   **bootstrap 说明**：首次安装由本批离线自验（本地跑同一检查器＋identity 组回归）与独立审查
-#   完成 bootstrap；首个引入本 workflow 的 PR 不会触发默认分支尚不存在的本检查；
-#   由维护者按离线自验＋审查结论合入后生效。已有 workflow 但 base 缺依赖时才 exit 2。
-#   权限：`contents: read` 只读（pull_request_target 下也**只**给只读，避免目标仓库写权限被 head 侧影响）。
-#   权威判据仍在本地：提交后、推送前须自行运行同一检查器（见 luno-core/references/delegation.md
-#   〈Git 提交署名〉）。CI 只补一次范围复核，不替代对实际编写者的确认。
+# 提交署名机械检查（CI 复核；权威判据仍是提交后、推送前本地运行同一检查器）。
+#   pull_request_target 运行默认分支的 workflow，并 checkout PR 的 base：检查器、规则与 web-flow 公钥
+#   都取自 base，PR 改它们不能给自己放行。head 只 fetch 成对象交给检查器读字节，绝不 checkout／执行；
+#   base 缺检查器或规则时检查器启动失败（rc=2），不回落 head。
+#   PR：base..head 逐提交核对（不给 --allow-squash）。
+#   push 到 main：before..after，加 --allow-squash 放行经 web-flow 验签的平台 squash 提交。
+#   权限只读：pull_request_target 下也只给 contents: read。
 name: commit-identities
 
 on:
@@ -31,41 +19,11 @@ jobs:
   identities:
     runs-on: ubuntu-latest
     steps:
-      # 固定到完整提交 SHA：actions/checkout v4 = 11d5960a326750d5838078e36cf38b85af677262
-      # （2026-07-16 查得；升级须重新核对 SHA 并改本行注释）
-      # ref：PR 取 base.sha（无则退回 github.sha，即 push 场景的 HEAD）。
+      # actions/checkout v4 固定完整 SHA；升级须重新核对。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
-
-      - name: 取出 base 侧检查器、规则与 web-flow 公钥（防 PR 自改绕过）
-        if: github.event_name == 'pull_request_target'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -eu
-          mkdir -p "$RUNNER_TEMP/guard"
-          # 尽力补齐 base 对象（fetch-depth: 0 通常已含；失败不掩盖，交给下面的 cat-file 判定）
-          git fetch --no-tags --quiet origin "$BASE_SHA" || true
-          if ! git cat-file -e "$BASE_SHA^{commit}"; then
-            echo "::error::base 提交不在本地对象库，无法取可信检查器（历史不完整）"
-            exit 2
-          fi
-          take() {  # take <仓库内路径>：按**与仓库相同的相对布局**写入 guard 目录
-            if ! git cat-file -e "$BASE_SHA:$1" 2>/dev/null; then
-              echo "::error::base 缺少可信检查器或规则；须先完成独立 bootstrap"
-              exit 2
-            fi
-            mkdir -p "$RUNNER_TEMP/guard/$(dirname "$1")"
-            git cat-file blob "$BASE_SHA:$1" > "$RUNNER_TEMP/guard/$1.part"
-            test -s "$RUNNER_TEMP/guard/$1.part"
-            mv "$RUNNER_TEMP/guard/$1.part" "$RUNNER_TEMP/guard/$1"
-          }
-          # 检查器内的 web-flow 公钥按「脚本所在仓库」相对解析，故必须同布局一起取出
-          take tools/check-commit-identities.py
-          take tools/github-web-flow.gpg
-          take skills/luno-core/references/delegation.md
 
       - name: 核对提交署名
         env:
@@ -78,21 +36,17 @@ jobs:
         run: |
           set -eu
           if [ "$EVENT_NAME" = pull_request_target ]; then
-            # head 只作为**数据**取回对象，绝不 checkout／执行（pull_request_target 的 token 有写权限面）
             git fetch --no-tags --quiet origin "$PR_HEAD" || true
             if ! git cat-file -e "$PR_HEAD^{commit}" 2>/dev/null; then
-              # fork PR 的 head 提交可能不能按 SHA 直接取；退到 GitHub 公开的 PR ref，仍只取对象
+              # fork PR 的 head 可能不能按 SHA 直接取；退到 PR ref，仍只取对象
               git fetch --no-tags --quiet origin "+refs/pull/$PR_NUMBER/head" || true
             fi
-            python3 -B "$RUNNER_TEMP/guard/tools/check-commit-identities.py" \
-              --base "$PR_BASE" --head "$PR_HEAD" \
-              --rules "$RUNNER_TEMP/guard/skills/luno-core/references/delegation.md"
+            python3 -B tools/check-commit-identities.py --base "$PR_BASE" --head "$PR_HEAD"
           else
-            case "$PUSH_BEFORE" in
-              0000000000000000000000000000000000000000)
-                echo "::error::push 前值为全零：无可信基线，未做署名检查"
-                exit 2 ;;
-            esac
+            if [ "$PUSH_BEFORE" = 0000000000000000000000000000000000000000 ]; then
+              echo "::error::push 前值为全零：无可信基线，未做署名检查"
+              exit 2
+            fi
             python3 -B tools/check-commit-identities.py --base "$PUSH_BEFORE" --head "$PUSH_AFTER" \
               --allow-squash
           fi
