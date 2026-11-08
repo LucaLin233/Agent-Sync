@@ -71,6 +71,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / 'tools' / 'check-commit-identities.py'
 LUNO = ('LUNO', 'luno@local')
 FORGE = ('FORGE', 'forge@local')
+LENS = ('LENS', 'lens@local')
 OTHER = ('someone', 'someone@example.invalid')
 PLATFORM = ('GitHub', 'noreply@github.com')
 SIGNER = 'Test Signer <test-signer@example.invalid>'
@@ -93,11 +94,11 @@ def load_tool():
 
 
 
-def rule_text(luno=LUNO[1], forge=FORGE[1]):
+def rule_text(luno=LUNO[1], forge=FORGE[1], lens=LENS[1]):
     """合成规则文件：与仓库 delegation.md〈Git 提交署名〉段同形态，身份取自参数。"""
     return ('# 夹具规则\n\n## Git 提交署名\n\n'
-            'Git提交按实际编写者设置 Author：LUNO 使用 `LUNO <%s>`，FORGE 使用 `FORGE <%s>`。\n'
-            '平台自动生成的合并提交保留平台身份。\n\n## 其他段\n\n不相关正文。\n' % (luno, forge))
+            'Git提交按实际编写者设置 Author：LUNO 使用 `LUNO <%s>`，FORGE 使用 `FORGE <%s>`，LENS 使用 `LENS <%s>`。\n'
+            '平台自动生成的合并提交保留平台身份。\n\n## 其他段\n\n不相关正文。\n' % (luno, forge, lens))
 
 
 def ident(pair):
@@ -326,7 +327,7 @@ class Base(unittest.TestCase):
 
     def verdict(self, proc, rc, *needles):
         out = proc.stdout + proc.stderr
-        for secret in (LUNO[1], FORGE[1], OTHER[1], PLATFORM[1], PLACEHOLDER):
+        for secret in (LUNO[1], FORGE[1], LENS[1], OTHER[1], PLATFORM[1], PLACEHOLDER):
             self.assertNotIn(secret, out, '输出不得含邮箱或占位形态')
         self.assertNotIn('@', out, '输出不得含任何 @ 串')
         self.assertEqual(proc.returncode, rc, out)
@@ -348,10 +349,17 @@ class PositiveTest(Base):
         base, head = self.repo.line(FORGE, LUNO)
         self.verdict(self.repo.run(base, head), 0, '通过')
 
-    def test_coauthor_allowed(self):
-        base, head = self.repo.line(
-            FORGE, FORGE, message='subject\n\nCo-authored-by: LUNO <%s>\n' % LUNO[1])
+    def test_lens_author_forge_committer(self):
+        # LENS 制稿、FORGE 代提交：作者保留实际编写者 LENS，Committer 记实际操作者
+        base, head = self.repo.line(LENS, FORGE)
         self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_coauthor_allowed(self):
+        for pair in (LUNO, LENS):
+            with self.subTest(pair=pair[0]):
+                base, head = self.repo.line(
+                    FORGE, FORGE, message='subject\n\nCo-authored-by: %s <%s>\n' % pair)
+                self.verdict(self.repo.run(base, head), 0, '通过')
 
     def test_midbody_coauthor_not_parsed(self):
         # 同 git 口径：尾部不是 trailer 块时，正文中段的同名行不参与解析
@@ -484,6 +492,13 @@ class SquashTest(Base):
         problems, _ = self.inspect(
             message='squash\n\nCo-authored-by: nobody <%s>\n' % OTHER[1])
         self.assertIn('Co-authored-by#1 身份不在署名表内', problems)
+
+    def test_squash_lens_coauthor_accepted(self):
+        # PR 内 LENS 制稿的提交被 squash：收口者按原字节写一行 LENS 尾署即合规
+        problems, kind = self.inspect(
+            message='squash\n\nCo-authored-by: LENS <%s>\n' % LENS[1])
+        self.assertEqual(kind, 'squash')
+        self.assertEqual(problems, [])
 
     def test_squash_duplicate_coauthor_deduped(self):
         # 并集去重：PR 内多个提交同属 FORGE，收口者按原字节各写一行 → 同一身份重复只计一次
@@ -722,11 +737,23 @@ class NegativeIdentityTest(Base):
         base, head = self.repo.line(('FORGE', LUNO[1]), LUNO)
         self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
 
+    def test_lens_name_with_foreign_email(self):
+        base, head = self.repo.line(('LENS', LUNO[1]), LUNO)
+        self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+
     def test_lowercase_name(self):
         for name in ('forge', 'Luno', 'luno', 'Forge'):
             with self.subTest(name=name):
                 base, head = self.repo.line((name, FORGE[1]), LUNO)
                 self.verdict(self.repo.run(base, head), 1, 'author')
+
+    def test_lens_name_case_sensitive(self):
+        # 单故障注入：仅改作者名大小写，邮箱仍是 LENS 的正确地址，其余条件同正控
+        # （LENS 作者＋FORGE 代提交），故失败只能来自大小写敏感。
+        for name in ('lens', 'Lens', 'leNs'):
+            with self.subTest(name=name):
+                base, head = self.repo.line((name, LENS[1]), FORGE)
+                self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
 
     def test_bad_committer(self):
         base, head = self.repo.line(LUNO, ('LUNO', OTHER[1]))
@@ -828,12 +855,29 @@ class RulesTest(Base):
         self.verdict(self.repo.run(base, head), 2, '缺少')
 
     def test_duplicate_identity(self):
-        text = rule_text().replace('平台自动生成的合并提交保留平台身份。',
-                                   '平台自动生成的合并提交保留平台身份。\n\nLUNO <%s>' % LUNO[1])
+        for pair in (LUNO, FORGE, LENS):
+            with self.subTest(pair=pair[0]):
+                text = rule_text().replace(
+                    '平台自动生成的合并提交保留平台身份。',
+                    '平台自动生成的合并提交保留平台身份。\n\n%s <%s>' % pair, 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 2, '身份重复')
+
+    def test_missing_lens_identity(self):
+        text = rule_text().replace('，LENS 使用 `LENS <%s>`' % LENS[1], '', 1)
         self.assertNotEqual(text, rule_text())
         self.repo.rules.write_text(text, encoding='utf-8')
         base, head = self.repo.line()
-        self.verdict(self.repo.run(base, head), 2, '身份重复')
+        self.verdict(self.repo.run(base, head), 2, '缺少 LENS')
+
+    def test_two_identities_same_email(self):
+        for a, b in ((LUNO, FORGE), (LUNO, LENS), (FORGE, LENS)):
+            with self.subTest(a=a[0], b=b[0]):
+                self.repo.rules.write_text(rule_text(**{a[0].lower(): b[1]}), encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 2, '同一邮箱')
 
     def test_placeholder_form(self):
         for text in (rule_text(luno=PLACEHOLDER), rule_text(forge=PLACEHOLDER),
