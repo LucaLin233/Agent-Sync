@@ -1,6 +1,6 @@
 # 接口与契约（CCHP 控制面）
 
-本文件改写自上游 `CCH-HQ/cchp-cli`（CLI 0.1.3 / spec v1.0.12）的 agent 指南、输出契约、安全模型和认证、错误、分页文档，只保留本端用得到的判据。列表形状、操作字段和分页一律在命中操作时以当前内置 spec（`cchp schema`、`cchp commands show`）为准，这里不缓存。
+本文件的判据以 CLI 0.1.3 / spec v1.0.12 为基线。列表形状、操作字段和分页一律在命中操作时以当前内置 spec（`cchp schema`、`cchp commands show`）为准，这里不缓存。
 
 ## 两个入口
 
