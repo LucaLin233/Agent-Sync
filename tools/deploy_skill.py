@@ -525,10 +525,27 @@ def zip_members(blob, stage):
         raise Fail(stage, "ZIP 不可读（%s）" % exc.__class__.__name__)
 
 
+CACHE_SEGMENT = "__pycache__"
+CACHE_SUFFIX = ".pyc"
+
+
+def cache_member_problems(members):
+    """候选清单内建禁令：成员含 __pycache__ 路径段或以 .pyc 结尾即拒，与登记无关。"""
+    bad = sorted((rel for rel in members
+                  if not isinstance(rel, str) or CACHE_SEGMENT in rel.split("/")
+                  or rel.endswith(CACHE_SUFFIX)), key=str)
+    if not bad:
+        return []
+    shown = "，".join(map(safe_path, bad[:5]))
+    more = "（另有 %d 项）" % (len(bad) - 5) if len(bad) > 5 else ""
+    return ["候选清单含 Python 缓存文件（__pycache__ 路径段或 .pyc，登记不得放行）：［%s］%s"
+            % (shown, more)]
+
+
 def package_problems(entries, name, members, body_contract):
     if not entries:
         return ["空包（源内无文件）"]
-    problems = []
+    problems = cache_member_problems(members)
     for rel, path in entries:
         mode = os.stat(path).st_mode & 0o7777
         if mode != 0o644:

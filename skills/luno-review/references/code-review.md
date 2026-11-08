@@ -59,3 +59,5 @@ CI 核对最新的 HEAD、实际运行的套件和日志。GitHub 查询按 `gh 
 - 无法当批处理的发现按 `luno-core`〈执行闭环〉说明实际处置与责任；只有已授权且确需外部跟踪时建立 issue，不以口头「以后处理」冒充闭环。
 - 分歧优先级：**技术事实与数据 > 风格指南 > 工程设计原则 > 代码库一致性**
 - 作者有完整上下文并坚持时，优雅接受推翻；评代码不评人
+
+来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock；Copyright (c) 2025 Jesse Vincent；不强制 TDD；OpenMinis 许可按 2026-10-25 本地决定处理，README 的 Apache-2.0 标注冲突保留，不作法律适用结论或扩大分发授权；原市场整包许可未决，GitHub 长版未整体采用。完整许可随包见 ../LICENSE.matt-pocock.txt、../LICENSE.obra-superpowers.txt、../LICENSE.openminis.txt；固定提交、取材路径与日期见仓库 skills-sources.md。

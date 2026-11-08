@@ -11,7 +11,7 @@
 ## 会话、Python 和读图
 
 - `terminalExec` 按实际工具定义建立或复用 `session_id`；命令用绝对路径，不把跨调用的 `cd`、`export` 或别名当作已保存的状态（实测 `export` 不跨调用保留，见基线）。
-- `pythonExec` 读取工具返回的 `output`、`stderr` 和 `exit_code`。MCP 的 Python 结果没有 REST Task 的 `status`，不能伪造状态，也不能改用 Task 轮询来判定 MCP 调用。官方文档说它支持用 PEP 723 脚本元数据声明第三方依赖，但依赖安装、缓存、版本和执行效果都没验证过，不能当作已承诺的能力。
+- `pythonExec` 读取工具返回的 `output`、`stderr` 和 `exit_code`。MCP 的 Python 结果没有 REST Task 的 `status`，不能伪造状态，也不能改用 Task 轮询来判定 MCP 调用。官方文档说它支持用 PEP 723 脚本元数据声明第三方依赖，本资源未提供依赖安装、缓存、版本或执行效果的验证证据，不能据此把 PEP 723 当作已承诺的能力。
 - `readImage` 只有取得完整的 image 内容才算读图成功：先解码 base64，核对 MIME、字节长度或哈希、图像能解码和目标完整，再做本机的视觉读取；只拿到 `file_path`、`mime_type`、`size_bytes` 等元数据不算成功。
 - `computerUse` 和 `CU:<worker_id>` 路径按禁用处理；这表示不依赖它，不表示服务端不可用。工具列表里有没有它，都不构成访问控制结论。
 
@@ -25,7 +25,7 @@
   ```
 
 - 历史实测（2026-11-01，实例版本未知）：`mode=async` 返回 `task_id` 和同源的 `status_url`，用相同认证在同一来源查询；要设置客户端超时和总轮询预算，有限次取得终态。提交时遇到 HTTP 502/504 或状态查询失败，有 ID 就先在预算内查询；没有 ID、查不到终态或状态不明，都按结果未知处理，不盲目重试。
-- 成功要同时满足 `status=succeeded` 和 `exit_code=0`，并核对 `result.output`、`result.stderr` 和目标完整性。目前没有定义取消流程；关闭或 404 不能证明容器已删除或回收。每个新 Task 用唯一的 `request_id`；文档里的幂等不作为重试的保证。
+- 成功要同时满足 `status=succeeded` 和 `exit_code=0`，并核对 `result.output`、`result.stderr` 和目标完整性。本资源未定义取消流程；关闭或 404 不能证明容器已删除或回收。每个新 Task 用唯一的 `request_id`；文档里的幂等不作为重试的保证。
 
 ## 依赖与产物回传
 

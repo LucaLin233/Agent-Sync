@@ -515,6 +515,31 @@ class LocalPackage(Case):
                     self.assertEqual(os.stat(str(repo.src / "scripts/run.sh")).st_mode & 0o777,
                                      0o755, "不得压平源权限")
 
+    def test_cache_members_refused_without_inventory_help(self):
+        """__pycache__ 路径段与 .pyc 由候选清单内建拒绝：登记与否都拒，普通文件正控不退。"""
+        # 错误文本用的是 ZIP 成员名（技能根相对名），不是 repo 相对路径
+        probes = (("registered __pycache__", "__pycache__/fixture.cpython-311.pyc", True,
+                   "［__pycache__/fixture.cpython-311.pyc］"),
+                  ("registered .pyc", "references/stray.pyc", True, "候选清单含 Python 缓存文件"),
+                  ("unregistered __pycache__", "__pycache__/orphan.cpython-311.pyc", False,
+                   "候选清单含 Python 缓存文件"))
+        for label, rel, register, needle in probes:
+            with self.subTest(label):
+                repo = self.repo()
+                write(repo.src / rel, b"\x00cache")
+                if register:
+                    repo.register()          # live() 现读：坏成员被显式登记，不靠清单差异拦
+                self.assert_fail(pack_inproc(repo), 2, "本地校验", needle)
+                self.assertEqual(repo.artifacts(), [], "拒绝时不得写出候选")
+                self.assertEqual((repo.lh_calls(), repo.sdk_imported()), ([], False))
+        repo = self.repo()
+        write(repo.src / "references/notes.txt", "普通文件\n")
+        repo.register()
+        rc, out, err = repo.run(repo.args())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(zip_members(repo.candidate())),
+                         ["SKILL.md", RES, "references/notes.txt"])
+
     def test_inventory_must_equal_package(self):
         repo = self.repo()
         repo.register(resources=[RES, "references/ghost.md"])

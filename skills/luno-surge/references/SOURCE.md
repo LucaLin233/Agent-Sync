@@ -67,3 +67,5 @@
 ## 第三方精选改写
 
 `platform-compatibility.md` 和 `diagnostics.md` 里的 CoreDevice/RSD 同机回环内容，精选改写自 `OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00`（2026-10-25 本地核对），不是 Surge.app 的官方更新，在线可取性和当前设备行为没复核。上游许可按 MIT 处理，许可原文随包保留为 `LICENSE.openminis.txt`（根 LICENSE）和 `LICENSE.openminis-ios-dev.txt`（`ios-dev/LICENSE`）；README 标 Apache-2.0 的不一致及其裁定见仓库的 `skills-sources.md`。这些附件只用于许可通知和溯源，不产生新的发布授权。
+
+上述 OpenMinis 材料：Copyright (c) 2026 OpenMinis；Copyright (c) 2026 OpenMinis contributors；2026-10-25 本地决定按 MIT 处理，根 LICENSE 与 README 标 Apache-2.0 的不一致仍保留。本地决定不是法律适用结论，不授权扩大分发；在线可取性及当前设备行为未复核。

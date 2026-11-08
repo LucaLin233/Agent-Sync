@@ -19,10 +19,12 @@ CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provi
 路径相对技能根，按总控的加载规则读取：
 
 - 任何实际的 CLI 或 API 调用，以及认证、结果契约、错误码、分页、重试、流式和下载的解释：`references/interfaces.md`。
-- 只读的业务查询（用量、失败请求、审计等）：`references/workflows.md` 的对应节。
-- 任何写入、恢复、覆盖或转发相关的变更（含 provider/key/endpoint、配额、LLM token、导入）：读完整的 `references/workflows.md`，其中〈本组织约定〉适用于所有写入。
-- 请求/响应覆盖规则（request-overrides，旧称「请求过滤器」）的读取、解释、草稿验证和任何写操作：`references/coverage-rules.md`。
-- 生产写入或不可逆操作前另需备份时（如导入覆盖），按 `luno-ops` 的远端文件与备份资源做改前备份和改后回读；单个对象的启停用〈配置变更前的快照〉即可。
+- 业务操作、解释、建议或结论：读 `references/workflows.md` 的篇首共用前置及命中业务完整节：用量→〈用量与耗材〉，失败请求→〈失败请求定位〉，provider/key 启停、撤销或删除→〈provider 与 key 的启停、撤销〉，provider/endpoint 创建→〈provider 与 endpoint 的创建〉，key 创建、更新、倍率、探测或测活→〈key 的创建、更新与倍率〉，配置继承、会话复用或恢复→〈配置继承与恢复〉，审计→〈审计追溯〉，成员/配额→〈成员与配额〉，LLM token→〈LLM token〉，导入→〈CC Hub 导入〉。跨项取并集；纯接口认证或分页咨询不触发业务节。
+- 写入、恢复、覆盖或转发变更（含覆盖规则）另连读 `references/workflows.md` 的〈本组织约定〉〈配置变更前的快照〉〈配置继承与恢复〉及目标业务完整节；转发变更再读〈转发相关变更的验收与切换〉，配额写入再读〈用量与耗材〉。新建 provider 或 key 的增减、启停、撤销、测活，另读〈key 的创建、更新与倍率〉；删除 provider/key 另读〈provider 与 key 的启停、撤销〉。组织约定中的跨节指针仅在对应业务命中时连读，不使所有写入加载无关业务；无法确定分支则全文。
+- 请求/响应覆盖规则（request-overrides，旧称「请求过滤器」）的读取、解释、建议、结论、草稿验证和任何写操作：`references/coverage-rules.md`；实际调用或涉及认证、结果、错误、分页、重试契约时另读 `references/interfaces.md`；写入及跨业务比较仍按上述触发连读相应完整节。
+- 生产写入或不可逆动作前：必须完整加载 `luno-ops`，按其〈资源与触发〉读取远端落位／备份资源并执行改前备份与改后回读；授权核对、秘密面与跨会话交接按 `luno-core`〈授权与安全〉〈执行闭环〉。
+
+- 来源、许可、改写边界与上游更新核对：`luno-cchp/SOURCE.md`（不作普通调用的加载前置；溯源、再分发或判断是否跟版时完整读取）。
 
 ## 执行位置与版本门槛
 
@@ -68,3 +70,5 @@ CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provi
 ## 输出
 
 结论先行：操作和目标实例、实际命令或 operationId、关键字段（用量、状态、`request_id`）、没执行的项和不确定之处。有变更时补上改前状态、改后回读结果和回滚方式；影响转发时另报链路验证结果或没验证的原因（判据见 `references/workflows.md`〈转发相关变更的验收与切换〉）。
+
+来源与许可：CCH-HQ/cchp-cli 的 MIT 精选改写；Copyright (c) 2026 the cchp contributors；完整许可见 LICENSE.upstream.txt；取材基线、排除项与跟版条件见包内 luno-cchp/SOURCE.md。

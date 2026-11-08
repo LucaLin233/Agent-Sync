@@ -1,6 +1,6 @@
 # Minis 客户端配置
 
-本资源的操作只在 Minis 端可用。
+本资源的操作只在 Minis 端可用。配置任务必读本说明及〈配置接口〉，其余按入口命中的完整节与交叉依赖；SOUL 或技能写入必须连读〈记忆与生效真源〉，分支不明则全文。
 
 ## 配置接口
 
@@ -11,7 +11,7 @@
 
 ## 子代理与模型
 
-- 子代理条目在 App UI 配置。内置的通用子代理在 `subagents.general.instructions`（roster 显示为 `builtin.general`）。instructions 的字符上限见 `minis-config topic-help subagents`（LENS/FORGE 同这个值），其他条目不外推。
+- 子代理条目在 App UI 配置。内置的通用子代理在 `subagents.general.instructions`（roster 显示为 `builtin.general`）。instructions 的字符上限见 `minis-config topic-help subagents`（原核对记录中 LENS/FORGE 同值，原日期和版本未记录；当前值需重核），其他条目不外推。
 - 子代理的工具和上下文能力按当前手册和实际运行面核对，不外推到两端；派发按 `luno-core/references/delegation.md`，身份和采纳按 `luno-review`。retry 或 resume 之后尤其要核对任务、实际角色和模型组；`minis-sessions-cli status` 只能作为可见字段的证据，缺必要元数据就标「通道身份未验证」，不用角色自述补齐。
 - **生效窗口**由分组的 `contextLimitTokens` 决定，**分组优先于模型条目**的 `contextWindowOverride`/`contextWindowTokens`；关掉「Limit Context Window」会回落到条目值，再打开后**要回读当前分组的生效值**，不用历史观测代替。
 - 模型不可用时，按分组的解析结果和报错判断，分清「配置已保存」「分组已绑定」「调用实际成功」三件事。

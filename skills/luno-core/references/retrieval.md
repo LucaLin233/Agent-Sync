@@ -23,3 +23,5 @@
 
 - URL 的路径、查询或片段里含有凭据、userinfo、令牌或签名参数、个人或内部信息的，私网或本地地址，以及依赖登录态的页面，都不得转发；不附带浏览器 Cookie 或认证头。转发授权或目标是否公开不明确时，不用这个回退，也不借代理绕过访问控制。
 - 返回结果要核对目标、关键段落和日期；不把代理生成的摘要、拦截页或缓存当作完整的最新原文。上面的检索顺序和秘密边界不变。
+
+来源与许可：S1–S5 及 OpenMinis 的 MIT 精选改写；Copyright (c) 2026 Exa Labs, Inc.；Copyright (c) 2025 Exa Labs；Copyright (c) 2026 Keenable；Copyright (c) 2026 OpenMinis；完整 MIT 通知见 ../LICENSE.retrieval-sources.txt。溯源、追新、取材边界或再分发核对时完整读取 `references/retrieval-sources.md`，普通检索不自动加载；历史证据不证明当前工具可用。

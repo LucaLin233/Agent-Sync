@@ -55,3 +55,5 @@
 ## 超时与重试
 
 `--timeout` 默认 60 秒。读请求在网络失败和 5xx 后会自动重试两次；**CLI 对变更不自动重试**。超时发生在请求发出前是 `not_sent`，发出后没收到应答是 `unknown_outcome`。人工接续前先查真实现状，确认原因和授权；只有操作支持、并且已经返回或发送过 `idempotency_key` 时，才复用这个键。没有幂等头的操作按其业务专节处理；request-overrides 的写入没有幂等头，见 `references/coverage-rules.md`。
+
+来源与许可：CCH-HQ/cchp-cli 的 MIT 精选改写；Copyright (c) 2026 the cchp contributors；完整许可见 ../LICENSE.upstream.txt；取材基线、排除项与跟版条件见包内 luno-cchp/SOURCE.md。

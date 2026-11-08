@@ -39,7 +39,7 @@
 
 **同步注意**：iOS 上的改动会立即上传 iCloud，Dropbox 在下次打开 App 时同步。Surge 的 iCloud Drive 文件夹超过 200 个文件和文件夹时后台同步不可用，只影响该目录的 profile 在 App 关闭期间的修改，不泛化为所有 profile 或前台编辑的上限。
 
-**内置 MCP**：默认关闭，端点是 POST `/v1/mcp`，用 `http-api-mcp=true` 启用；stateless Streamable HTTP，和 HTTP API 共用 key，可以用 `X-Key` 或新版的 Bearer。`get_profile_section`/`replace_profile_section` 通过回传 revision 编辑；工具注解不代替授权，iOS 6 的 MCP 另需核对订阅权益。不新建 MCP 服务，也不自动启用。官方 CLI `profile section set <name> <file|-> [revision]` 的本地文件和 stdin 转换不能照搬到 Controller 桥上。
+**内置 MCP**：默认关闭，端点是 POST `/v1/mcp`，用 `http-api-mcp=true` 启用；stateless Streamable HTTP，和 HTTP API 共用 key，可以用 `X-Key` 或新版的 Bearer。`get_profile_section`/`replace_profile_section` 通过回传 revision 编辑；工具注解不代替授权，iOS 6 的 MCP 另需核对订阅权益。本资源不授权新建或启用 MCP；确需新建或启用时，先核当次授权、实例版本与权益条件，不自动执行。官方 CLI `profile section set <name> <file|-> [revision]` 的本地文件和 stdin 转换不能照搬到 Controller 桥上。
 
 ## 用 `policy-descriptor` 测未配置的节点
 

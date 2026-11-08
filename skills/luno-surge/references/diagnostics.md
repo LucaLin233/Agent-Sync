@@ -59,3 +59,5 @@ surge-cli --raw proxy-runtime-status POLICY::…
 - TCP connect 成功不等于协议成功：任意端口都能瞬间连上却没有数据，可能是假通。要分别确认 TCP、Pair-Verify、RSD 会话和获准的只读业务返回。
 - 上游要求导入模块后重启 VPN。不为验证而自动导入、启停模块或重启 VPN；需要的动作先列出影响和回滚，按入口和既有授权执行。前提没满足就不能说验证通过。
 - 配对凭据或设备访问缺授权时停止这一步，不读凭据文件取密。
+
+来源与许可：OpenMinis/MinisSkills，MIT 精选改写；Copyright (c) 2026 OpenMinis；Copyright (c) 2026 OpenMinis contributors；本地许可决定与边界见本包 references/SOURCE.md〈第三方精选改写〉。完整许可随包见 ../LICENSE.openminis.txt、../LICENSE.openminis-ios-dev.txt；固定提交、取材路径与日期见仓库 skills-sources.md。

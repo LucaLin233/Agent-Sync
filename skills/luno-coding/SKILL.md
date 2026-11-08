@@ -29,3 +29,5 @@ description: 代码编写、修复、重构与审查的实施侧核对：最小�
 ## 交付
 
 交实际命令、结果、未验证及原因；文件存在或“应该没问题”不代证据。
+
+来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock；Copyright (c) 2025 Jesse Vincent。完整许可随包见 LICENSE.matt-pocock.txt、LICENSE.obra-superpowers.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
