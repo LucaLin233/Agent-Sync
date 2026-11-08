@@ -1164,8 +1164,7 @@ class LauncherTrust(Case):
         self.assertEqual(h.repo.artifacts(), [key_of(NAME)], "只有本地候选包，伪 lh 未被执行")
 
     def test_non_allowlisted_path_shapes_are_refused(self):
-        """每种形态独立 Harness。"""
-        similar = self.work / "usr" / "local" / "bin2"      # 相似前缀目录
+        similar = self.work / "usr" / "local" / "bin2"
         write(similar / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
         cwd = self.work / "cwd"
         write(cwd / "rel-bin" / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
@@ -1189,7 +1188,7 @@ class LauncherTrust(Case):
     def test_no_lh_on_path_is_refused(self):
         h = self.harness()
         h.env["PATH"] = "/usr/bin:/bin"
-        self.assertIsNone(shutil.which("lh", path=h.env["PATH"]), "该 PATH 确实没有 lh")
+        self.assertIsNone(shutil.which("lh", path=h.env["PATH"]))
         self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
         self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets, h.platform.requests),
                          ([], [], [], []))
@@ -1223,7 +1222,7 @@ class LauncherTrust(Case):
                                   h.platform.requests), ([], [], [], []))
 
     def test_non_executable_real_target_guard_branch(self):
-        """软链入口＋真实目标注入不可执行：which(entry) 仍命中，产品走 access 守卫。"""
+        """软链入口＋真实目标不可执行：which 仍命中，走 access 守卫。"""
         h = self.harness()
         inst = self.work / "opt" / "lobehub"
         write(inst / "cli", "#!/bin/sh\nexit 0\n", mode=0o755)
