@@ -998,6 +998,24 @@ class PackerTest(unittest.TestCase):
             with zipfile.ZipFile(io.BytesIO(blob)) as archive:
                 self.assertEqual(b'two\n', archive.read('references/two.md'))
 
+    def test_package_modes_follow_source_bits_not_root_access(self):
+        """权限保真：以 root 能力模拟 os.access(X_OK) 恒真，模式仍须由源文件 stat 执行位决定。
+
+        旧实现按 os.access 判定，在 iSH/root 上会把 0644 文档打成 0755（本用例转红）；
+        新实现读 st_mode 执行位，doc 保持 0644、script 保持 0755。
+        """
+        with tempfile.TemporaryDirectory(prefix='surge-mode-') as tmp:
+            skill, _script, module = self.isolated(tmp)
+            os.chmod(str(skill / 'references/one.md'), 0o644)
+            os.chmod(str(skill / 'references/two.md'), 0o755)
+            entries = module.collect(skill)
+            with mock.patch.object(os, 'access', lambda *a, **k: True):
+                blob = module.build(entries)
+            with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                modes = {i.filename: i.external_attr >> 16 & 0o7777 for i in archive.infolist()}
+            self.assertEqual(0o644, modes['references/one.md'])
+            self.assertEqual(0o755, modes['references/two.md'])
+
     def test_cli_output_metadata_and_atomic_replace(self):
         with tempfile.TemporaryDirectory(prefix='surge-cli-') as tmp:
             skill, script, _module = self.isolated(tmp)

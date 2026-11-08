@@ -36,10 +36,11 @@ class Guard:
         self._declared = False
 
     def official(self):
-        """可豁免缺件的官方原件路径集合（首次用到时计算一次）。
+        """可豁免缺件的官方原件路径集合（run() 每次确定调用，结果缓存一次）。
 
         只认 luno-surge 对象登记的 OFFICIAL_ORIGINALS 路径，且 manifest 须有对应哈希；
         登记形态不合一律硬错误。没有任何登记时缺件只判未核（rc=3），不冒充通过。
+        由官方缺件分支惰性触发会让原件在位时整段跳过，故 run() 无条件调用。
         """
         if self._official is not None:
             return self._official
@@ -268,6 +269,8 @@ class Guard:
             if not any(x.strip() for x in lines[i:j]): self.problem('义务块为空')
 
     def run(self):
+        # 官方声明每次必核：缺件豁免只放宽“文件不存在”，不因原件在位而跳过登记/manifest 形态校验
+        self.official()
         bodies=self.sources();self.claims(bodies);self.identities();self.obligations(bodies)
         for k in self.hard: print('[结构错误] '+k)
         for k in self.incomplete: print('[检查不完整] '+k)

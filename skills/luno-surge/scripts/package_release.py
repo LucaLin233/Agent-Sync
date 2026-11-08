@@ -85,7 +85,7 @@ def build(entries):
                 if pattern.search(data):
                     raise SecretError(f"Potential secret found in {rel}")
             info=zipfile.ZipInfo(rel,date_time=(2026,1,1,0,0,0))
-            mode=0o755 if os.access(path,os.X_OK) else 0o644
+            mode=0o755 if Path(path).stat().st_mode & 0o111 else 0o644
             info.external_attr=(stat.S_IFREG|mode)<<16
             info.compress_type=zipfile.ZIP_DEFLATED
             archive.writestr(info,data)
