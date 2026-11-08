@@ -344,8 +344,8 @@ class CliRunner(object):
         except OSError:
             raise CleanupRefused("父目录不可达", self.root)
         try:
-            self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根被替换")
             try:
+                self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根被替换")
                 shutil.rmtree(name, dir_fd=pfd)
             except OSError as exc:
                 raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)

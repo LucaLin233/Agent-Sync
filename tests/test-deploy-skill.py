@@ -897,6 +897,50 @@ class TempLifecycle(Case):
         self.assertEqual((keep / "keep.txt").read_text(), "sentinel")
         self.assertNotIn(MARK, out + err)
 
+    def test_parent_fd_lstat_failure_maps_to_fixed_cleanup(self):
+        """第二次父 fd 相对根 lstat 的 PermissionError 不得逸出：固定清理 rc，不覆盖主错。"""
+        real_lstat = os.lstat
+
+        def deny():
+            fired = []
+
+            def lstat(path, *a, **kw):
+                if kw.get("dir_fd") is not None and not fired:
+                    fired.append(1)
+                    raise PermissionError(13, "denied")
+                return real_lstat(path, *a, **kw)
+
+            return lstat
+
+        for branch, fail, want in (("readonly", True, 2), ("view-fail", True, 2),
+                                   ("upload", True, 1), ("readonly", False, 0),
+                                   ("view-fail", False, 2), ("upload", False, 0)):
+            with self.subTest((branch, fail)):
+                h = self.harness()
+                if branch == "readonly":
+                    blob = h.candidate_blob()
+                    h.s3.objects[key_of(NAME)] = blob
+                    h.platform.adopt(blob)
+                if branch == "view-fail":
+                    h.platform.view_rc = 1
+                if fail:
+                    with mock.patch.object(h.mod.os, "lstat", deny()):
+                        rc, out, err = h.run()
+                else:
+                    rc, out, err = h.run()
+                self.assertEqual(rc, want, out + err)
+                self.assertNotIn("Traceback", err)
+                self.assertNotIn(MARK, out + err)
+                if fail:
+                    self.assertIn("清理失败", err)
+                    self.assertNotIn("PermissionError: [Errno", err, "不丢原异常自由报文")
+                    if branch == "upload":
+                        self.assertEqual(h.s3.puts, [key_of(NAME)])
+                    else:
+                        self.assertEqual(h.s3.puts, [])
+                    if branch == "view-fail":
+                        self.assertIn("阶段失败：平台回读｜", err)
+
     def test_cleanup_only_failure_rc_priority(self):
         def deny(op):
             real = getattr(os, op)
