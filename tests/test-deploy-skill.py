@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -781,6 +782,181 @@ class ControlledCli(Case):
         self.assertNotIn(MARK, out + err)
 
 
+# ── 临时根生命周期 ───────────────────────────────────────────────────────────
+
+class TempLifecycle(Case):
+    """D2：临时根身份、共用 close、拒删与错误优先级。"""
+
+    LINE = re.compile(r"临时(\S+)：path=(\S+) dev=(\d+) ino=(\d+) uid=(\d+) mode=(\d+)")
+
+    def capture(self, h):
+        lines, mod, real = [], getattr(h, "mod", h), None
+
+        def log(line):
+            lines.append(line)
+            real(line)
+
+        real = mod.log
+        mod.log = log
+        return lines
+
+    def created(self, lines):
+        return [(m.group(2), int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6), 8))
+                for m in map(self.LINE.match, lines) if m]
+
+    def gone(self, lines, n=5):
+        found = self.created(lines)
+        self.assertEqual(len(found), n)
+        for path, _d, _i, _u, _m in found:
+            self.assertFalse(os.path.lexists(path))
+
+    def sentinel(self):
+        self.n += 1
+        keep = self.work / ("sentinel%d" % self.n)
+        keep.mkdir()
+        (keep / "keep.txt").write_text("sentinel")
+        return keep
+
+    def test_creation_identity_and_cleanup(self):
+        h = self.harness()
+        lines = self.capture(h)
+        seen, real = [], h.platform.view
+
+        def view(args, stage, timeout):
+            if not seen:
+                for path, dev, ino, uid, mode in self.created(lines):
+                    st = os.lstat(path)
+                    seen.append((st.st_dev, st.st_ino, st.st_uid, stat.S_IMODE(st.st_mode)))
+                    self.assertEqual(seen[-1], (dev, ino, uid, mode))
+                    self.assertEqual(mode, 0o700)
+            return real(args, stage, timeout)
+
+        h.mod.run_lh = view
+        rc, out, err = h.run()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(seen), 5)
+        self.gone(lines)
+
+    def test_partial_construction_failure_closes(self):
+        h = self.harness()
+        lines = self.capture(h)
+        real, calls = os.mkdir, []
+
+        def mkdir(path, mode=0o777, **kw):
+            calls.append(path)
+            if len(calls) == 3:
+                raise OSError(13, "denied")
+            return real(path, mode, **kw)
+
+        with mock.patch.object(h.mod.os, "mkdir", mkdir):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("无法建立受控 CLI 环境", err)
+        self.gone(lines, 2)
+
+    def test_business_failure_and_timeout_keep_primary(self):
+        h = self.harness()
+        lines = self.capture(h)
+        h.platform.view_rc = 1
+        rc, out, err = h.run()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("阶段失败：平台回读｜", err)
+        self.gone(lines)
+
+        repo = self.repo()
+        mod = load(TOOL, "deploy_skill_timeout")
+        mod.CLI_LAUNCHERS = (str(repo.bin / "lh"),)
+        lines = self.capture(mod)
+        with mock.patch.dict(os.environ, {"PATH": "%s:/usr/bin:/bin" % repo.bin}, clear=True):
+            mod.freeze_cli_runner(ORIGIN, "k")
+        with mock.patch.object(mod.CliRunner, "call",
+                               side_effect=subprocess.TimeoutExpired(["lh"], 1)):
+            with self.assertRaises(mod.Fail) as ctx:
+                mod.run_lh(["skill", "view"], mod.STAGE_PLATFORM, 1.0)
+        self.assertEqual(ctx.exception.rc, 2)
+        self.assertIn("超过剩余预算", ctx.exception.detail)
+        self.assertEqual(mod.release_cli_runner(), (None, False))
+        self.gone(lines)
+
+    def test_symlink_in_tree_is_refused_and_sentinel_kept(self):
+        keep = self.sentinel()
+        h = self.harness()
+        lines = self.capture(h)
+        real, fired = h.platform.view, []
+
+        def view(args, stage, timeout):
+            if not fired:
+                fired.append(1)
+                os.symlink(str(keep), os.path.join(self.created(lines)[1][0], "link"))
+            return real(args, stage, timeout)
+
+        h.mod.run_lh = view
+        rc, out, err = h.run()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("阶段失败：清理｜", err)
+        self.assertIn("子项为软链", err)
+        self.assertTrue((keep / "keep.txt").exists())
+        self.assertNotIn(MARK, out + err)
+
+    def test_rebind_after_check_keeps_replacement(self):
+        for where in ("root", "home"):
+            with self.subTest(where):
+                keep = self.sentinel()
+                h = self.harness()
+                lines = self.capture(h)
+                real, fired, target = h.mod.os.listdir, [], []
+
+                def listdir(fd, _h=h, _l=lines, _f=fired, _t=target, _w=where):
+                    names = real(fd)
+                    if not _f and isinstance(fd, int):
+                        _f.append(1)
+                        _t.append(self.created(_l)[0 if _w == "root" else 1][0])
+                        os.rename(_t[0], _t[0] + ".moved")
+                        os.mkdir(_t[0], 0o700)
+                        (Path(_t[0]) / "keep.txt").write_text("sentinel")
+                    return names
+
+                with mock.patch.object(h.mod.os, "listdir", listdir):
+                    rc, out, err = h.run()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("清理失败", err)
+                self.assertIn(target[0], err)
+                self.assertTrue((Path(target[0]) / "keep.txt").exists())
+                self.assertTrue(os.path.isdir(target[0] + ".moved"))
+
+    def test_cleanup_only_failure_rc_priority(self):
+        def deny(op):
+            real = getattr(os, op)
+
+            def call(path, *a, **kw):
+                if kw.get("dir_fd") is not None:
+                    raise PermissionError(13, "denied")
+                return real(path, *a, **kw)
+
+            return call
+
+        for view_rc, want in ((0, 1), (1, 2)):
+            with self.subTest(view_rc):
+                h = self.harness()
+                h.platform.view_rc = view_rc
+                with mock.patch.object(h.mod.os, "rmdir", deny("rmdir")):
+                    rc, out, err = h.run()
+                self.assertEqual(rc, want, out + err)
+                self.assertIn("清理失败", err)
+                self.assertIn("home/", err)
+                if view_rc:
+                    self.assertIn("阶段失败：平台回读｜", err)
+                else:
+                    self.assertIn("阶段失败：清理｜", err)
+
+        h = self.harness()
+        with mock.patch.object(h.mod.os.path, "lexists",
+                               side_effect=PermissionError(13, "denied")):
+            rc, out, err = h.run()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("核验不可达", err)
+
+
 # ── 部署流程 ─────────────────────────────────────────────────────────────────
 
 class DeployFlow(Case):
@@ -788,12 +964,21 @@ class DeployFlow(Case):
 
     def test_happy_path(self):
         h = self.harness()
+        rollback = h.repo.out / (NAME + ".predeploy.zip")
+        seen = []
+        put = h.s3.put_object
+
+        def watch(**kw):
+            seen.append((os.stat(str(rollback)).st_mode & 0o7777, sha(rollback.read_bytes())))
+            return put(**kw)
+
+        h.s3.put_object = watch
         rc, out, err = h.run()
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(h.s3.puts, [key_of(NAME)])
-        rollback = h.repo.out / (NAME + ".predeploy.zip")
         self.assertEqual(rollback.read_bytes(), h.pre_blob)
-        self.assertEqual(os.stat(str(rollback)).st_mode & 0o7777, 0o644)
+        self.assertEqual(os.stat(str(rollback)).st_mode & 0o7777, 0o600, "自动备份 0600")
+        self.assertEqual(seen, [(0o600, sha(h.pre_blob))])
         installs = h.platform.kinds("install")
         self.assertEqual([r["payload"] for r in installs], [{"url": h.fetched_urls[0]}])
         self.assertEqual(installs[0]["headers"]["X-API-Key"], API_KEY)
@@ -1137,6 +1322,24 @@ class AtomicWrite(Case):
         self.assertEqual(ctx.exception.rc, 2)
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["a.zip"])
+
+    def test_caller_mode_before_publish_and_failure_old(self):
+        mod = load(TOOL, "deploy_skill_atomic_mode")
+        target = self.work / "b.zip"
+        target.write_bytes(b"old")
+        os.chmod(str(target), 0o640)
+        mod.write_atomic(str(target), b"new", mod.STAGE_ROLLBACK, 0o600)
+        self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
+                         (b"new", 0o600))
+        mod.write_atomic(str(target), b"pkg", mod.STAGE_PACK)
+        self.assertEqual(os.stat(str(target)).st_mode & 0o7777, 0o644)
+        for op in ("fchmod", "replace"):
+            with mock.patch.object(mod.os, op, side_effect=OSError("nope")):
+                with self.assertRaises(mod.Fail):
+                    mod.write_atomic(str(target), b"x", mod.STAGE_ROLLBACK, 0o600)
+            self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
+                             (b"pkg", 0o644))
+            self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["b.zip"])
 
 
 # ── 启动器信任：PATH 只用于选择已知安装入口 ──────────────────────────────────
