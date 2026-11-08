@@ -1,50 +1,49 @@
 # 平台与协议差异
 
-本表是协议门槛与平台限制的**唯一执行判据**，也是历史验证结论的唯一出处；其他文件（`SKILL.md`、`controller-cli.md`、`upstream-command-reference.md` 官方原文等）中出现的协议号或版本语句若与本表冲突，以本表为准（那些属上游历史文字，仅作说明）。
+协议门槛、平台限制和历史验证结论只以本文件为准。其他文件（入口、`controller-cli.md`、官方原文 `upstream-command-reference.md` 等）里的协议号或版本说法与本文件冲突时，按本文件执行，那些只是上游的历史文字。
 
-以下是已验证版本快照，不代表当前运行版本。能力异常时读取 `version`，核对平台和 Controller Protocol。
+下面是有日期的版本快照，不代表当前运行的版本。能力异常时先跑 `surge-cli --raw version`，核对 Surge、Core、平台和 Controller Protocol；不要把 App 发行版本和 Controller 内部版本混为一谈。
 
-### Plugin System（macOS only）
+## 命令门槛
 
-Protocol ≥24 的在线插件管理仅限 macOS：`plugin list|info|parameters|load-unpacked|configure|enable|disable|select|uninstall`。本版本的 `plugin install` 尚未开放；`plugin validate|pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，因此 Minis/iSH 客户端不实现这两个子命令。配置插件前先用 `parameters` 读取 schema，API Key 等敏感参数不得出现在回复、日志或公开包中。完整格式见 `plugin-authoring.md`（官方原件，不随公开仓库分发，部署时从官方包取件；未装入即停依赖）。
+| 能力 | 最低 Controller Protocol | 平台 | 说明 |
+|---|---|---|---|
+| `rule`、`dns`、`http probe`、`security ban` | 20 | 共享 | |
+| `geoip`、性能/规则使用/虚拟 IP 的 dump、`benchmark rule-matching` | 22 | 共享 | |
+| `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
+| `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
+| `restart-engine` | 24 | 共享 | 和差量 `reload` 不同：关闭连接、清除缓存和临时规则 |
+| logbook 的大小截断语义 | 27 | 共享 | 下面各行依据官方 Mac 6.11.0 build 12680 命令参考 |
+| `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
+| `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |
+| `summary.network` 的 ipv4/ipv6 | 30 | 共享 | |
+| `profile section list`/`get`/`set` | 31 | 共享 | 本端桥不实现 `set`，见下文 |
+| `summary.network` 的 encrypted-dns | 33 | 共享 | |
+| `traffic.testBytes` | 35 | 共享 | |
+| `capture-filter` | 36 | 共享 | 改捕获过滤会影响记录范围，按既有授权和数据最小化执行 |
 
-引用上游插件示例时，不把 `insecure: true` 或命令行 `token=…` 当作本端默认：保持证书校验；密钥只用已授权注入变量经已核安全入口传递，无法避免进入参数/日志时暂停相关配置。
+27 及以上各行只是官方给出的能力条件，不代表本端设备已验收；不要从历史上的 Protocol 25 推断它们可用，也不要把 HTTP 版本条件当成 Controller 门槛。
 
-### VMNET（macOS only）
+`plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；完整格式见 `plugin-authoring.md`（官方原件，部署时取件，没装入就停止依赖）。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
 
-Protocol 23 新增：
+## Surge 6：分节编辑与内置 MCP
 
-```sh
-surge-cli --raw vmnet status
-surge-cli --raw vmnet arp
-surge-cli --raw vmnet ndp
-surge-cli --raw vmnet ra
-```
+- HTTP 分节编辑和内置 MCP 的最低版本是 iOS 6.0.0 / Mac 6.11.0，仍要核对所选实例实际的平台、营销版本和 build。2026-11-03 时 iOS 6 的发布页是 TestFlight，不是 App Store 稳定版。
+- iOS 6 的 MCP 另需订阅已解锁或有效试用的权益；装了这个版本或有 TestFlight 资格，都不能证明有这项权益。
+- 是否已经导入官方新版、它的版本和原文哈希，以当前的 `upstream-manifest.json` 为准；拿到安装包不等于已导入。
+- Minis 自建桥不实现 `profile section set` 的本地文件和 stdin 转换，但保留 `list`/`get` 的只读路径，不因为 `set` 的风险一律禁用。官方 `get` 可能返回含密码的真实正文，本端 `--raw` 仍是客户端脱敏的 JSON，两者都不会自动成为获准的回写原稿。读取和安全写入按 `references/http-api.md` 执行；这些新能力没有设备实测，历史的只读和重启验收不扩大到它们。
 
-用于排查 macOS Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管。Surge iOS 返回 `Unsupported command` 属正常平台限制。
+## 历史验证
 
-## Surge 6 增量
+| Controller build | 日期 | 平台与版本 | 覆盖范围 |
+|---|---|---|---|
+| 3822 | — | — | 首次验证 `reload` 和 `restart-engine` 的差异（关闭连接、清除缓存和临时规则） |
+| 3830 | 2026-09-02 | 正式版 Surge iOS 5.22.0（Controller 内部版本 5.102.0），Protocol 25 | 认证、CRLF 文本命令、JSON Lines 响应和 `restart-engine` 的逐项结论 |
+| 3842 | 2026-09-15 | 同上 5.22.0 / Protocol 25 | 复测认证和只读命令；`restart-engine` 未复测 |
+| 3852 | 2026-09-27 | Controller 内部版本 5.102.0 | `scripts/acceptance.sh --controller` 和 `--network` 两档只读验收全部通过（握手与能力、`status`、`summary`、`dump performance`、`rule match`、`rule temp list`、`feature list`、`module list`、`watch speed` 首帧、Prometheus metrics、官方校验服务上传合成的无秘密 profile、`dns lookup`），全程没改 Surge 设置；变更类操作（`restart-engine`、切换 profile）未复测，仍按 3830/3822 |
 
-官方Mac6.11.0 build12680命令参考：profile section需Controller protocol≥31，capture-filter需≥36；不由历史Protocol25推断可用，也不把HTTP版本条件当Controller门槛。HTTP分节编辑与内置MCP最低iOS6.0.0／Mac6.11.0，仍须核所选实例实际平台、营销版本和build；iOS6发布页当前为TestFlight，非App Store稳定版。iOS6的MCP另核订阅解锁／有效试用权益，安装版本或TestFlight资格不证明该权益。
-
-是否已经导入及其版本、原文哈希，须核当前upstream-manifest；取得包不等于已导入。Minis自建桥不实现profile section set的本地文件／stdin转换；保留list/get的只读路径，不因set风险一律禁用。官方get可返回含密码真实正文，本端--raw仍是客户端脱敏JSON，二者均不自动成为获准原稿来源。读取与HTTP安全写入必须遵守 `references/http-api.md`；新能力未设备实测，历史只读／重启验收不扩大适用。
-
-同份原件的其他新增门槛：logbook大小截断语义≥27；dump dns-lookup-times、traffic-stat-hourly及summary.network≥28；policy-usage、traffic-stat-hourly.policy与network-changed事件≥29；summary.network的ipv4／ipv6≥30、encrypted-dns≥33；traffic.testBytes≥35。仅为官方能力条件，不构成本端当前设备验收；捕获过滤变更影响记录范围，仍须按既有授权与数据最小化执行。
-
-## 已知兼容性
-
-- `rule`、`dns`、`http probe`、`security ban` 需要 Controller Protocol ≥20。
-- `geoip`、性能/规则使用/虚拟 IP dump、规则匹配 benchmark 需要 ≥22。
-- `vmnet` 需要 ≥23，且仅限 macOS。
-- `plugin` 在线命令需要 ≥24 且仅限 macOS；iOS 返回 `Unknown command`。
-- `restart-engine` 需要 ≥24；它与差量 `reload` 不同，会关闭连接并清除缓存和临时规则。
-- 后续复测：Controller build **3852**（Surge iOS 5.102.0，2026-09-27）——`scripts/acceptance.sh --controller` 与 `--network` 两档只读验收**全部通过**（Controller 握手与能力、`status`／`summary`／`dump performance`／`rule match`／`rule temp list`／`feature list`／`module list`／`watch speed` 首帧、Prometheus metrics、官方 profile 校验服务上传合成无秘密 profile、`dns lookup`），全程未改 Surge 设置。该结论**只覆盖只读路径**：`restart-engine`、切换 profile 等变更类操作未在 3852 上复测，仍按 3830／3822 的记录。
-- 历史逐项验证（2026-09-02 记录）：正式版 Surge iOS 5.22.0（Controller 内部版本 5.102.0 build 3830）/ Controller Protocol 25 —— 认证、CRLF 文本命令、JSON Lines 响应及 `restart-engine` 的逐项结论来自该 build。
-- 后续复测：同一 5.22.0 / Protocol 25 的 Controller build 3842（2026-09-15）复测了认证与只读命令；`restart-engine` 未在该 build 上复测，其结论仍按 3830 与下面 3822 的记录。
-- `reload` 与 `restart-engine` 的明确差异最初在 Controller build 3822 上验证（关闭连接、清除缓存与临时规则）。
-- Protocol 25 仍兼容旧 JSON `argv` 请求，但本客户端已对齐正式版 Surge Mac 6.9.0 build 12250 的文本编码。以上均为有日期的历史结论，不声明当前运行版本。
-- 遇到 `Unknown command` 或能力异常时，先运行 `surge-cli --raw version` 核对 Surge、Core、平台和 Controller Protocol。
+Protocol 25 仍兼容旧的 JSON `argv` 请求，但本客户端已对齐正式版 Surge Mac 6.9.0 build 12250 的文本编码。
 
 ## CoreDevice/RSD 同机回环（第三方报告，非本机验收）
-上游 ios-dev 报告 Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为该方案门槛；勿混用 App 发行版本与 Controller 内部版本。上游所列验证环境为 iOS 27.0.1/27.1、Surge 5.23.0；其流程要求 Wi-Fi、已开启开发者模式及有效 RemotePairing 配对材料，同机只运行一个相应 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑及前提未核对时不据此执行；不能外推其他系统、实现或全部服务端口。
-来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，ios-dev/SKILL.md、ios-dev/references/loopback.md；2026-10-25 本地核对；许可文件 ios-dev/LICENSE 记载 MIT，README 标 Apache-2.0 的不一致已于 2026-10-25 由本地维护者决定按 MIT 处理（见 skills-sources.md）；精选改写；在线可取性及本机行为未复核；分发时随附 MIT 版权行与许可全文。
+
+上游 OpenMinis ios-dev（2026-10-25 本地核对）报告：Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为门槛（这里是 App 发行版本，不是 Controller 内部版本）。上游列出的验证环境是 iOS 27.0.1/27.1 和 Surge 5.23.0；流程要求 Wi-Fi、已开启开发者模式和有效的 RemotePairing 配对材料，同机只运行一个相应的 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑和前提没核对时不据此执行，也不外推到其他系统、实现或全部服务端口；操作判据见 `references/diagnostics.md`。

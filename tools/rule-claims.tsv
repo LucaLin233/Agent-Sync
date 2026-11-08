@@ -48,7 +48,6 @@ skills/luno-surge/SKILL.md	references/platform-compatibility.md	资源必需	资
 skills/luno-surge/SKILL.md	references/diagnostics.md	资源条件	资源加载边（surge·诊断工作流）
 skills/luno-surge/SKILL.md	references/command-reference.md	资源条件	资源加载边（surge·命令参考）
 skills/luno-surge/SKILL.md	references/plugin-authoring.md	资源条件	资源加载边（surge·插件开发；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/SOURCE.md	资源条件	资源加载边（surge SOURCE·自指）
 skills/luno-surge/references/SOURCE.md	references/command-reference.md	资源条件	资源加载边（surge SOURCE·命令参考）
 skills/luno-surge/references/SOURCE.md	references/plugin-authoring.md	资源条件	资源加载边（surge SOURCE·插件开发指南；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/SOURCE.md	references/upstream-SKILL.md	资源条件	资源加载边（surge SOURCE·上游快照；部署时从官方包取件，仓库不含）
@@ -95,3 +94,4 @@ skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源�
 skills/luno-minis/SKILL.md	references/session-groups.md	资源条件	资源加载边
 skills/luno-lobehub/references/agents.md	references/access.md	资源条件	资源加载边
 skills/luno-lobehub/references/instance.md	references/skills.md	资源条件	资源加载边
+skills/luno-surge/references/platform-compatibility.md	references/diagnostics.md	资源条件	资源加载边
