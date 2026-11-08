@@ -1,7 +1,7 @@
 """Read-only, bounded agentSkills.readResource transport (stdlib only).
 
-Key-bound scope: HTTP sends no workspace header; this is not personal mode.
-No settings files, proxy discovery, redirect handling, retry or CLI fallback.
+No workspace header is sent (key-bound personal scope). No settings files, proxy
+discovery, redirect handling, retry or CLI fallback.
 """
 import base64
 import hashlib
@@ -14,12 +14,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urlsplit
 
-# 受批准 origin 只留 **sha256 pin**（非秘密）：私有域名不进仓库。`LOBEHUB_SERVER` 为必需变量，
-# 缺失／空／与 pin 不符一律固定分类 `configuration`（fail-closed，先于 key 检查与任何 HTTP）。
+# 受批准 origin 只留 sha256 pin（私有域名不进仓库）；缺失或不符即 `configuration`。
 APPROVED_ORIGIN_SHA256 = 'b5da30b40617adaffac73c305fadf7268769014bc938d969e22958e1b0e02a0b'
 ORIGIN_ENV = 'LOBEHUB_SERVER'
 REQUEST_TIMEOUT = 30.0  # I/O wait/cooperative checks, NOT a request wall-clock deadline.
-TOTAL_BUDGET = 300.0  # Per skill including CLI; currently cooperative, NOT hard.
 MAX_RESPONSE = 8 * 1024 * 1024  # HTTP envelope only, NOT total process memory.
 ENDPOINT = '/trpc/lambda/agentSkills.readResource'
 
@@ -70,20 +68,11 @@ def _object(pairs):
 
 
 def connection_context():
-    """Freeze required origin, designated key **and scope** before any CLI/HTTP request.
+    """Freeze (origin, key) before any CLI/HTTP request; fixed classification on failure.
 
-    `LOBEHUB_SERVER` is **required**: a missing/empty value, or one whose sha256 differs from
-    `APPROVED_ORIGIN_SHA256` (the approved origin is pinned, never defaulted), is a fixed
-    `configuration` failure — checked before the key and before any CLI/HTTP request.
-
-    Scope is personal only: this transport sends no `X-Workspace-Id`. An explicit
-    `LOBEHUB_WORKSPACE_ID` is therefore **rejected** (fixed classification
-    `configuration`) instead of being silently ignored — otherwise the read could not be
-    proven to be same-scope as the remote CLI read. The remote CLI is forced into the
-    same personal mode by an empty HOME/XDG (see `CliRunner` in deploy_skill.py),
-    which matches the CLI source precedence
-    `resolveWorkspaceScope`: explicit → `LOBEHUB_WORKSPACE_ID` → persisted
-    (`loadActiveWorkspace`) → personal.
+    Origin must match the sha256 pin. Scope is personal only (no `X-Workspace-Id` is sent), so
+    an explicit `LOBEHUB_WORKSPACE_ID` is rejected rather than ignored; the deploy tool runs the
+    CLI with an empty HOME/XDG so its persisted workspace cannot differ either.
     """
     origin = os.environ.get(ORIGIN_ENV)
     if not origin:
@@ -99,8 +88,8 @@ def connection_context():
 
 
 class ResourceClient:
-    def __init__(self, deadline, context=None):
-        origin, key = connection_context() if context is None else context
+    def __init__(self, deadline, context):
+        origin, key = context
         parsed = urlsplit(origin)
         self.host = parsed.hostname
         self.headers = {'X-API-Key': key, 'User-Agent': 'curl/8.7.1',
