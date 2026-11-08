@@ -13,7 +13,7 @@
 
 ## Surge 6 分节与捕获过滤
 
-官方新快照包含profile section list／get／set和capture-filter；版本／协议唯一判据见 `references/platform-compatibility.md`。官方get可含密码，官方--raw与本端脱敏--raw不是同一接口。本端尚未实现profile section set的本地文件／stdin转换，因此禁止通过本端调用set（含--raw）；现有桥已在建立 Controller 连接、读取文件与取密之前以固定错误拦截该命令（T8 已通过），但该程序护栏不构成对该命令的适配，官方文件/stdin 语义仍不可用。list/get不因该写风险整体禁用，但仍受读前非秘密来源与当次授权限制，不可拿脱敏输出回写。永久内容编辑执行前完整读 `references/http-api.md` 的安全入口规则；本批不通过猜Controller编码实现set。
+官方新快照包含profile section list／get／set和capture-filter；版本／协议唯一判据见 `references/platform-compatibility.md`。官方get可含密码，官方--raw与本端脱敏--raw不是同一接口。本端尚未实现profile section set的本地文件／stdin转换，因此禁止通过本端调用set（含--raw）；现有桥已在建立 Controller 连接、读取文件与取密之前以固定错误拦截该命令，但该程序护栏不构成对该命令的适配，官方文件/stdin 语义仍不可用。list/get不因该写风险整体禁用，但仍受读前非秘密来源与当次授权限制，不可拿脱敏输出回写。永久内容编辑执行前完整读 `references/http-api.md` 的安全入口规则；不通过猜测Controller编码实现set。
 
 ## 必要语法索引
 

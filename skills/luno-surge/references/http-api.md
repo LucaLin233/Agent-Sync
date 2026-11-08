@@ -22,9 +22,9 @@ GET `/v1/profiles/section?name=…`返回无header的content及revision；POST `
 
 iOS改动立即上传iCloud，Dropbox在下次打开App时同步。Surge的iCloud Drive文件夹超过200个文件和文件夹时，后台同步不可用，仅该目录的profiles在App关闭期间受相应修改限制；不泛化为所有profile／前台编辑上限。
 
-内置MCP为默认关闭的POST `/v1/mcp`，启用项http-api-mcp=true；stateless Streamable HTTP，共用API key，可用X-Key或新版Bearer。get_profile_section／replace_profile_section回传revision编辑；工具注解不替代授权，iOS6 MCP另核订阅已解锁／有效试用权益。本批不新建MCP服务或自动启用。官方CLI `profile section set <name> <file|-> [revision]` 的本地文件／stdin转换不能照搬到Controller桥。
+内置MCP为默认关闭的POST `/v1/mcp`，启用项http-api-mcp=true；stateless Streamable HTTP，共用API key，可用X-Key或新版Bearer。get_profile_section／replace_profile_section回传revision编辑；工具注解不替代授权，iOS6 MCP另核订阅已解锁／有效试用权益。不新建MCP服务，也不自动启用。官方CLI `profile section set <name> <file|-> [revision]` 的本地文件／stdin转换不能照搬到Controller桥。
 
-本端入口：`python3 -B scripts/surge_ios.py --confirm-dangerous section replace --input -`；stdin为一份UTF-8 JSON，字段仅name、revision、original、content、backup_dir。写后阶段错误按阶段固定token：读`E_READ_DECODE`／4、写后核验`E_VERIFY_FAILED`／5、写请求`E_REJECTED`／4或`E_WRITE_UNKNOWN`／5（含传输级协议异常，不重试）。本入口的argv形状不合格与stdin不合规都只回固定`E_INPUT`／2且不回显argv，普通`request POST`命中分节路由在JSON解析、取密与联网之前即拒绝。回归为本机合成数据＋本机随机端口夹具（真实子进程入口，含可信CA正向与hostname错配两组TLS用例），不等于设备实测；活动配置变更仍须另有本批授权。
+本端入口：`python3 -B scripts/surge_ios.py --confirm-dangerous section replace --input -`；stdin为一份UTF-8 JSON，字段仅name、revision、original、content、backup_dir。写后阶段错误按阶段固定token：读`E_READ_DECODE`／4、写后核验`E_VERIFY_FAILED`／5、写请求`E_REJECTED`／4或`E_WRITE_UNKNOWN`／5（含传输级协议异常，不重试）。本入口的argv形状不合格与stdin不合规都只回固定`E_INPUT`／2且不回显argv，普通`request POST`命中分节路由在JSON解析、取密与联网之前即拒绝。回归为本机合成数据＋本机随机端口夹具（真实子进程入口，含可信CA正向与hostname错配两组TLS用例），不等于设备实测；活动配置变更仍须另有当次授权。
 
 ## 端点发现
 

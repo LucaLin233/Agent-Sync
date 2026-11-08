@@ -9,7 +9,7 @@
 - 环境变量经 App 设置页维护；引用按变量名，缺失即说明并给创建入口，不换来源。凭据类只读存在性与长度，取值不经对话。
 
 ## 子代理与模型
-- 子代理条目在 App UI 配置。内置通用子代理位于 `subagents.general.instructions`（roster 显示为 `builtin.general`）。instructions 字符上限见 `minis-config topic-help subagents`（本批 LENS/FORGE 同该值），其他条目不外推。
+- 子代理条目在 App UI 配置。内置通用子代理位于 `subagents.general.instructions`（roster 显示为 `builtin.general`）。instructions 字符上限见 `minis-config topic-help subagents`（LENS/FORGE 同该值），其他条目不外推。
 - 子代理的工具/上下文能力按当前手册和实际运行面核，不外推两端；派发依 `luno-core/references/delegation.md`，身份采纳依review。尤其retry/resume后核任务、实际角色与模型组；`minis-sessions-cli status`只作可见字段证据，缺必要元数据标通道身份未验证，不以角色自述补齐。
 - 分组 `contextLimitTokens` 决定生效窗口，**分组优先于模型条目**的 `contextWindowOverride`/`contextWindowTokens`；关掉「Limit Context Window」回落到条目值，再打开后**须回读当前分组的生效值**，不以历史观测代替。
 - 模型不可用时按分组解析结果与报错判断，区分「配置已保存」「分组已绑定」「调用实际成功」。

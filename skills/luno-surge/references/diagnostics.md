@@ -54,4 +54,4 @@ surge-cli --raw proxy-runtime-status POLICY::…
 
 ### CoreDevice/RSD 同机回环
 仅此场景才评估 `[IP Rewrite]` 的目标地址 `reflect` 与该地址 `/32` 的 `tun-included-routes`；先核目标地址、现有路由、模块及配对前提，版本/平台条件依 `references/platform-compatibility.md`。不自动改路由，不整段覆盖既有路由，不移植“无副作用”保证。TCP connect 成功不是协议成功；任意端口瞬连却无数据可能是假通，须区分 TCP、Pair-Verify、RSD 会话与获准的只读业务返回。上游要求导入模块后重启 VPN；不为验证自动导入、启停模块或重启 VPN，所需动作先列明影响及回滚，按入口及既有授权关口执行；未满足前提不得宣称验证通过。配对凭据或设备访问缺授权即停该步，不读凭据文件取密。
-来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，coredevice-toolkit/references/SURGE_LOOPBACK.md、ios-dev/references/loopback.md；2026-10-25 本地核对；许可文件根 LICENSE 与 ios-dev/LICENSE 记载 MIT，README 标 Apache-2.0 的冲突未裁定；精选改写；在线可取性及本机行为未复核，分发前须裁定许可并保留适用通知。
+来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，coredevice-toolkit/references/SURGE_LOOPBACK.md、ios-dev/references/loopback.md；2026-10-25 本地核对；许可文件根 LICENSE 与 ios-dev/LICENSE 记载 MIT，README 标 Apache-2.0 的不一致已于 2026-10-25 由本地维护者决定按 MIT 处理（见 skills-sources.md）；精选改写；在线可取性及本机行为未复核；分发时随附 MIT 版权行与许可全文。

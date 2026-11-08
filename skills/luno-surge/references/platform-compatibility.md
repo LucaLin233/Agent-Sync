@@ -47,4 +47,4 @@ surge-cli --raw vmnet ra
 
 ## CoreDevice/RSD 同机回环（第三方报告，非本机验收）
 上游 ios-dev 报告 Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为该方案门槛；勿混用 App 发行版本与 Controller 内部版本。上游所列验证环境为 iOS 27.0.1/27.1、Surge 5.23.0；其流程要求 Wi-Fi、已开启开发者模式及有效 RemotePairing 配对材料，同机只运行一个相应 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑及前提未核对时不据此执行；不能外推其他系统、实现或全部服务端口。
-来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，ios-dev/SKILL.md、ios-dev/references/loopback.md；2026-10-25 本地核对；许可文件 ios-dev/LICENSE 记载 MIT，README 标 Apache-2.0 的冲突未裁定；精选改写；在线可取性及本机行为未复核，分发前须裁定许可并保留适用通知。
+来源：OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00，ios-dev/SKILL.md、ios-dev/references/loopback.md；2026-10-25 本地核对；许可文件 ios-dev/LICENSE 记载 MIT，README 标 Apache-2.0 的不一致已于 2026-10-25 由本地维护者决定按 MIT 处理（见 skills-sources.md）；精选改写；在线可取性及本机行为未复核；分发时随附 MIT 版权行与许可全文。
