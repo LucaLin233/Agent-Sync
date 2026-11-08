@@ -29,7 +29,7 @@ OFFICIAL_ORIGINALS = {
 OFFICIAL_REPO_PATHS = set(OFFICIAL_ORIGINALS)
 INVENTORY_MANIFEST = 'skills/luno-surge/references/upstream-manifest.json'
 # __OBLIGATIONS__
-OBLIGATIONS = (('skills/luno-lobehub/SKILL.md', '## 范围'), ('skills/luno-review/SKILL.md', '## 审查'), ('skills/luno-ops/SKILL.md', '## 专项执行'), ('skills/luno-writing/SKILL.md', '## 分支'), ('skills/luno-minis/SKILL.md', '## 资源与触发'), ('skills/luno-minis/references/runtime.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-sync/SKILL.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
+OBLIGATIONS = (('skills/luno-lobehub/SKILL.md', '## 范围'), ('skills/luno-review/SKILL.md', '## 审查'), ('skills/luno-writing/SKILL.md', '## 分支'), ('skills/luno-minis/SKILL.md', '## 资源与触发'), ('skills/luno-minis/references/runtime.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-sync/SKILL.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
 
 class Guard:
     def __init__(self, root):

@@ -97,6 +97,6 @@ skills/luno-core/SKILL.md	references/writing-safety.md	资源条件	精简提案
 skills/luno-lobehub/SKILL.md	references/agents.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-ops/SKILL.md	references/ssh.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-lobehub/references/agents.md	luno-core	必需加载	Agent资源前置
-skills/luno-ops/references/ssh.md	luno-core	必需加载	SSH资源前置
 skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
 skills/luno-sync/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
+skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
