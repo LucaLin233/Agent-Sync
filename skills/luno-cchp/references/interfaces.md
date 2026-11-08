@@ -1,91 +1,57 @@
 # 接口与契约（CCHP 控制面）
 
-上游依据：CCH-HQ/cchp-cli@d9da5760a8d2f6ce689c01b98b6c96540513045d（2026-10-25，MIT，CLI 0.1.3／spec v1.0.12）的 `docs/agent-guide.md`、`docs/output-contract.md`、`docs/safety-model.md` 与 `skills/cchp/references/{auth,errors,output-contract,pagination}.md`；本文件为中文精选改写，删除上游面向人的入门叙述，只留本端要用的判据；列表形状、操作字段与分页只在命中操作时以当前内置 spec（`cchp schema`／`cchp commands show` 的 schema 与 `pagination` 描述符）核对，不在此缓存旧表。来源与分层见技能根 `luno-cchp/SOURCE.md`。
+本文件改写自上游 `CCH-HQ/cchp-cli`（CLI 0.1.3 / spec v1.0.12）的 agent 指南、输出契约、安全模型和认证、错误、分页文档，只保留本端用得到的判据。列表形状、操作字段和分页一律在命中操作时以当前内置 spec（`cchp schema`、`cchp commands show`）为准，这里不缓存。
 
-## 两条分支
+## 两个入口
 
-| 分支 | 适用 | 前提 |
-|---|---|---|
-| `cchp` CLI | 默认分支。查询与小范围变更、需要离线查操作与 schema、需要门禁与脱敏 | 已安装 cchp；CLI 的 server 取 `CCHP_GATEWAY_URL`（管理 API 域），配已授权的 `CCHP_TOKEN`；`cchp status --json` 可读 |
-| Management API 直连 | CLI 可用且已从 CLI 取得该操作契约，需要 HTTP 编排（批量读、接入现有 HTTP 客户端） | 同一实例、同一管理 token、同一组织；已从 CLI 取得该操作的 method 与 URL |
-
-CLI 不可用、版本不符或 spec 与实例不匹配时，按 `luno-cchp/SKILL.md`〈执行位置与版本门槛〉停止并报缺口；直连不是缺 CLI 时的替代入口。
-
-直连约束：
-- 路径与方法从 `cchp api <operationId> --dry-run --json` 的 `method`／`url` 取，不凭记忆或第三方文档拼路径；请求体形状以 `cchp schema <operationId> --json` 为准。
-- CLI 的门禁、脱敏、重试与分页在这一分支都**不生效**：写操作须自行加同等前置（改前取证、改后回读；自动重试与人工接续遵守本文件〈超时与重试〉），错误响应不得原样打印含凭据的头。
-- 端点前缀、版本化路径与直连分页参数**需当次实测确认**；未确认前只做只读。
+- **`cchp` CLI**（默认）：查询和小范围变更，离线查操作和 schema，带门禁和脱敏。前提：已安装、server 指向管理面、配了已授权的 `CCHP_TOKEN`、`cchp status --json` 可读。
+- **Management API 直连**：只在 CLI 可用、并已从 CLI 取得该操作契约、需要 HTTP 编排（批量读、接入现有 HTTP 客户端）时使用；同一实例、同一管理 token、同一组织。CLI 不可用、版本不符或 spec 与实例不匹配时按 `luno-cchp/SKILL.md`〈执行位置与版本门槛〉停止，直连不是替代入口。
+  - 路径和方法从 `cchp api <operationId> --dry-run --json` 的 `method`/`url` 取，请求体形状以 `cchp schema <operationId> --json` 为准，不凭记忆或第三方文档拼路径。
+  - CLI 的门禁、脱敏、重试和分页在直连时**都不生效**：写操作要自己做同等的前置（改前取证、改后回读，重试和接续按〈超时与重试〉），错误响应不能原样打印含凭据的请求头。
+  - 端点前缀、版本化路径和直连分页参数**须当次实测确认**，确认前只做只读。
 
 ## 认证
 
-- 管理 token 形如 `cch_auth_live_<prefix>_<secret>`；`cch_llm_live_…` 一类 LLM token 会被拒绝。
-- 一个 token 属于「一个人＋一个组织」；有效权限是人员角色与 token 授权范围的交集。`getMyPermissionSummary` 看现状；被拒时 `denied_reasons` 为 `token_scope` 表示限制来自 token 本身。
-- token 只随请求发往签约服务器的 origin（scheme＋host＋port 全匹配）；重定向到别处即丢弃，不携带 `X-CCH-Organization` 到其他组织。
-- 明文 `http://` 只对回环地址成立。
-- 取凭据只有本技能入口允许的那一种来源；`CCHP_TOKEN_FILE` 与保存态登录不在授权回退序列内。
-- 需要浏览器会话的操作由 `cchp commands --all --json` 标为 `excluded`，无程序化替代。
+- 管理 token 形如 `cch_auth_live_<prefix>_<secret>`；`cch_llm_live_…` 这类 LLM token 会被拒绝。
+- 一个 token 属于「一个人 + 一个组织」，有效权限是人员角色和 token 授权范围的交集。现状用 `getMyPermissionSummary` 查；被拒时 `denied_reasons` 为 `token_scope` 表示限制来自 token 本身。
+- token 只发往签约服务器的 origin（scheme、host、port 全部匹配）；重定向到别处就丢弃，不把 `X-CCH-Organization` 带到其他组织。明文 `http://` 只对回环地址成立。
+- 需要浏览器会话的操作在 `cchp commands --all --json` 里标为 `excluded`，没有程序化的替代。
 
-## 实例端点与凭据（部署记录 2026-10-25/26；HTTP 探测 2026-10-26）
+## 实例端点与凭据（部署记录 2026-10-25/26，HTTP 探测 2026-10-26）
 
-变量与缺失处置见 `luno-cchp/SKILL.md`〈实例与端点〉：两地址从环境注入（https），`CCHP_GATEWAY_URL` 用于面板与管理 API（`/api/*`），`CCHP_TOKEN` 用作管理面 `Authorization: Bearer`；`CCHP_BASE_URL` 用于 `{CCHP_BASE_URL}/v1/*`，LLM token 用作数据面 `Authorization: Bearer`（或 `x-api-key`）。CLI 的 server 须指向管理面，可逐命令覆盖 `CCHP_BASE_URL="$CCHP_GATEWAY_URL" cchp status --json`，勿把数据面地址当管理 server。
+两个地址都从环境注入（https）：`CCHP_GATEWAY_URL` 是面板和管理 API（`/api/*`），`CCHP_TOKEN` 作为管理面的 `Authorization: Bearer`；`CCHP_BASE_URL` 是数据面 `{CCHP_BASE_URL}/v1/*`，LLM token 作为数据面的 `Authorization: Bearer`（或 `x-api-key`）。
 
-- 最小反例：2026-10-26 数据面域对带管理 token 的已测管理路径返回 401 `data plane requires LLM token`（code 10003）；不能据此断定管理 token 失效或未测路由存在。数据面 `GET /v1/models` 无凭据返回 401 `missing API key`；模型推理本轮未验证。
-- 面板根 `/` 与 `/v1/models` 在面板域曾返回 200 HTML（SPA 回退），不能当数据面可用。
+- **CLI 的 server 必须指向管理面。**既有用法是逐命令覆盖：`CCHP_BASE_URL="$CCHP_GATEWAY_URL" cchp status --json`。这说明 CLI 是从 `CCHP_BASE_URL` 读 server，而本环境的 `CCHP_BASE_URL` 是数据面地址，所以**不覆盖就可能打到数据面**（表现为下面的 401 code 10003）。CLI 实际读哪个变量**待验证**：在实例上用 `cchp status --json` 看 server 字段确认，确认前每条命令都显式覆盖。
+- 反例（2026-10-26）：数据面域名对带管理 token 的已测管理路径返回 401 `data plane requires LLM token`（code 10003），不能据此断定管理 token 失效或未测的路由存在。数据面 `GET /v1/models` 无凭据返回 401 `missing API key`；模型推理未验证。
+- 面板域的根 `/` 和 `/v1/models` 曾返回 200 HTML（SPA 回退），不能当作数据面可用。
 
 ## 结果契约
 
-`--json`、`CCHP_AGENT=1` 或 stdout 非终端即进入 agent 模式：stdout 恰好一个 JSON 结果对象（流式先逐行事件、末行终态），诊断与失败提示走 stderr，失败退出码非 0，无提示符、分页器与颜色。通用输出规则按需反向核实 `cchp guide agents|errors|tasks`；操作参数、响应与分页以 `cchp commands show <operationId> --json`、`cchp schema <operationId> --json` 的当前离线契约为准，不在此缓存字段大表或普通示例。
+带 `--json`、`CCHP_AGENT=1` 或 stdout 不是终端时进入 agent 模式：stdout 恰好一个 JSON 结果对象（流式先逐行输出事件，最后一行是终态），诊断和失败提示走 stderr，失败时退出码非 0，没有提示符、分页器和颜色。结果对象按操作带 `schema_version`、`ok`、`operation`、`status`、`request_id`、`data`、`error`、`warnings` 等字段，列表、变更、密钥、下载、流式和 dry-run 分别可能带 `pagination`、`outcome`、`idempotency_key`、`secret`、`file`、`stream`、`dry_run`；缺字段不能推断成功或完整。发现类命令（`commands`、`schema`、`version`、`guide`、`status`）同形，内容在 `data`；`cchp skill show` 默认输出原始 Markdown，加 `--json` 才是结果对象。
 
-结果对象按操作返回 `schema_version`、`ok`、`operation`、`status`、`request_id`、`data`、`error`、`warnings` 等适用字段；列表、变更、密钥、下载、流式与 dry-run 分别可能带 `pagination`、`outcome`、`idempotency_key`、`secret`、`file`、`stream`、`dry_run`。缺失字段不作成功或完整性推断。
-
-发现类命令（`commands`、`schema`、`version`、`guide`、`status`）同形，内容在 `data`。`cchp skill show` 默认输出原始 Markdown，`--json` 才回到结果对象。
-
-**安全输出前置（含错误、流式与下载诊断）**：`data` 为服务端原值，不等于已获准展示。执行前按具体操作契约确认非秘密字段白名单，嵌套对象限定子字段；未知字段不输出。按 `luno-core/SKILL.md`〈授权与安全〉的秘密面规则，先做源头非秘密字段投影，按字段名、类型与元数据判敏，不以取样、整值捕获或内存后处理替代；全量／整对象读取仅限已确认不含秘密且在既有授权内，并先说明必要性。既有 CLI／客户端的安全捕获与内存投影只处理满足上述前提的响应，分别处理 stdout、stderr 与退出码，只把安全投影送入工具结果、会话或诊断文件，不先全量落盘后脱敏；不满足源头读取前提即停该读取／调用并报缺口，不猜 `--fields` 等旗标。必要且已确认非秘密的警告、授权／恢复限制与错误原文完整保留；含秘密或安全性不明时仅报位置、类型和缺口。一次性密钥仍只走入口已授权的 `--secret-out` 例外，不授权读取该秘密文件。
-
-## 列表与完整性
-
-分页与目标集合完整性统一按下文〈分页〉；升级重核描述符，不从相邻响应或旧操作名推断。
+**安全输出**（含错误、流式和下载诊断）：`data` 是服务端原值，不等于可以展示。执行前按具体操作的契约确认非秘密字段白名单，嵌套对象限定子字段，未知字段不输出；按总控〈秘密面〉做源头投影，按字段名、类型和元数据判敏，不靠取样或事后处理。CLI 或客户端的安全捕获和内存投影只用于满足上述前提的响应：分别处理 stdout、stderr 和退出码，只把投影结果送进工具结果、会话或诊断文件，不先全量落盘再脱敏。不满足前提就停止这次读取或调用并报告缺口，不猜 `--fields` 之类的旗标。必要且已确认不含秘密的警告、授权或恢复限制和错误原文要完整保留。一次性密钥只走 `--secret-out`，且不授权读取那个文件。
 
 ## 错误与退出码
 
+失败时 `error` 含 `kind`、`message`、`hint`、`code`、`detail`、`required_permission`、`challenge_action`、`fields`、`retryable`、`problem`（服务端 problem+json，已脱敏）。完整的码表以 `cchp guide errors` 为准，决定处置的几个：
 
-失败时 `error` 含 `kind`、`message`、`hint`、`code`、`detail`、`required_permission`、`challenge_action`、`fields`、`retryable`、`problem`（服务端 problem+json，已脱敏）。
-
-| 退出码 | `kind` | 含义与处置 |
-|---|---|---|
-| 1 | `internal`／`http_error` | 未预期失败或异常状态码；取证后报 |
-| 2 | `usage` | 命令或旗标不对、缺输入、cchp 不执行该操作；按 `hint` 修命令 |
-| 3 | `unauthorized` | 认证未通过（401）：可能是 URL／token 类型不匹配，或 token 过期、撤销、写错。停止并报告，核对已授权的 URL／token 配对；不能仅凭 401 要求更换 token |
-| 4 | `permission_denied` | 权限不足（403）：报 `required_permission` |
-| 5 | `not_found` | 404：核 id |
-| 6 | `conflict` | 409／412：现状不允许；重读现状再判断 |
-| 7 | `invalid_input`／`validation` | 本地 schema 校验失败或服务端拒绝（400／422）；按 `fields` 修 |
-| 8 | `browser_session_required`／`human_verification_required` | 428：只能由用户在控制台完成 |
-| 9 | `rate_limited` | CLI／Management API 的 429 分类；确认可重试的管理面限流后按 `hint` 等待，仅只读可重试；不据此归因网关业务请求，业务拒绝按 `references/workflows.md`〈失败请求定位〉核查。 |
-| 10 | `server_error` | 5xx：读可稍后重试；变更先查状态 |
-| 11 | `not_sent` | 请求未离开本机：修因后按〈超时与重试〉接续 |
-| 12 | `unknown_outcome` | 可能已到达服务端：停止变更并先查状态；接续按〈超时与重试〉 |
-| 13 | `policy` | cchp 安全策略拒绝：核授权，不为过关叠旗标 |
-| 14 | `not_signed_in` | 无凭据：报缺口，按入口的认证边界处理 |
-
-## 请求／响应覆盖规则（request-overrides）
-
-涉及 request-overrides 的操作、解释、建议或结论前，须完整读取 `references/coverage-rules.md`〈请求／响应覆盖规则：读取、草稿验证、变更与回读〉；本节不复述，也不为已随 CLI 0.1.3 移除的旧接口保留作用域断言。
+- **3 `unauthorized`**（401）：可能是 URL 和 token 类型不匹配（见上节的数据面反例），或 token 过期、撤销、写错。停止并报告，核对已授权的 URL/token 配对；不能只凭 401 就要求换 token。
+- **9 `rate_limited`**：CLI/Management API 的 429；确认是可重试的管理面限流后按 `hint` 等待，只有只读可以重试。它不能用来归因网关的业务请求，业务拒绝按 `references/workflows.md`〈失败请求定位〉核查。
+- **11 `not_sent`**：请求没离开本机，修因后按〈超时与重试〉接续。
+- **12 `unknown_outcome`**：可能已到达服务端，停止变更，先查状态。
+- 其余：4 权限不足报 `required_permission`；6 冲突（409/412）先重读现状；7 输入校验失败按 `fields` 修；8 只能由用户在控制台完成；10 服务端 5xx，读可以稍后重试，变更先查状态；13 安全策略拒绝，核授权，不叠加旗标；14 没有凭据，报告缺口，按认证边界处理；1、2、5 分别是未预期失败、用法错误、对象不存在，按 `hint` 处理。
 
 ## 分页
 
-默认一页。以当前 `cchp commands show <operationId> --json` 的pagination描述符确定items/next路径、cursor/page及旗标；schema/契约升级重核。cursor不透明，只在同一筛选条件下传回，不构造或跨查询复用。
+默认只取一页。以当前 `cchp commands show <operationId> --json` 的 pagination 描述符确定 items 和 next 的路径、cursor 或 page 以及续页旗标，schema 或契约升级后重核。cursor 不透明，只在同一筛选条件下原样传回，不构造也不跨查询复用。
 
-`partial`/`preparing`须重取或按当次契约消解；无描述符、next或续页旗标均不证明完整。按筛选、返回数量/上限及契约核目标集合；不能确认完整性即停依赖写入。只读按支持的 `--page-limit`/`--max-items` 串行翻页，命中上限或truncated时报部分结果。限流按hint有界等待，不并行抓页/重试。
+`partial`/`preparing` 为真时要重取，或按当次契约消解。没有描述符、没有 next 或没有续页旗标，都不证明结果完整；按筛选条件、返回数量和上限以及契约核对目标集合，不能确认完整就不做依赖它的写入。只读查询可以用支持的 `--page-limit`/`--max-items` 串行翻页，命中上限或 truncated 时报告是部分结果；限流时按 hint 有限等待，不并行抓页或重试。`--timeout` 默认 60 秒，覆盖多页的整次运行；到期的 warning 和续页信息不等于完整结果，要报告数量并说明覆盖范围。
 
-`--timeout`默认60秒，含多页整次运行；到期的warning和续页信息不等于完整结果，报数说明覆盖范围。
+## 流式与下载
 
-## 流式与下载例外
-
-- 流式：先逐行 NDJSON 事件（`type`、`operation`、`seq`、`event`、`id`、`data`），最后再给一个终态结果对象。agent 模式默认 20 个事件后停，`--max-events` 改上限，`--timeout` 可提前结束；终态对象的 `stream` 说明已投递事件数与结束原因（`max_events`／`deadline`／`server_closed`）。
-- 下载：需要 `--output <新文件>`（`-` 走 stdout）；cchp 拒绝覆盖已有文件，`download-bundle` 同属下载、同样要 `--output`。响应体按字节原样落盘，不论 Content-Type（含 `text/event-stream` 与 NDJSON 响应帧），结果 `file` 的 `bytes`、`sha256` 描述的就是落盘文件，回读以 sha256 判等。请求归档标注该 part 非空、却下载到空内容时，以 `server_error`（退出码 10）失败，不报成功。
-- `cchp skill show` 是契约例外：默认打原始 Markdown，加 `--json` 才回到结果对象。
+- **流式**：先逐行输出 NDJSON 事件（`type`、`operation`、`seq`、`event`、`id`、`data`），最后一个终态结果对象。agent 模式默认 20 个事件后停，`--max-events` 改上限，`--timeout` 可以提前结束；终态的 `stream` 说明已投递的事件数和结束原因（`max_events`/`deadline`/`server_closed`）。
+- **下载**：需要 `--output <新文件>`（`-` 表示 stdout），cchp 拒绝覆盖已有文件，`download-bundle` 也一样。响应体按字节原样落盘，结果里 `file` 的 `bytes`、`sha256` 描述的就是落盘的文件，回读用 sha256 判等。请求归档标明某部分非空、却下载到空内容时，会以 `server_error`（退出码 10）失败，不报成功。
 
 ## 超时与重试
 
-`--timeout` 默认 60 秒。读在 2 次网络失败与 5xx 后重试两次；CLI 对变更**不自动重试**。超时发生在请求发出前为 `not_sent`，发出后应答未回为 `unknown_outcome`。人工接续前先查真实现态、确认原因和授权；仅操作支持且已返回／已发送 `idempotency_key` 时复用该键。未提供幂等头的操作按其业务专节处理，不套用该键；request-overrides 的例外见 `references/coverage-rules.md`〈请求／响应覆盖规则：读取、草稿验证、变更与回读〉。
+`--timeout` 默认 60 秒。读请求在网络失败和 5xx 后会自动重试两次；**CLI 对变更不自动重试**。超时发生在请求发出前是 `not_sent`，发出后没收到应答是 `unknown_outcome`。人工接续前先查真实现状，确认原因和授权；只有操作支持、并且已经返回或发送过 `idempotency_key` 时，才复用这个键。没有幂等头的操作按其业务专节处理；request-overrides 的写入没有幂等头，见 `references/coverage-rules.md`。

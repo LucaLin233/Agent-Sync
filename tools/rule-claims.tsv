@@ -62,21 +62,16 @@ skills/luno-sync/references/skill-authoring.md	references/agent-document-writing
 skills/luno-cchp/SKILL.md	references/interfaces.md	资源必需	资源加载边（cchp 入口·接口契约或覆盖规则实际调用）
 skills/luno-cchp/SKILL.md	references/workflows.md	资源条件	资源加载边（cchp 入口·业务动作或覆盖规则写入恢复及跨业务比较）
 skills/luno-cchp/references/interfaces.md	references/workflows.md	资源条件	资源加载边（interfaces→workflows）
-skills/luno-cchp/SKILL.md	luno-ops	必需加载	CCHP 生产写入前置加载
 skills/luno-ops/SKILL.md	luno-minis	条件加载	Minis 运行时按需加载（ops）
 skills/luno-core/SKILL.md	luno-minis	条件加载	Minis 运行时按需加载（ops）
 skills/luno-memory/references/maintenance.md	luno-sync	必需加载	固化候选修改前置加载（maintenance）
 skills/luno-ops/references/onlyboxes-baseline.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes-baseline.md→execution-environment.md）
 skills/luno-ops/references/onlyboxes.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes.md→execution-environment.md）
-skills/luno-cchp/SOURCE.md	references/interfaces.md	资源条件	资源加载边（B批 cchp SOURCE.md→interfaces.md）
-skills/luno-cchp/SOURCE.md	references/workflows.md	资源条件	资源加载边（B批 cchp SOURCE.md→workflows.md）
 skills/luno-cchp/references/workflows.md	references/interfaces.md	资源必需	资源加载边（workflows→安全输出与公共分页契约）
 skills/luno-cchp/SKILL.md	references/coverage-rules.md	资源条件	资源加载边（cchp 入口·覆盖规则）
-skills/luno-cchp/references/workflows.md	references/coverage-rules.md	资源条件	资源加载边（workflows→覆盖规则）
 skills/luno-cchp/references/interfaces.md	references/coverage-rules.md	资源条件	资源加载边（interfaces→覆盖规则）
 skills/luno-cchp/references/coverage-rules.md	references/interfaces.md	资源条件	资源加载边（覆盖规则→实际调用输出或接口契约）
 skills/luno-cchp/references/coverage-rules.md	references/workflows.md	资源条件	资源加载边（覆盖规则→跨业务比较或key创建更新）
-skills/luno-cchp/SOURCE.md	references/coverage-rules.md	资源条件	资源加载边（cchp SOURCE.md→覆盖规则）
 skills/luno-surge/SKILL.md	references/upstream-command-reference.md	资源条件	资源加载边（surge·官方命令原件；部署时从官方包取件，仓库不含）
 skills/luno-surge/SKILL.md	references/upstream-SKILL.md	资源条件	资源加载边（surge·上游对照；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/SOURCE.md	references/upstream-command-reference.md	资源条件	资源加载边（surge SOURCE·官方命令原件；部署时从官方包取件，仓库不含）
