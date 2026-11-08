@@ -1,55 +1,28 @@
 #!/usr/bin/env python3
-"""提交署名机械检查：规则单真源 → 逐提交字节比对。
+"""提交署名机械检查：逐个读取 <base>..<head> 的原始 Git 对象，按字节核对身份。
 
-判据（全部为**可复核的字节事实**，不做启发式猜测）：
-  1．身份单真源：从 `--rules` 指定的规则文件（默认 `skills/luno-core/references/delegation.md`）
-     〈Git 提交署名〉段**磁盘 bytes** 取**规则登记的每个精确身份**（完整声明 `Name <email>`）各一处，构成精确身份对集合。姓名白名单由本文件 `NAMES` 固定：新增姓名须在规则与本文件
-     两处同批；邮箱一律从规则的精确声明读取，不在此硬写（**不存在「动态开放身份」**，规则里
-     多出未知名不会自动放行）。
-     段缺失、身份缺失／重复、形态非法（无 `@`、含邮箱字符集外字符＝方括号等占位形态、两侧
-     带空白）、读取失败 → 非零退出（**不回退**：不读环境变量、不读 git config、不沿用上一提交
-     身份）。规则值**不做 strip 归一化**，但两类字段判法不同：邮箱两侧多余空白即判形态非法；
-     姓名带额外空白则不匹配登记名（该名缺精确声明 → 闭锁 rc=2；额外未知名在五名完整时忽略，
-     不因忽略而放宽）。
-  2．逐提交：`git rev-list <base>..<head>` 的每个提交读 `git cat-file commit` **原始字节**，
-     按提交对象的 author／committer 行解析「名 + 邮箱」bytes，须**精确等于**（大小写敏感）
-     规则登记的某个精确身份。
-  3．平台合并**只凭可信签名豁免**：须同时满足
-     ① 父 ≥ 2；
-     ② committer 行精确等于平台提交者 `GitHub <noreply@github.com>`（该地址是 GitHub 的公开
-        平台地址，与用户个人的 GitHub noreply 转发地址无关）；
-     ③ `git verify-commit` 在**临时 GNUPGHOME**（只导入随仓库的 `tools/github-web-flow.gpg`）
-        下退出码为 0（非零一律不豁免，不看输出里有没有 `VALIDSIG`：已过期／已撤销钥签的
-        提交既报 VALIDSIG 又 rc≠0），且签名主钥指纹属于本文件 `WEBFLOW_FINGERPRINTS`
-        固定集合（只含现用钥）。
-     满足才报 `platform`，跳过 author／committer 身份校验；`Co-authored-by` **仍逐条核对**。
-     不满足即按普通提交检查（`GitHub` 不在署名表内，必然违规 → rc=1）。
-     公钥文件缺失／无法读、其主钥指纹不含本文件固定值、gpg 不可用 → rc=2（环境不完整，
-     fail-closed：宁可整批报错，也不把「验证不了」当成「不是平台合并」或「通过」）。
-  3b．squash 提交（仅在 `--allow-squash` 时评估，供 push 到 main 的收口事件用；PR 事件一律不带该
-     参数，仍逐提交核对）：须同时满足 ① 父**恰为 1**；② committer 行精确等于平台提交者；
-     ③ 同上验签通过；④ 尾部 `Co-authored-by` **非空**且逐条合规（格式、身份在表内）。编写身份
-     按 Author 与合法尾部署名的**并集去重**判定：同一身份写多行只计一次，且允许与 Author 相同
-     （squash 的 Author 就是 PR 内最后一个提交的作者，收口者按原字节各写一行时必然重合）。
-     满足才报 `squash` 并跳过 author／committer 身份校验。
-     「覆盖 PR 内全部作者」**不在本工具可判范围**：push 事件的 `before..after` 只含 squash 这一
-     个提交，PR 内原始提交不在该范围（也未取 `refs/pull/*`），故无法机械比对作者全集；边界
-     由合并时的人工自核（规则〈Git 提交署名〉）与 PR 事件对原提交的逐个核对共同保证。
-  4．`Co-authored-by:` 取自消息**尾部 trailer 块**（交由 `git interpret-trailers --parse` 解析，
-     与 git 自身口径一致）：格式须为 `Name <email>`，身份须精确等于规则登记的某个精确身份。
-     编写身份按 Author 与尾部署名的并集去重：普通提交的尾行**不得**与 Author 相同（判违规），
-     squash 提交放行；同一身份的重复尾行按去重处理，不判违规。
-  5．环境不可信即停：rev 非法、`rev-list` 失败、浅克隆、对象缺失、规则文件不可读／非 UTF-8、
-     空范围（未给 `--allow-empty`）→ 非零退出，不把「未检到」当「通过」。
-     另屏蔽对象替换与嫁接（`--no-replace-objects` + `GIT_NO_REPLACE_OBJECTS`，
-     `GIT_GRAFT_FILE=/dev/null` 使 `info/grafts` 不参与），避免用 `git replace`／grafts 改写历史绕过。
+- 身份只取 --rules 指定文件（默认 skills/luno-core/references/delegation.md）的〈Git 提交署名〉段。
+  标题须整行精确匹配（允许行尾空白），只读反引号内完整的 Name <email> 声明；姓名由 NAMES
+  固定，新增姓名须与规则同批更新，未知姓名不放行。姓名不 strip，带额外空白即不匹配；五名
+  完整时忽略额外未知声明。缺段、缺身份、重复、同邮箱、非法邮箱（占位或空白）、不可读或
+  非 UTF-8 均 rc=2；邮箱域名允许无点。不读环境、git config，不沿用上一提交的身份。
+- git rev-list 范围内每个提交的 author／committer，须从 git cat-file commit 原始行解析，
+  姓名及邮箱均与规则精确相等（大小写敏感）。
+- 平台合并须同时满足父≥2、committer精确匹配平台身份常量、web-flow验签通过，才豁免
+  author／committer；Co-authored-by仍逐条核对。验签仅用随仓库公钥和临时GNUPGHOME，
+  不读用户钥环、不联网；git verify-commit须rc=0且签名主钥指纹在固定集合，不能仅凭VALIDSIG
+  或签名子钥放行。公钥缺失/不可读、缺受信主钥或gpg不可用均rc=2；其他验签失败按普通提交检查。
+- squash仅在--allow-squash下评估（push到main使用，PR事件不得带）：父恰为1、平台提交者、
+  同上验签通过，并且尾部Co-authored-by非空且逐条合规。push范围只有squash提交，不能证明
+  覆盖PR全部作者；该义务由PR事件逐提交检查和合并时人工自核共同保证。
+- Co-authored-by交给git interpret-trailers --parse读取尾部块，格式须为Name <email>且身份在表内。
+  编写身份按Author与合法尾行的并集去重；普通提交尾行不得等于Author，squash允许相同；
+  同一身份重复尾行不判违规。正文中段不当尾行，畸形尾行不得回退为“无署名”。
+- 非法rev、rev-list失败、浅克隆、对象缺失、空范围（未给--allow-empty）均rc=2。
+  --no-replace-objects、GIT_NO_REPLACE_OBJECTS与GIT_GRAFT_FILE=/dev/null屏蔽replace和grafts。
 
-输出**只报短 SHA、字段与错误类别**：任何情况下都不打印邮箱（也不打印名），即使输入含畸形值。
-退出码：0 通过；1 存在违规；2 用法／环境／规则错误（检查不完整）。
-
-边界：本工具只做**机械**核对，不证明「提交确实是实际编写者所写」——署名真实性与代提交是否
-经授权仍需人工确认（见规则〈Git 提交署名〉末句）；签名只用于确认「这是 GitHub 平台的自动合并」，
-不评价普通提交的签名状态。
+输出只报短 SHA、字段与错误类别（可含既定登记姓名）；不得回显邮箱或任意输入值。退出码：0通过，1违规，2用法/环境/规则错误。
+只做机械核对，不证明实际编写者或代提交授权；签名只确认GitHub平台自动合并，不评价普通提交签名。
 """
 import argparse
 import os

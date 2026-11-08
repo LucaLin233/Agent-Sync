@@ -113,7 +113,6 @@
       "source": "skills/luno-core/SKILL.md",
       "resources": [
         "skills/luno-core/references/retrieval.md",
-        "skills/luno-core/references/retrieval-sources.md",
         "skills/luno-core/references/delegation.md",
         "skills/luno-core/LICENSE.matt-pocock.txt",
         "skills/luno-core/LICENSE.retrieval-sources.txt",
