@@ -49,8 +49,8 @@ squash 尾行等于 Author、平台合并无需作者行）与普通提交去重
     无空格／Tab 分隔仍能解析（合法身份 rc=0、非法身份 rc=1）；续行与混合 trailer 下
     畸形值不回退为「无签名」而是判违规；正文中段（非尾部 trailer 块）的同一行不参与解析，
     与 git `interpret-trailers` 口径一致。
-  5 规则单真源：规则文件缺失／缺〈Git 提交署名〉段／身份重复（三身份逐个）／三身份任意两者
-    同邮箱（LUNO×FORGE、LUNO×LENS、FORGE×LENS）／LENS 身份缺失／方括号占位形态／
+  5 规则单真源：规则文件缺失／缺〈Git 提交署名〉段／身份重复（规则登记的每个精确身份逐个）／规则登记的精确身份任意两者
+    同邮箱（LUNO×FORGE、LUNO×LENS、FORGE×LENS）／任一登记身份缺失／方括号占位形态／
     邮箱两侧带空白 → rc=2；现役身份是不可路由的本地地址（域名无点）须被接受；
     且**不回退**（不读环境或 git config）；另证规则改动即时生效（无缓存、无上次身份沿用）。
   6 环境负控：无效 rev、空范围（未给 `--allow-empty`）→ rc=2；浅克隆 → rc=2。
@@ -58,11 +58,14 @@ squash 尾行等于 Author、平台合并无需作者行）与普通提交去重
   7 秘密面：全部用例的输出（stdout＋stderr）**不得**出现任何夹具邮箱、占位形态或 `@`；
     参数错误／路径错误／rev 错误三条路径亦不例外（argparse 已改为固定文案）。
 
-夹具除「真实平台合并提交」一例外全部为合成身份（`example.invalid` 保留域，与任何真实署名
-无关），提交对象用 `hash-object -t commit -w` 按字节手工构造，故可覆盖畸形身份、伪造签名头；
+夹具**绝大部分**为合成身份（`example.invalid` 保留域，与任何真实署名无关）。例外两项：真实
+平台合并提交一例；以及 2 个**准确公开身份** `Claude Opus 5.5`、`LIN student`（名字与邮箱逐字节
+取自原公开 commit meta，用于字节级精确匹配，**不得据此推断其实际模型或实际署名来源**）。
+提交对象用 `hash-object -t commit -w` 按字节手工构造，故可覆盖畸形身份、伪造签名头；
 真实签名用测试内临时生成的 ed25519 钥（非 web-flow）。不依赖本机 git 身份与网络。
 """
 import importlib.util
+from itertools import combinations
 import os
 import shutil
 import subprocess
@@ -98,11 +101,20 @@ def load_tool():
 
 
 
-def rule_text(luno=LUNO[1], forge=FORGE[1], lens=LENS[1]):
-    """合成规则文件：与仓库 delegation.md〈Git 提交署名〉段同形态，身份取自参数。"""
+# 规则登记的外部身份夹具：**literal 期望**，不从生产 NAMES 反推。
+EXTERNAL = (('LIN student', '86354789+MiCat-S@users.noreply.github.com'), ('Claude Opus 5.5', 'noreply@anthropic.com'))
+
+
+def rule_text(luno=LUNO[1], forge=FORGE[1], lens=LENS[1], extra=None):
+    """合成规则文件：与 delegation.md〈Git 提交署名〉段同形态；身份为**literal 期望**。"""
+    if extra is None:
+        extra = EXTERNAL
+    decl = ''.join('，%s 使用 `%s <%s>`' % (n, n, v) for n, v in extra)
     return ('# 夹具规则\n\n## Git 提交署名\n\n'
-            'Git提交按实际编写者设置 Author：LUNO 使用 `LUNO <%s>`，FORGE 使用 `FORGE <%s>`，LENS 使用 `LENS <%s>`。\n'
-            '平台自动生成的合并提交保留平台身份。\n\n## 其他段\n\n不相关正文。\n' % (luno, forge, lens))
+            'Git提交按实际编写者设置 Author：LUNO 使用 `LUNO <%s>`，FORGE 使用 `FORGE <%s>`，'
+            'LENS 使用 `LENS <%s>`%s。\n'
+            '平台自动生成的合并提交保留平台身份。\n\n## 其他段\n\n不相关正文。\n'
+            % (luno, forge, lens, decl))
 
 
 def ident(pair):
@@ -859,15 +871,53 @@ class RulesTest(Base):
         self.verdict(self.repo.run(base, head), 2, '缺少')
 
     def test_duplicate_identity(self):
-        for pair in (LUNO, FORGE, LENS):
+        # 重复声明必须是**完整反引号声明**：reader 只认 `Name <email>`，不认裸行。
+        tail = '，LENS 使用 `LENS <%s>`' % LENS[1]
+        for pair in (LUNO, FORGE, LENS) + EXTERNAL:
             with self.subTest(pair=pair[0]):
                 text = rule_text().replace(
-                    '平台自动生成的合并提交保留平台身份。',
-                    '平台自动生成的合并提交保留平台身份。\n\n%s <%s>' % pair, 1)
+                    tail, tail + '，%s 使用 `%s <%s>`' % (pair[0], pair[0], pair[1]), 1)
                 self.assertNotEqual(text, rule_text())
                 self.repo.rules.write_text(text, encoding='utf-8')
                 base, head = self.repo.line()
                 self.verdict(self.repo.run(base, head), 2, '身份重复')
+
+    def test_empty_email_declaration(self):
+        # 空邮箱是**坏声明**。reader 先判重复、后判邮箱形态，故位置决定**哪一个** rc=2：
+        #   · 坏声明在本节**所有**合法声明之前 → 该名首次出现即空值 → 「形态非法」；
+        #   · 坏声明在所有合法声明**之后**（下一 `##` 之前）→ 该名已登记 → 「身份重复」。
+        # 两种位置都必须 rc=2，且断言顺序，防止只换期望字符串。
+        head_anchor = '## Git 提交署名\n\n'
+        tail_anchor = '平台自动生成的合并提交保留平台身份。'
+        names = tuple(n for n, _ in (LUNO, FORGE, LENS) + EXTERNAL)
+        for name in names:
+            decl = '%s 使用 `%s <>`\n' % (name, name)
+            for pos, anchor, want in (('before', head_anchor, '形态非法'),
+                                      ('after', tail_anchor, '身份重复')):
+                with self.subTest(name=name, pos=pos):
+                    text = rule_text().replace(anchor, anchor + decl if pos == 'before'
+                                               else anchor + '\n' + decl.rstrip('\n'), 1)
+                    self.assertNotEqual(text, rule_text())
+                    bad = text.index('`%s <>`' % name)
+                    legit = [text.index('`%s <%s>`' % p) for p in (LUNO, FORGE, LENS) + EXTERNAL]
+                    if pos == 'before':
+                        self.assertLess(bad, min(legit))
+                    else:
+                        self.assertGreater(bad, max(legit))
+                    self.repo.rules.write_text(text, encoding='utf-8')
+                    base, head = self.repo.line()
+                    self.verdict(self.repo.run(base, head), 2, want)
+
+    def test_only_name_with_empty_email(self):
+        # 把该名本身写成 `Name <>`：该名已登记但形态非法 → rc=2，不得读成别的放行。
+        base_pairs = (LUNO, FORGE, LENS) + EXTERNAL
+        for name, email in base_pairs:
+            with self.subTest(name=name):
+                text = rule_text().replace('`%s <%s>`' % (name, email), '`%s <>`' % name, 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 2, '形态非法')
 
     def test_missing_lens_identity(self):
         text = rule_text().replace('，LENS 使用 `LENS <%s>`' % LENS[1], '', 1)
@@ -957,3 +1007,173 @@ class EnvironmentTest(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ExternalIdentityTest(Base):
+    """规则登记的外部身份（测试内 literal fixture，独立于生产 NAMES，不从 NAMES 反推）。
+
+    reader 契约顺序：整行标题 → 反引号完整声明 → 精确 name 入表 → 先判重复、再判邮箱形态。
+    """
+
+    def test_external_author_ok(self):
+        for pair in EXTERNAL:
+            with self.subTest(pair=pair[0]):
+                base, head = self.repo.line(pair, pair)
+                self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_external_committer_ok(self):
+        for pair in EXTERNAL:
+            with self.subTest(pair=pair[0]):
+                base, head = self.repo.line(LUNO, pair)
+                self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_lens_committer_with_external_author_ok(self):
+        base, head = self.repo.line(EXTERNAL[1], LENS)
+        self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_external_coauthor_ok(self):
+        for pair in EXTERNAL:
+            with self.subTest(coauthor=pair[0]):
+                base, head = self.repo.line(
+                    LUNO, LUNO, message='subject\n\nCo-authored-by: %s <%s>\n' % pair)
+                self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_forge_not_author_coauthor_ok(self):
+        base = self.repo.commit(OTHER, OTHER)
+        msg = 'subject\n\nCo-authored-by: FORGE <%s>\n' % FORGE[1]
+        head = self.repo.commit(EXTERNAL[0], EXTERNAL[0], message=msg, parents=[base])
+        self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_external_wrong_email_rc1(self):
+        for name, mail in EXTERNAL:
+            for old_pair in (LUNO, FORGE, LENS):
+                with self.subTest(new_name=name, old_email_owner=old_pair[0]):
+                    bad = (name, old_pair[1])
+                    self.assertNotEqual(bad, (name, mail))
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
+
+    def test_external_wrong_name_rc1(self):
+        for name, mail in EXTERNAL:
+            for old_pair in (LUNO, FORGE, LENS):
+                with self.subTest(new_email_owner=name, old_name=old_pair[0]):
+                    bad = (old_pair[0], mail)
+                    self.assertNotEqual(bad, old_pair)
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
+
+    def test_generic_claude_rc1(self):
+        base, head = self.repo.line(('Claude', EXTERNAL[1][1]), ('Claude', EXTERNAL[1][1]))
+        self.verdict(self.repo.run(base, head), 1, 'author')
+
+    def test_claude_local_alias_rc1(self):
+        base, head = self.repo.line((EXTERNAL[1][0], 'claude@local'),
+                                    (EXTERNAL[1][0], 'claude@local'))
+        self.verdict(self.repo.run(base, head), 1, 'author')
+
+    def test_external_case_variants_rc1(self):
+        for name, mail in EXTERNAL:
+            local, domain = mail.split('@', 1)
+            names = (name.lower(), name.upper())
+            if name == 'Claude Opus 5.5':
+                names += ('Claude opus 5.5',)
+            variants = tuple((n, mail) for n in names) + (
+                (name, mail.upper()), (name, local + '@' + domain.upper()))
+            for bad in variants:
+                with self.subTest(identity=name, bad=bad):
+                    self.assertNotEqual(ident(bad), ident((name, mail)))
+                    base, head = self.repo.line(bad, LUNO)
+                    out = self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+                    self.assertIn(head[:7] + ' author 身份不在署名表内', out.splitlines())
+
+    def test_rule_missing_external_rc2(self):
+        for idx, (name, _mail) in enumerate(EXTERNAL):
+            with self.subTest(name=name):
+                extra = tuple(p for i, p in enumerate(EXTERNAL) if i != idx)
+                self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 2, '缺少')
+
+    def test_rule_same_email_conflict_rc2(self):
+        # 五名 literal 夹具的全部十对；不从生产 NAMES 或生产算法构造期望。
+        for a, b in combinations((LUNO, FORGE, LENS) + EXTERNAL, 2):
+            with self.subTest(a=a[0], b=b[0]):
+                original = rule_text()
+                needle = '`%s <%s>`' % b
+                self.assertEqual(original.count(needle), 1)
+                text = original.replace(needle, '`%s <%s>`' % (b[0], a[1]), 1)
+                self.assertNotEqual(text, original)
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                out = self.verdict(self.repo.run(base, head), 2, '同一邮箱')
+                self.assertIn('错误：规则〈Git 提交署名〉段身份指向同一邮箱（5 个身份，不回退）',
+                              out.splitlines())
+
+    def test_rule_title_lookalike_rc2(self):
+        for heading in ('## Git 提交署名示例', '##非Git提交署名'):
+            with self.subTest(heading=heading):
+                text = rule_text().replace('## Git 提交署名', heading, 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 2, '缺少')
+
+    def test_rule_external_name_whitespace_rc2(self):
+        # 姓名不 strip；该精确声明缺失，不把所有未知声明一律判非法。
+        name, mail = EXTERNAL[0]
+        for bad in (' ' + name, name + ' ', ' ' + name + ' '):
+            with self.subTest(bad=bad):
+                self.assertNotEqual(bad.encode(), name.encode())
+                extra = ((bad, mail), EXTERNAL[1])
+                self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
+                base, head = self.repo.line()
+                out = self.verdict(self.repo.run(base, head), 2, '缺少')
+                self.assertIn('错误：规则〈Git 提交署名〉段缺少 LIN student 身份（不回退）',
+                              out.splitlines())
+
+    def test_rule_notlin_prefix_rc2(self):
+        for bad in ('NotLIN student', 'Fake LIN student'):
+            with self.subTest(replacement=bad):
+                extra = ((bad, EXTERNAL[0][1]), EXTERNAL[1])
+                self.repo.rules.write_text(rule_text(extra=extra), encoding='utf-8')
+                base, head = self.repo.line()
+                out = self.verdict(self.repo.run(base, head), 2, '缺少')
+                self.assertIn('错误：规则〈Git 提交署名〉段缺少 LIN student 身份（不回退）',
+                              out.splitlines())
+
+    def test_rule_unknown_extra_declaration_rc0(self):
+        # 五名合法声明完整时，两种未知声明均忽略；不新增身份、不全拒未知名。
+        tail = '平台自动生成的合并提交保留平台身份。'
+        for bad in ('NotLIN student', 'Fake LIN student'):
+            with self.subTest(extra=bad):
+                text = rule_text().replace(tail, tail + '\n%s 使用 `%s <x@y>`' % (bad, bad), 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 0, '通过')
+
+    def test_rule_external_invalid_email_rc2(self):
+        for name, mail in EXTERNAL:
+            for invalid in (PLACEHOLDER, 'address', ''):
+                with self.subTest(identity=name, invalid=invalid):
+                    original = rule_text()
+                    needle = '`%s <%s>`' % (name, mail)
+                    self.assertEqual(original.count(needle), 1)
+                    text = original.replace(needle, '`%s <%s>`' % (name, invalid), 1)
+                    self.assertNotEqual(text, original)
+                    self.repo.rules.write_text(text, encoding='utf-8')
+                    base, head = self.repo.line()
+                    out = self.verdict(self.repo.run(base, head), 2, '形态非法')
+                    self.assertIn('错误：规则〈Git 提交署名〉段 %s 身份形态非法（占位、带空白或非邮箱）'
+                                  % name, out.splitlines())
+
+    def test_rule_title_trailing_whitespace_ok(self):
+        for suffix in (' ', '\t', ' \t '):
+            with self.subTest(suffix=suffix):
+                text = rule_text().replace('## Git 提交署名\n', '## Git 提交署名' + suffix + '\n', 1)
+                self.assertNotEqual(text, rule_text())
+                self.repo.rules.write_text(text, encoding='utf-8')
+                base, head = self.repo.line()
+                self.verdict(self.repo.run(base, head), 0, '通过')
