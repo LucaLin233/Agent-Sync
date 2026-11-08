@@ -6,7 +6,7 @@ import urllib.error, urllib.request
 from datetime import datetime
 from pathlib import Path
 
-# 脚本可能被 install.sh 以符号链接落到 PATH，故用 realpath 解析同级共享模块所在目录。
+# install.sh 以符号链接落 PATH：按 realpath 找同级共享模块。
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from _privacy import dumps_redacted, redact_boundary  # noqa: E402
 
@@ -83,12 +83,7 @@ HELP = {
 "set-log-level":"Usage: set-log-level <log-level>",
 }
 
-# ── 输出边界（统一脱敏）───────────────────────────────────────────────────
-# 这些命令的响应体可能含 Profile 全文、代理行凭据、订阅 URL、请求正文与日志；
-# 错误输出同样来自服务端。**所有** stdout／stderr 写出都经这里，而不是只给
-# `--raw` 分支加正则——`Error:` 分支、render 的格式化分支、`profile diff`、
-# `--check` 校验服务的错误详情、`die()` 的本地错误消息一并覆盖。
-# 端口形态/换行一律保持：先脱敏再 print，不改变既有格式。
+# 输出边界：所有 stdout／stderr（raw、render、错误、profile diff、--check、die）都经此脱敏。
 def _emit(stream, text, end="\n"):
     stream.write(redact_boundary(text) + end)
     if stream is sys.stdout:
@@ -96,17 +91,11 @@ def _emit(stream, text, end="\n"):
 
 
 def out(text="", end="\n"):
-    """默认空串：`render_summary`／`render_vmnet ra` 用 `out()` 输出小节后的空行。"""
     _emit(sys.stdout, text, end)
 
 
 def out_literal(text, end="\n"):
-    """输出**编译期字面量**（帮助/用法文本）：不经脱敏。
-
-    这些字符串来自本文件常量、不含任何运行时数据，脱敏只会产生假阳性——例如帮助里的
-    `Remote password: SURGE_API_KEY` 与 `Credential: SURGE_API_KEY` 是**变量名**，
-    却被敏感键启发式（`password`／`credential`）当成凭据值抹掉，破坏既有帮助文本。
-    """
+    """帮助等编译期字面量不经脱敏：其中 `password: SURGE_API_KEY` 是变量名，脱敏会误抹。"""
     sys.stdout.write(text + end)
     sys.stdout.flush()
 
@@ -137,7 +126,6 @@ def credential(stdin_mode: bool):
         value=sys.stdin.readline().rstrip("\r\n")
     else:
         value=os.getenv("SURGE_API_KEY", "")
-        # 不再在 TTY 下交互补取：秘密只来自已注入变量或 --password-stdin。
     if not value: die("A remote controller password is required. Set SURGE_API_KEY or use --password-stdin.")
     return value
 
@@ -361,8 +349,7 @@ def render_summary(o):
     for section in sections:
         out(f"{section.get('section','Summary')}:")
         for line in section.get("lines",[]):
-            # **先对整段 content 脱敏，再分行输出**（2026-10-12 N1）：逐行脱敏会把跨行引号口令
-            # 拆散——首行只剩开引号、续行没有凭据上下文，尾段（如 `"a,b"` 的后半）原样泄漏。
+            # 先整段脱敏再分行：逐行脱敏会拆散跨行引号口令、泄漏尾段。
             content=redact_boundary(str(line.get("content","")))
             parts=content.splitlines() or [""]
             out(f"  {line.get('title','?')}: {parts[0]}")
@@ -374,12 +361,7 @@ def render_profile_diff(o):
     effective=o.get("profile")
     if not isinstance(original,str) or not isinstance(effective,str):
         out(dumps_redacted(o, indent=2)); return
-    # **先脱敏整份 profile，再分行做 diff**（2026-10-12 N2）：逐行脱敏会把跨行引号口令截断
-    # （尾段连同换行被抹掉），而 difflib 仍按原行数写 `@@` 头 ⇒ hunk 计数与正文不符、相邻行
-    # 粘连。整份先脱敏后，`@@` 计数与正文都按**脱敏后**的文本计算，结构自洽；代价＝仅凭据
-    # 不同的差异会随脱敏一并消失（非敏感差异仍可见）。
-    # **边界**：本输出只表示**脱敏文本**的差异——空输出不证明原始配置相同，不得用于配置等价
-    # 判定或回导（凭据差异、以及保守脱敏尾段里的非敏感差异都可能不可见）。
+    # 整份先脱敏再 diff，hunk 计数与正文自洽。输出只是脱敏文本的差异：空输出不证明配置相同。
     out("".join(difflib.unified_diff(
         redact_boundary(original).splitlines(keepends=True),
         redact_boundary(effective).splitlines(keepends=True),
@@ -426,7 +408,7 @@ E_SECTION_SET_BLOCKED = "E_SECTION_SET_REQUIRES_LOCAL_ADAPTER"
 
 
 def block_section_set(argv):
-    """profile section set 的本地文件／stdin 转换未实现：连接、取密、读文件前直接拒绝（raw 不绕过）。"""
+    """profile section set 未实现本地转换：连接、取密、读文件前拒绝（raw 不绕过）。"""
     if len(argv)>=3 and [str(a).lower() for a in argv[:3]]==["profile","section","set"]:
         die(E_SECTION_SET_BLOCKED,2)
 
@@ -434,8 +416,7 @@ def block_section_set(argv):
 def main():
     raw,remote,stdin_mode,check_path,argv=parse_cli(sys.argv[1:])
     block_section_set(argv)
-    # `--check` 本身合法且不需要 Controller 命令：校验必须先于「无命令打帮助」的早退，
-    # 否则 `--check /不存在/路径` 会静默成功（退出 0）。set 拦截仍先于校验与读文件。
+    # --check 先于「无命令打帮助」，否则读不到文件也会退出 0。
     if check_path is not None:
         validate_profile(check_path,raw)
     if not argv:

@@ -42,19 +42,13 @@ files drifted in content or in mode since prepare, before it creates backup/.
 import argparse, datetime, difflib, hashlib, importlib.util, json, shutil, subprocess
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
-# Persistent transaction root: /var/minis/workspace does not survive across shell
-# processes on this device, so staged batches live under /var/minis/shared.
+# /var/minis/workspace does not survive across shell processes; staged batches live here.
 TRANSACTION_ROOT = Path('/var/minis/shared/surge-updates')
 ADAPTER = ROOT/'scripts/adapt_upstream_reference.py'
-# Files downloaded and staged from the official installation. `agents/openai.yaml`
-# is intentionally NOT applied automatically: it carries local Minis wording and is
-# compared by hand after every prepare.
+# agents/openai.yaml carries local wording and is compared by hand, never applied.
 DOWNLOAD = {'SKILL.md':'references/upstream-SKILL.md', 'references/command-reference.md':'references/upstream-command-reference.md', 'references/plugin-authoring.md':'references/plugin-authoring.md', 'agents/openai.yaml':'agents/openai.yaml', 'assets/logo.png':'assets/logo.png'}
 MANUAL = {'agents/openai.yaml'}
-# The official icon is not retained locally (the local `agents/openai.yaml` no longer
-# references it). It stays in DOWNLOAD so the structural --source gate and the
-# provenance manifest keep covering all five official files, but `apply` never writes
-# it back into the active tree.
+# The icon stays in DOWNLOAD for the gate and manifest but is never written back.
 NO_APPLY = {'assets/logo.png'}
 UNWRITTEN = MANUAL | NO_APPLY
 APPLY = {src: dst for src, dst in DOWNLOAD.items() if dst not in UNWRITTEN}
@@ -105,10 +99,8 @@ def check_reference_is_raw(path):
 def prepare(args):
     source = check_source_dir(args.source) if args.source else None
     if source is not None:
-        # Validated before any transaction directory exists: nothing is created or staged.
         check_reference_is_raw(source/'references/command-reference.md')
     if source is None and not args.host:
-        # Fail closed before the transaction directory, scp or ssh: no host is cached here.
         raise SystemExit(
             'Explicit --host required when --source is not given: pass the Mac target the user '
             'designated for this run. No default host is built into this skill, and nothing was '
@@ -123,7 +115,7 @@ def prepare(args):
         else:
             run(['scp','-q','-oBatchMode=yes','-oConnectTimeout=10',args.host+':/Applications/Surge.app/Contents/Resources/Skills/surge/'+src,str(p)])
     if not source:
-        # A downloaded reference is gated before staging too; raw evidence survives.
+        # Gate the downloaded reference before staging; raw evidence survives.
         try:
             check_reference_is_raw(raw/'references/command-reference.md')
         except SystemExit as exc:
@@ -144,10 +136,7 @@ def prepare(args):
     print('Review directory:',folder,flush=True)
     provenance={'source':args.source or args.host,'version_report':version,'retrieved_at':datetime.datetime.now().isoformat(),'raw_sha256':{s:current(raw/s) for s in DOWNLOAD},'runtime_validation':'not performed'}
     put(staged/'references/upstream-manifest.json',json.dumps(provenance,indent=2).encode())
-    # Only auto-applied files enter the transaction; staged copies of manual files
-    # stay in staged/ for human comparison, and staged copies of NO_APPLY files stay
-    # in staged/ only - neither is ever written by apply. Each entry records the
-    # active file's original mode (None = file did not exist yet).
+    # Only auto-applied files enter the transaction; mode None = file did not exist.
     files={str(p.relative_to(staged)):{'before':current(ROOT/p.relative_to(staged)),'after':current(p),'mode':mode_of(ROOT/p.relative_to(staged))} for p in staged.rglob('*') if p.is_file() and str(p.relative_to(staged)) not in UNWRITTEN}
     (folder/'transaction.json').write_text(json.dumps({'files':files,'adapter':current(ADAPTER),'manual':sorted(MANUAL)},indent=2))
     print('Prepared; active skill unchanged. Inspect review.diff, raw/, staged/ before apply.')
@@ -167,9 +156,7 @@ def apply(args):
     if tx['adapter']!=current(ADAPTER): raise SystemExit('Adapter changed; prepare again')
     for name,h in files.items():
         if current(ROOT/name)!=h['before'] or current(folder/'staged'/name)!=h['after']: raise SystemExit('Changed since prepare: '+name)
-    # Mode drift is checked BEFORE backup/ is created: if someone tightened or
-    # loosened a target file's mode after prepare (content untouched), applying
-    # would silently overwrite it with the mode recorded at prepare time.
+    # Mode drift is refused before backup/ exists.
     for name,h in files.items():
         now=mode_of(ROOT/name)
         if now!=h['mode']:
