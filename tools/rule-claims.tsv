@@ -15,8 +15,6 @@ skills/luno-lobehub/SKILL.md	references/skills.md	资源条件	资源加载边�
 skills/luno-lobehub/SKILL.md	references/knowledge.md	资源条件	资源加载边（入口·knowledge）
 skills/luno-lobehub/SKILL.md	references/instance.md	资源条件	资源加载边（入口·instance）
 skills/luno-lobehub/references/knowledge.md	references/instance.md	资源条件	资源加载边（knowledge→instance）
-skills/luno-lobehub/references/skills.md	references/knowledge.md	资源条件	资源加载边（skills→knowledge）
-skills/luno-lobehub/references/skills.md	references/instance.md	资源条件	资源加载边（skills→instance）
 skills/luno-review/SKILL.md	references/code-review.md	资源条件	资源加载边（review·代码审查/代码判断；CI-only仅读〈代码双轴与 CI〉）
 skills/luno-ops/SKILL.md	references/execution-environment.md	资源必需	资源加载边（ops）
 skills/luno-ops/SKILL.md	references/onlyboxes.md	资源条件	资源加载边（ops·沙箱落地）
@@ -96,8 +94,9 @@ skills/luno-core/SKILL.md	references/handoff.md	资源条件	精简提案新增�
 skills/luno-core/SKILL.md	references/writing-safety.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-lobehub/SKILL.md	references/agents.md	资源条件	精简提案新增分支，触发与全文见入口
 skills/luno-ops/SKILL.md	references/ssh.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-lobehub/references/agents.md	luno-core	必需加载	Agent资源前置
 skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
 skills/luno-sync/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
 skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
 skills/luno-minis/SKILL.md	references/session-groups.md	资源条件	资源加载边
+skills/luno-lobehub/references/agents.md	references/access.md	资源条件	资源加载边
+skills/luno-lobehub/references/instance.md	references/skills.md	资源条件	资源加载边
