@@ -1,10 +1,8 @@
 #!/bin/sh
-# Non-destructive acceptance test for Minis Surge CLI.
-# Tiers: --offline (default: syntax + local links only), --installed (offline plus
-# the PATH entry must resolve into this package), --controller (adds read-only
-# queries against the local instance), --network (additionally uploads a synthetic
-# secret-free Profile and sends DNS requests). No tier changes Surge settings;
-# --network never uploads a real profile.
+# Non-destructive acceptance test for Minis Surge CLI. Tiers: --offline (default: syntax +
+# local links), --installed (+ PATH entry resolves into this package), --controller (+ read-only
+# queries), --network (+ uploads a synthetic secret-free Profile, DNS requests). No tier changes
+# Surge settings.
 set -eu
 export PYTHONDONTWRITEBYTECODE=1
 SELF_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -39,10 +37,8 @@ for p in root.rglob('*.md'):
 PY
 pass "Offline syntax and local links"
 
-# --installed: the PATH entry must be a live link into *this* package. Renaming or
-# moving the skill directory leaves the old symlink dangling while every in-package
-# check still passes. SURGE_CLI_BIN (name or path) redirects the lookup so fixture
-# runs stay isolated from the host install point.
+# --installed: renaming the skill directory leaves the old link dangling while in-package checks
+# pass. SURGE_CLI_BIN (name or path) redirects the lookup.
 if [ "$MODE" = --installed ]; then
   python3 - "$SELF_DIR/surge_cli.py" "$CLI" <<'PY' || fail "Installed surge-cli does not resolve into this package"
 import os,sys
@@ -69,7 +65,6 @@ PY
 fi
 [ "$MODE" != --offline ] || exit 0
 
-# The temp workspace is only needed once a connected tier actually runs.
 TMP="$(mktemp -d /tmp/surge-cli-accept.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
