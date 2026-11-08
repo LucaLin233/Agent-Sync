@@ -61,4 +61,4 @@ Minis `subagent_task`：显式设置 max_minutes；progress_report=none（用户
 
 ## Git 提交署名
 
-Git 提交按实际编写者设置 Author：LUNO 使用 `LUNO <luno@local>`，FORGE 使用 `FORGE <forge@local>`，LENS 使用 `LENS <lens@local>`。作者按实际内容贡献判定，与谁操作仓库无关。代提交保留原作者，Committer 记实际提交者；共同编写用 `Co-authored-by` 补充，纯审查不署名；平台自动生成的合并提交（merge 与 squash）保留平台身份。提交前用 `git -c user.name=<角色名> -c user.email=<对应地址>` 或 `GIT_AUTHOR_*`/`GIT_COMMITTER_*` 显式指定身份，不依赖默认配置，也不沿用上一提交的身份；机械检查不代替对实际编写者的确认。规则仓库的 squash 署名和提交前检查见 `luno-sync/references/sync-workflow.md`。
+Git 提交按实际编写者设置 Author：LUNO 使用 `LUNO <luno@local>`，FORGE 使用 `FORGE <forge@local>`，LENS 使用 `LENS <lens@local>`。作者按实际内容贡献判定，与谁操作仓库无关。并登记下列精确身份对：`LIN student <86354789+MiCat-S@users.noreply.github.com>`（GitHub 账号 MiCat-S，仅作说明，不构成 GitHub 授权）、`Claude Opus 5.5 <noreply@anthropic.com>`。不设通配、别名或按域名放行；不新增运行端 Agent 或权限；署名仍按实际 Author 与合法 `Co-authored-by` 的并集判定。代提交保留原作者，Committer 记实际提交者；共同编写用 `Co-authored-by` 补充，纯审查不署名；平台自动生成的合并提交（merge 与 squash）保留平台身份。提交前用 `git -c user.name=<角色名> -c user.email=<对应地址>` 或 `GIT_AUTHOR_*`/`GIT_COMMITTER_*` 显式指定身份，不依赖默认配置，也不沿用上一提交的身份；机械检查不代替对实际编写者的确认。规则仓库的 squash 署名和提交前检查见 `luno-sync/references/sync-workflow.md`。
