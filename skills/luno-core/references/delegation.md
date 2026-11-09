@@ -13,7 +13,7 @@
 
 正式独立判断按 `luno-review`：判断者未参与被审版本的实现、身份可核、已加载规则；自己修改的版本不能独立放行。匿名或通用兜底只交执行事实，不形成正式判断。规则正文改动另按 `luno-sync` 的分级和独立差分验收，拟稿者不预审自己的改稿。
 
-子代理不注入常驻提示词，因此角色指令保留秘密底线，并强制先完整加载core；派发、受派、独立判断或非低风险任务，再读本资源的共同契约、预算和当前分支。四项边界只在上文定义，不在三份角色指令重复；默认分工与例外各自保留。必需规则缺失时停止依赖部分。
+子代理不注入常驻提示词，因此角色指令保留秘密底线，并强制先完整加载core；派发、受派、独立判断或非低风险任务，再读本资源的共同契约、预算和当前分支。必需规则缺失时停止依赖部分。
 
 ## 负责人：准入与派发
 
@@ -63,4 +63,4 @@ Minis `subagent_task`：显式设置 max_minutes；progress_report=none（用户
 
 ## Git 提交署名
 
-Git 提交按实际编写者设置 Author：LUNO 使用 `LUNO <luno@local>`，FORGE 使用 `FORGE <forge@local>`，LENS 使用 `LENS <lens@local>`。作者按实际内容贡献判定，与谁操作仓库无关。并登记下列精确身份对：`LIN student <86354789+MiCat-S@users.noreply.github.com>`（GitHub 账号 MiCat-S，仅作说明，不构成 GitHub 授权）、`Claude Opus 5.5 <noreply@anthropic.com>`。不设通配、别名或按域名放行；不新增运行端 Agent 或权限；署名仍按实际 Author 与合法 `Co-authored-by` 的并集判定。代提交保留原作者，Committer 记实际提交者；共同编写用 `Co-authored-by` 补充，纯审查不署名；平台自动生成的合并提交（merge 与 squash）保留平台身份。提交前用 `git -c user.name=<角色名> -c user.email=<对应地址>` 或 `GIT_AUTHOR_*`/`GIT_COMMITTER_*` 显式指定身份，不依赖默认配置，也不沿用上一提交的身份；机械检查不代替对实际编写者的确认。规则仓库的 squash 署名和提交前检查见 `luno-sync/references/sync-workflow.md`。
+Git 提交按实际编写者设置 Author：LUNO 使用 `LUNO <luno@local>`，FORGE 使用 `FORGE <forge@local>`，LENS 使用 `LENS <lens@local>`。作者按实际内容贡献判定，与谁操作仓库无关。并登记下列精确身份对：`LIN student <86354789+MiCat-S@users.noreply.github.com>`、`Claude Opus 5.5 <noreply@anthropic.com>`。代提交保留原作者，Committer 记实际提交者；共同编写用 `Co-authored-by` 补充，纯审查不署名；平台自动生成的合并提交（merge 与 squash）保留平台身份。提交前用 `git -c user.name=<角色名> -c user.email=<对应地址>` 或 `GIT_AUTHOR_*`/`GIT_COMMITTER_*` 显式指定身份，不依赖默认配置，也不沿用上一提交的身份；机械检查不代替对实际编写者的确认。规则仓库的 squash 署名和提交前检查见 `luno-sync/references/sync-workflow.md`。

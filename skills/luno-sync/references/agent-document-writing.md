@@ -34,6 +34,4 @@
 
 不采用的做法：按调用拆分技能、router skill、`disable-model-invocation` 之类的调用机制，以及用单个「锚词」代替多句说明。「按序列拆分」只作启发，不授予派发权限，派发仍按各入口和子代理规则。
 
-不把 negation 当作普遍定律，不据此改写现行禁令式表述。
-
 来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。

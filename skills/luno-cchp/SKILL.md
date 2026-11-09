@@ -20,7 +20,7 @@ CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provi
 
 - 任何实际CLI或API调用，以及认证、结果、错误、分页、重试、流式和下载的解释：`references/interfaces.md`。
 - 业务操作、解释、建议或结论，以及任何写入、恢复、覆盖或转发变更：完整读取 `references/workflows.md`；其中组织约定、改前快照、配置继承与恢复适用于所有写入。纯接口认证或分页咨询不触发业务资源。
-- 请求/响应覆盖规则（request-overrides，旧称“请求过滤器”）的读取、解释、建议、结论、草稿验证和任何写操作：`references/coverage-rules.md`；实际调用或涉及接口契约时另读 `references/interfaces.md`，写入或跨业务比较另完整读 `references/workflows.md`。整读不取消这些独立触发。
+- 请求/响应覆盖规则（request-overrides，旧称“请求过滤器”）的读取、解释、建议、结论、草稿验证和任何写操作：`references/coverage-rules.md`；实际调用或涉及接口契约时另读 `references/interfaces.md`，写入或跨业务比较另完整读 `references/workflows.md`。
 - 实际需要备份（如导入覆盖）或命中宿主机、容器、反代、DNS、TLS等运维时，按需加载 `luno-ops` 并读取命中的完整资源；需要备份的变更须完成改前备份与改后回读。普通对象操作仍须核授权、留改前快照、改后回读并具备恢复办法，不因免读ops而免除这些义务。
 - 来源、许可、改写边界或上游更新核对：完整读取 `luno-cchp/SOURCE.md` 的维护规则及其仓库登记；普通调用不加载来源档案。
 
