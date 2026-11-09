@@ -29,7 +29,6 @@ import hashlib
 import http.client
 import importlib
 import importlib.util
-import inspect
 import io
 import json
 import logging
@@ -334,23 +333,11 @@ class CliRunner(object):
             except OSError:
                 raise CleanupRefused("身份核验不可达", path)
             self.check_dir(st, (ident, uid, mode), path, "路径被替换")
-        name = os.path.basename(self.root)
-        rec_root = (self.records[0][2], self.records[0][3], self.records[0][4])
-        if not (getattr(shutil.rmtree, "avoids_symlink_attacks", False)
-                and "dir_fd" in inspect.signature(shutil.rmtree).parameters):
-            raise CleanupRefused("运行时缺 fd 锚定无跟随删除能力", self.root)
+        # rmtree 拒绝软链根，树内不跟随软链（各平台 fd 实现）；dir_fd 参数要 3.11 才有，不依赖它。
         try:
-            pfd = os.open(os.path.dirname(self.root) or ".", DIR_FLAGS)
-        except OSError:
-            raise CleanupRefused("父目录不可达", self.root)
-        try:
-            try:
-                self.check_dir(os.lstat(name, dir_fd=pfd), rec_root, self.root, "根被替换")
-                shutil.rmtree(name, dir_fd=pfd)
-            except OSError as exc:
-                raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)
-        finally:
-            os.close(pfd)
+            shutil.rmtree(self.root)
+        except OSError as exc:
+            raise CleanupRefused("删除失败 %s" % exc.__class__.__name__, self.root)
         self.verify_absent()
 
     @staticmethod
