@@ -4,7 +4,7 @@
 
 ## 约定
 
-- 运行正文不写来源说明。唯一的例外是 Apache-2.0 来源的改写内容，以下文件各保留一行修改声明：`skills/luno-sync/references/skill-authoring.md`、`skills/luno-sync/scripts/quick_validate.py`、`skills/luno-review/references/code-review.md`。
+- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-sync/references/skill-authoring.md`、`skills/luno-sync/scripts/quick_validate.py`、`skills/luno-review/references/code-review.md`。
 - 许可全文随技能包分发，文件名为 `skills/<技能>/LICENSE.*.txt`；本文件不是许可原文。对外分发含第三方改写内容的产物时，必须随附对应的版权行和许可全文。
 - 「精选改写」指按本端需要用中文改写选定的判据，不是原文翻译，也不整段照抄。
 - 「核对」指所注日期的本地或在线取证。标「在线可取性未复核」的条目此后没有再访问上游；整理本文件时也没有重新访问任何上游。
