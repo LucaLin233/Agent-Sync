@@ -1,7 +1,7 @@
 # 提交署名机械检查（CI 复核；权威判据仍是提交后、推送前本地运行同一检查器）。
 #   pull_request_target 运行默认分支的 workflow，并 checkout PR 的 base：检查器、规则与 web-flow 公钥
 #   都取自 base，PR 改它们不能给自己放行。head 只 fetch 成对象交给检查器读字节，绝不 checkout／执行；
-#   PR 事件先把 base 的检查器、规则与公钥按同布局取到 RUNNER_TEMP 再运行；base 缺任一项直接退出 2，不回落 head。
+#   base 缺检查器或规则时检查器启动失败（rc=2），不回落 head。
 #   PR：base..head 逐提交核对（不给 --allow-squash）。
 #   push 到 main：before..after，加 --allow-squash 放行经 web-flow 验签的平台 squash 提交。
 #   权限只读：pull_request_target 下也只给 contents: read。
@@ -25,32 +25,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
 
-      - name: 取出 base 侧检查器、规则与 web-flow 公钥（防 PR 自改绕过）
-        if: github.event_name == 'pull_request_target'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -eu
-          mkdir -p "$RUNNER_TEMP/guard"
-          git fetch --no-tags --quiet origin "$BASE_SHA" || true
-          if ! git cat-file -e "$BASE_SHA^{commit}"; then
-            echo "::error::base 提交不在本地对象库，无法取可信检查器"
-            exit 2
-          fi
-          take() {  # 按与仓库相同的相对布局写入 guard 目录（公钥按脚本所在目录解析）
-            if ! git cat-file -e "$BASE_SHA:$1" 2>/dev/null; then
-              echo "::error::base 缺少可信检查器、规则或公钥"
-              exit 2
-            fi
-            mkdir -p "$RUNNER_TEMP/guard/$(dirname "$1")"
-            git cat-file blob "$BASE_SHA:$1" > "$RUNNER_TEMP/guard/$1.part"
-            test -s "$RUNNER_TEMP/guard/$1.part"
-            mv "$RUNNER_TEMP/guard/$1.part" "$RUNNER_TEMP/guard/$1"
-          }
-          take tools/check-commit-identities.py
-          take tools/github-web-flow.gpg
-          take skills/luno-core/references/delegation.md
-
       - name: 核对提交署名
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -67,9 +41,7 @@ jobs:
               # fork PR 的 head 可能不能按 SHA 直接取；退到 PR ref，仍只取对象
               git fetch --no-tags --quiet origin "+refs/pull/$PR_NUMBER/head" || true
             fi
-            python3 -B "$RUNNER_TEMP/guard/tools/check-commit-identities.py" \
-              --base "$PR_BASE" --head "$PR_HEAD" \
-              --rules "$RUNNER_TEMP/guard/skills/luno-core/references/delegation.md"
+            python3 -B tools/check-commit-identities.py --base "$PR_BASE" --head "$PR_HEAD"
           else
             if [ "$PUSH_BEFORE" = 0000000000000000000000000000000000000000 ]; then
               echo "::error::push 前值为全零：无可信基线，未做署名检查"

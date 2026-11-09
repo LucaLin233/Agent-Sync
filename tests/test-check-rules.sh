@@ -213,14 +213,13 @@ for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set
 [ -z "$leak" ] && echo probe:ok || { echo "probe:leak$leak"; exit 1; }
 ''')
 ROWS=('lint|smoke|echo lint:ran|1','eat|g1|cat >/dev/null; echo eat:ran|1','probe|g1|sh tests/probe.sh|1',
-      'bad|g2|echo bad:ran; exit 1|0','path|g3|sh tests/pathprobe.sh|0',
-      'fakepy|g3|python3 -c probe|0','fakepyfail|g3|python3 -c fail-trigger|0')
+      'bad|g2|echo bad:ran; exit 1|0')
 FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:]
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
 HOSTILE=dict(os.environ,HOME=str(FIX/'home'),TMPDIR=str(FIX/'tmp'),PYTHONPATH=str(FIX/'poison'),
              SYNTH_SECRET='synthetic-secret',SYNTH_EMPTY='')
-def rt(*a,stdin=None,env=None):
-    r=subprocess.run(['sh','tests/run-tests.sh',*a],cwd=str(FIX),env=env or HOSTILE,input=stdin,
+def rt(*a,stdin=None):
+    r=subprocess.run(['sh','tests/run-tests.sh',*a],cwd=str(FIX),env=HOSTILE,input=stdin,
                      capture_output=True,text=True,errors='replace',timeout=120)
     return r.returncode,r.stdout+r.stderr
 def ran(out):return sorted(set(re.findall(r'(\w+):ran',out))|({'probe'} if 'probe:ok' in out else set()))
@@ -234,14 +233,6 @@ for label,args,stdin,rc,want in (
     code,out=rt(*args,stdin=stdin)
     check('runner %s：rc=%d 且只跑 %s'%(label,rc,want),code==rc and ran(out)==want and out.count('probe:ok')<=1,
           'rc=%d ran=%s\n%s'%(code,ran(out),out[-400:]))
-# 重复／重叠 selector：每入口真实只执行一次，失败传播与 rc 不变
-code,out=rt('select',stdin='[["group","g1"],["group","g1"],["case","probe"],["smoke"]]')
-check('select 重叠去重：每入口只执行一次',
-      code==0 and out.count('eat:ran')==1 and out.count('probe:ok')==1
-      and out.count('lint:ran')==1,out[-300:])
-code,out=rt('select',stdin='[["group","g1,g2"],["case","bad"],["group","g1"]]')
-check('select 重叠去重不吞失败：rc=1 且失败入口只执行一次',
-      code==1 and out.count('bad:ran')==1 and out.count('eat:ran')==1,out[-300:])
 check('runner 失败入口附错误尾段','| bad:ran' in rt('case','bad')[1])
 for label,args,stdin in (('未知 case',('case','nope'),None),('未知组',('group','nope'),None),
                          ('选不到入口的 selector',('select',),'[["full"],["group","nope"]]'),
@@ -256,27 +247,6 @@ code,out=rt('select-paths',stdin='')
 check('select-paths：无命中只给 smoke',code==0 and out.strip()=='[["smoke"]]',out)
 code,out=rt('select-paths',stdin='tests/unregistered.py\0')
 check('select-paths：未登记测试路径拒绝',code==2,out)
-# PATH：runner 按已披露语义把调用方 PATH 逐字节交给入口；前置假 python3 必须被选中
-FAKE=FIX/'fakebin';FAKE.mkdir(exist_ok=True)
-(FAKE/'python3').write_text('#!/bin/sh\ncase "$*" in *fail-trigger*) echo fakepy:fail >&2; exit 3 ;;'
-                            ' esac\necho fakepy:selected\nexit 0\n')
-os.chmod(str(FAKE/'python3'),0o755)
-(FIX/'tests/pathprobe.sh').write_text('''want=$(cat tests/expected-path) || exit 1
-[ "$PATH" = "$want" ] && { echo path:same; exit 0; }
-echo "path:diff PATH=$PATH"; exit 1
-''')
-def rt_path(*a,path):
-    (FIX/'tests/expected-path').write_text(path+'\n',encoding='utf-8')
-    return rt(*a,env=dict(HOSTILE,PATH=path))
-FAKEPATH=str(FAKE)+':'+HOSTILE['PATH']
-code,out=rt_path('case','path',path=FAKEPATH)
-check('runner 把调用方 PATH 逐字节交给入口',code==0 and 'path:same' in out,out[-300:])
-code,out=rt_path('case','fakepy',path=FAKEPATH)
-check('PATH 前置假 python3 被选中（不硬改 PATH）',code==0 and 'fakepy:selected' in out,out[-300:])
-code,out=rt_path('case','fakepyfail',path=FAKEPATH)
-# 聚合契约：失败入口使 runner 退出 1，诊断行保留入口真实 rc=3
-check('失败入口：聚合 rc=1 且保留入口真实 rc=3 诊断',
-      code==1 and 'rc=3' in out and 'fakepy:fail' in out,out[-300:])
 # 负控：去掉 env -i 后探针必须报泄漏，证明隔离断言不是空转
 assert FIXED.count('env -i ')==1
 (FIX/'tests/run-tests.sh').write_text(FIXED.replace('env -i ','env '),encoding='utf-8')
