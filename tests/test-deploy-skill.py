@@ -18,7 +18,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -31,11 +30,6 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "deploy_skill.py"
-BOOTSTRAP = ("import importlib.util as u, sys\n"
-             "s = u.spec_from_file_location('deploy_skill_main', sys.argv[1])\n"
-             "m = u.module_from_spec(s); s.loader.exec_module(m)\n"
-             "m.CLI_LAUNCHERS = (sys.argv[2],)\n"     # 仅替换信任根，不复制解析算法
-             "sys.exit(m.main(sys.argv[3:]))\n")
 SURGE_PACKER = "skills/luno-surge/scripts/package_release.py"
 
 MARK = "SYNTHETIC-SECRET-9f3c1a7d"   # 只出现在夹具的凭据／签名 URL／原始报文里，绝不允许外流
@@ -137,8 +131,7 @@ class Repo(object):
         base = {"HOME": str(self.root), "TMPDIR": str(self.root),
                 "PATH": "%s:/usr/bin:/bin" % self.bin, "PYTHONPATH": str(self.root / "poison")}
         base.update(env or {})
-        cp = subprocess.run([sys.executable, "-B", "-c", BOOTSTRAP, str(TOOL), str(self.bin / "lh")]
-                            + argv, cwd=str(self.repo), env=base,
+        cp = subprocess.run([sys.executable, "-B", str(TOOL)] + argv, cwd=str(self.repo), env=base,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         return cp.returncode, cp.stdout.decode("utf-8", "replace"), cp.stderr.decode("utf-8", "replace")
 
@@ -341,7 +334,6 @@ class Harness(object):
     def __init__(self, repo, pre_blob=b"pre-deploy-zip-bytes"):
         self.repo, self.pre_blob = repo, pre_blob
         self.mod = load(TOOL, "deploy_skill_under_test")
-        self.mod.CLI_LAUNCHERS = (str(repo.bin / "lh"),)   # 合成信任入口（仅测试接缝）
         self.mod.WRITE_RETRY_DELAYS = (0.0, 0.0)
         self.mod.REPAIR_POLL_DELAYS = (0.0,) * 5
         self.real_open_storage = self.mod.open_storage
@@ -522,31 +514,6 @@ class LocalPackage(Case):
                 if label == "0755":
                     self.assertEqual(os.stat(str(repo.src / "scripts/run.sh")).st_mode & 0o777,
                                      0o755, "不得压平源权限")
-
-    def test_cache_members_refused_without_inventory_help(self):
-        """__pycache__ 路径段与 .pyc 由候选清单内建拒绝：登记与否都拒，普通文件正控不退。"""
-        # 错误文本用的是 ZIP 成员名（技能根相对名），不是 repo 相对路径
-        probes = (("registered __pycache__", "__pycache__/fixture.cpython-311.pyc", True,
-                   "［__pycache__/fixture.cpython-311.pyc］"),
-                  ("registered .pyc", "references/stray.pyc", True, "候选清单含 Python 缓存文件"),
-                  ("unregistered __pycache__", "__pycache__/orphan.cpython-311.pyc", False,
-                   "候选清单含 Python 缓存文件"))
-        for label, rel, register, needle in probes:
-            with self.subTest(label):
-                repo = self.repo()
-                write(repo.src / rel, b"\x00cache")
-                if register:
-                    repo.register()          # live() 现读：坏成员被显式登记，不靠清单差异拦
-                self.assert_fail(pack_inproc(repo), 2, "本地校验", needle)
-                self.assertEqual(repo.artifacts(), [], "拒绝时不得写出候选")
-                self.assertEqual((repo.lh_calls(), repo.sdk_imported()), ([], False))
-        repo = self.repo()
-        write(repo.src / "references/notes.txt", "普通文件\n")
-        repo.register()
-        rc, out, err = repo.run(repo.args())
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(sorted(zip_members(repo.candidate())),
-                         ["SKILL.md", RES, "references/notes.txt"])
 
     def test_inventory_must_equal_package(self):
         repo = self.repo()
@@ -782,204 +749,6 @@ class ControlledCli(Case):
         self.assertNotIn(MARK, out + err)
 
 
-# ── 临时根生命周期 ───────────────────────────────────────────────────────────
-
-class TempLifecycle(Case):
-    """D2：临时根身份、共用 close、拒删与错误优先级。"""
-
-    LINE = re.compile(r"临时(\S+)：path=(\S+) dev=(\d+) ino=(\d+) uid=(\d+) mode=(\d+)")
-
-    def capture(self, h):
-        lines, mod, real = [], getattr(h, "mod", h), None
-
-        def log(line):
-            lines.append(line)
-            real(line)
-
-        real = mod.log
-        mod.log = log
-        return lines
-
-    def created(self, lines):
-        return [(m.group(2), int(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6), 8))
-                for m in map(self.LINE.match, lines) if m]
-
-    def gone(self, lines, n=5):
-        found = self.created(lines)
-        self.assertEqual(len(found), n)
-        for path, _d, _i, _u, _m in found:
-            self.assertFalse(os.path.lexists(path))
-
-    def sentinel(self):
-        self.n += 1
-        keep = self.work / ("sentinel%d" % self.n)
-        keep.mkdir()
-        (keep / "keep.txt").write_text("sentinel")
-        return keep
-
-    def test_creation_identity_and_cleanup(self):
-        h = self.harness()
-        lines = self.capture(h)
-        seen, real = [], h.platform.view
-
-        def view(args, stage, timeout):
-            if not seen:
-                for path, dev, ino, uid, mode in self.created(lines):
-                    st = os.lstat(path)
-                    seen.append((st.st_dev, st.st_ino, st.st_uid, stat.S_IMODE(st.st_mode)))
-                    self.assertEqual(seen[-1], (dev, ino, uid, mode))
-                    self.assertEqual(mode, 0o700)
-            return real(args, stage, timeout)
-
-        h.mod.run_lh = view
-        rc, out, err = h.run()
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(len(seen), 5)
-        self.gone(lines)
-
-    def test_partial_construction_failure_closes(self):
-        h = self.harness()
-        lines = self.capture(h)
-        real, calls = os.mkdir, []
-
-        def mkdir(path, mode=0o777, **kw):
-            calls.append(path)
-            if len(calls) == 3:
-                raise OSError(13, "denied")
-            return real(path, mode, **kw)
-
-        with mock.patch.object(h.mod.os, "mkdir", mkdir):
-            rc, out, err = h.run()
-        self.assertEqual(rc, 2, out + err)
-        self.assertIn("无法建立受控 CLI 环境", err)
-        self.gone(lines, 2)
-
-    def test_business_failure_and_timeout_keep_primary(self):
-        h = self.harness()
-        lines = self.capture(h)
-        h.platform.view_rc = 1
-        rc, out, err = h.run()
-        self.assertEqual(rc, 2, out + err)
-        self.assertIn("阶段失败：平台回读｜", err)
-        self.gone(lines)
-
-        repo = self.repo()
-        mod = load(TOOL, "deploy_skill_timeout")
-        mod.CLI_LAUNCHERS = (str(repo.bin / "lh"),)
-        lines = self.capture(mod)
-        with mock.patch.dict(os.environ, {"PATH": "%s:/usr/bin:/bin" % repo.bin}, clear=True):
-            mod.freeze_cli_runner(ORIGIN, "k")
-        with mock.patch.object(mod.CliRunner, "call",
-                               side_effect=subprocess.TimeoutExpired(["lh"], 1)):
-            with self.assertRaises(mod.Fail) as ctx:
-                mod.run_lh(["skill", "view"], mod.STAGE_PLATFORM, 1.0)
-        self.assertEqual(ctx.exception.rc, 2)
-        self.assertIn("超过剩余预算", ctx.exception.detail)
-        self.assertEqual(mod.release_cli_runner(), (None, False))
-        self.gone(lines)
-
-    def test_internal_symlink_removed_without_following(self):
-        """内部软链不跟随：删链接本身，目标哨兵字节不变，整体收尾成功。"""
-        keep = self.sentinel()
-        h = self.harness()
-        lines = self.capture(h)
-        real, fired = h.platform.view, []
-
-        def view(args, stage, timeout):
-            if not fired:
-                fired.append(1)
-                os.symlink(str(keep), os.path.join(self.created(lines)[1][0], "link"))
-            return real(args, stage, timeout)
-
-        h.mod.run_lh = view
-        rc, out, err = h.run()
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual((keep / "keep.txt").read_text(), "sentinel")
-        self.assertNotIn(MARK, out + err)
-
-    def test_cleanup_only_failure_rc_priority(self):
-        def deny(op):
-            real = getattr(os, op)
-
-            def call(path, *a, **kw):
-                if kw.get("dir_fd") is not None:
-                    raise PermissionError(13, "denied")
-                return real(path, *a, **kw)
-
-            return call
-
-        for view_rc, want in ((0, 1), (1, 2)):
-            with self.subTest(view_rc):
-                h = self.harness()
-                h.platform.view_rc = view_rc
-                with mock.patch.object(h.mod.os, "rmdir", deny("rmdir")):
-                    rc, out, err = h.run()
-                self.assertEqual(rc, want, out + err)
-                self.assertIn("清理失败", err)
-                self.assertIn("deploy-lh-", err)
-                if view_rc:
-                    self.assertIn("阶段失败：平台回读｜", err)
-                else:
-                    self.assertIn("阶段失败：清理｜", err)
-
-        h = self.harness()
-        real_lstat = os.lstat
-
-        def deny(path, *a, **kw):
-            try:
-                return real_lstat(path, *a, **kw)
-            except FileNotFoundError:
-                raise PermissionError(13, "denied")
-
-        with mock.patch.object(h.mod.os, "lstat", deny):
-            rc, out, err = h.run()
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("核验不可达", err, "lexists 语义被拒：底层 lstat EACCES 不算 absent")
-
-    def test_recorded_mode_change_is_refused(self):
-        for where in ("root", "home"):
-            with self.subTest(where):
-                h = self.harness()
-                lines = self.capture(h)
-                seen = []
-                real_close = h.mod.CliRunner.close
-
-                def close(runner):
-                    seen.append(runner.records[0 if where == "root" else 1][1])
-                    os.chmod(seen[-1], 0o755)
-                    return real_close(runner)
-
-                with mock.patch.object(h.mod.CliRunner, "close", close):
-                    rc, out, err = h.run()
-                self.assertEqual(rc, 1, out + err)
-                self.assertIn("清理失败", err)
-                self.assertIn(seen[-1], err)
-                self.assertTrue(os.path.isdir(seen[-1]), "变权限后拒删，不 chmod 补救")
-                os.chmod(seen[-1], 0o700)
-
-    def test_dangling_symlink_at_recorded_path_counts_as_present(self):
-        h = self.harness()
-        lines = self.capture(h)
-        root = []
-
-        real = os.rmdir
-
-        def rmdir(path, *a, **kw):
-            out = real(path, *a, **kw)
-            recs = self.created(lines)
-            if not root and recs and path == recs[0][0]:
-                root.append(recs[0][0])
-                os.symlink("/nonexistent-d1d2", root[0])
-            return out
-
-        with mock.patch.object(h.mod.os, "rmdir", rmdir):
-            rc, out, err = h.run()
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("路径仍存在", err)
-        self.assertTrue(os.path.islink(root[0]))
-        os.unlink(root[0])
-
-
 # ── 部署流程 ─────────────────────────────────────────────────────────────────
 
 class DeployFlow(Case):
@@ -987,21 +756,12 @@ class DeployFlow(Case):
 
     def test_happy_path(self):
         h = self.harness()
-        rollback = h.repo.out / (NAME + ".predeploy.zip")
-        seen = []
-        put = h.s3.put_object
-
-        def watch(**kw):
-            seen.append((os.stat(str(rollback)).st_mode & 0o7777, sha(rollback.read_bytes())))
-            return put(**kw)
-
-        h.s3.put_object = watch
         rc, out, err = h.run()
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(h.s3.puts, [key_of(NAME)])
+        rollback = h.repo.out / (NAME + ".predeploy.zip")
         self.assertEqual(rollback.read_bytes(), h.pre_blob)
         self.assertEqual(os.stat(str(rollback)).st_mode & 0o7777, 0o600, "自动备份 0600")
-        self.assertEqual(seen, [(0o600, sha(h.pre_blob))])
         installs = h.platform.kinds("install")
         self.assertEqual([r["payload"] for r in installs], [{"url": h.fetched_urls[0]}])
         self.assertEqual(installs[0]["headers"]["X-API-Key"], API_KEY)
@@ -1016,6 +776,22 @@ class DeployFlow(Case):
         self.assertTrue(all(t and 0 < t <= 10 for _a, t in h.platform.views), "每次回读都带预算")
         self.assertIn("回读判等：", out)
         self.assertNotIn(MARK, out + err)
+
+    def test_temp_cli_root_removed_and_cleanup_failure_only_warns(self):
+        def run(h):
+            roots, view = [], h.platform.view
+            h.mod.run_lh = lambda *a: roots.append(h.mod.RUNNER.root) or view(*a)
+            return h.run(), roots[0]
+
+        (rc, out, err), root = run(self.harness())
+        self.assertEqual(rc, 0, out + err)
+        self.assertFalse(os.path.exists(root), "收尾删除临时根")
+        h = self.harness()
+        with mock.patch.object(h.mod.shutil, "rmtree", side_effect=OSError("busy")):
+            (rc, out, err), root = run(h)
+        self.addCleanup(shutil.rmtree, root, True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("临时目录残留 %s" % root, err)
 
     def test_predeploy_guards_stop_before_any_write(self):
         cases = (
@@ -1345,183 +1121,6 @@ class AtomicWrite(Case):
         self.assertEqual(ctx.exception.rc, 2)
         self.assertEqual(target.read_bytes(), b"old")
         self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["a.zip"])
-
-    def test_caller_mode_before_publish_and_failure_old(self):
-        mod = load(TOOL, "deploy_skill_atomic_mode")
-        target = self.work / "b.zip"
-        target.write_bytes(b"old")
-        os.chmod(str(target), 0o640)
-        mod.write_atomic(str(target), b"new", mod.STAGE_ROLLBACK, 0o600)
-        self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
-                         (b"new", 0o600))
-        mod.write_atomic(str(target), b"pkg", mod.STAGE_PACK)
-        self.assertEqual(os.stat(str(target)).st_mode & 0o7777, 0o644)
-        for op in ("fchmod", "replace"):
-            with mock.patch.object(mod.os, op, side_effect=OSError("nope")):
-                with self.assertRaises(mod.Fail):
-                    mod.write_atomic(str(target), b"x", mod.STAGE_ROLLBACK, 0o600)
-            self.assertEqual((target.read_bytes(), os.stat(str(target)).st_mode & 0o7777),
-                             (b"pkg", 0o644))
-            self.assertEqual(sorted(p.name for p in self.work.iterdir()), ["b.zip"])
-
-
-# ── 备份回读身份绑定 ─────────────────────────────────────────────────────────
-
-class BackupBinding(Case):
-    """B4：备份回读必须绑定刚发布的普通文件，不跟随替换件／软链；失败固定 rc2 且零上传。"""
-
-    def test_replacement_or_stat_refusal_stops_before_upload(self):
-        for kind in ("symlink", "inode", "stat", "chmod"):
-            with self.subTest(kind):
-                h = self.harness()
-                twin = self.work / "twin.zip"
-                twin.write_bytes(h.pre_blob)
-                os.chmod(str(twin), 0o600)
-                real_wa = h.mod.write_atomic
-
-                def wa(path, blob, stage, mode=0o644):
-                    ident = real_wa(path, blob, stage, mode)
-                    if path.endswith(".predeploy.zip") and kind in ("symlink", "inode"):
-                        os.rename(path, path + ".real")
-                        if kind == "symlink":
-                            os.symlink(str(twin), path)
-                        else:
-                            os.replace(str(twin), path)
-                    return ident
-
-                real_stat = os.stat
-
-                def deny(path, *a, **kw):
-                    if kw.get("dir_fd") is not None:
-                        raise PermissionError(13, "denied")
-                    return real_stat(path, *a, **kw)
-
-                real_read = os.read
-                backup = h.repo.out / (NAME + ".predeploy.zip")
-
-                def read(fd, n):
-                    blob = real_read(fd, n)
-                    if kind == "chmod" and blob and os.path.exists(str(backup)):
-                        os.chmod(str(backup), 0o644)
-                    return blob
-
-                with mock.patch.object(h.mod, "write_atomic", wa):
-                    if kind == "stat":
-                        with mock.patch.object(h.mod.os, "stat", deny):
-                            rc, out, err = h.run()
-                    elif kind == "chmod":
-                        with mock.patch.object(h.mod.os, "read", read):
-                            rc, out, err = h.run()
-                    else:
-                        rc, out, err = h.run()
-                self.assertEqual(rc, 2, out + err)
-                self.assertIn("回滚包", err)
-                self.assertEqual((h.s3.puts, h.platform.requests), ([], []))
-                self.assertNotIn(MARK, out + err)
-
-
-# ── 启动器信任：PATH 只用于选择已知安装入口 ──────────────────────────────────
-
-def resolve_with(mod, env):
-    with mock.patch.dict(os.environ, env, clear=True):
-        return mod.resolve_cli_argv()
-
-
-class LauncherTrust(Case):
-    """名单外同名可执行文件、shim／mise、非可执行目标一律固定 Fail（平台回读阶段）。"""
-
-    def test_old_rule_accepts_but_allowlist_refuses(self):
-        h = self.harness()
-        rogue = self.work / "rogue-bin"
-        write(rogue / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        h.env["PATH"] = "%s:/usr/bin:/bin" % rogue
-        entry = shutil.which("lh", path=h.env["PATH"])
-        real = os.path.realpath(entry)
-        self.assertEqual(str(rogue / "lh"), entry)
-        self.assertTrue(os.path.isfile(real) and os.access(real, os.X_OK), "旧判定接受该伪 lh")
-        self.assertNotIn(real, h.mod.CLI_LAUNCHERS)
-        self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-        self.assertEqual((h.platform.views, h.s3.gets, h.platform.requests), ([], [], []))
-        self.assertEqual(h.repo.artifacts(), [key_of(NAME)], "只有本地候选包，伪 lh 未被执行")
-
-    def test_non_allowlisted_path_shapes_are_refused(self):
-        similar = self.work / "usr" / "local" / "bin2"
-        write(similar / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        cwd = self.work / "cwd"
-        write(cwd / "rel-bin" / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        write(cwd / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        old = os.getcwd()
-        os.chdir(cwd)
-        try:
-            for label, path in (("prefix", "%s:/usr/bin:/bin" % similar),
-                                ("relative", "rel-bin:/usr/bin:/bin"),
-                                ("empty segment", ":/usr/bin:/bin")):
-                with self.subTest(label):
-                    h = self.harness()
-                    self.assertTrue(shutil.which("lh", path=path), "攻击入口确实能被 which 命中")
-                    h.env["PATH"] = path
-                    self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-                    self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets,
-                                      h.platform.requests), ([], [], [], []))
-        finally:
-            os.chdir(old)
-
-    def test_no_lh_on_path_is_refused(self):
-        h = self.harness()
-        h.env["PATH"] = "/usr/bin:/bin"
-        self.assertIsNone(shutil.which("lh", path=h.env["PATH"]))
-        self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-        self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets, h.platform.requests),
-                         ([], [], [], []))
-
-    def test_allowlisted_entry_and_legal_symlink_still_work(self):
-        h = self.harness()
-        inst = self.work / "opt" / "lobehub"
-        write(inst / "cli", "#!/bin/sh\nexit 0\n", mode=0o755)
-        (inst / "lh").symlink_to(inst / "cli")
-        h.mod.CLI_LAUNCHERS = (str(inst / "lh"),)
-        h.env["PATH"] = "%s:/usr/bin:/bin" % inst
-        self.assertEqual([str(inst / "cli")], resolve_with(h.mod, h.env), "合法软链解析为真实目标")
-        rc, out, err = h.run()
-        self.assertNotIn("无法解析 lh 启动器", err, "名单内入口不提前拒绝")
-        self.assertTrue(h.platform.views, "冻结后进入平台回读")
-
-    def test_shim_mise_and_non_executable_reach_their_branches(self):
-        h = self.harness()
-        shims = self.work / "mise" / "shims"
-        write(shims / "lh", "#!/bin/sh\nexit 0\n", mode=0o755)
-        mise = self.work / "mise" / "bin"
-        write(mise / "mise", "#!/bin/sh\nexit 0\n", mode=0o755)
-        (mise / "lh").symlink_to(mise / "mise")
-        for label, entry in (("shim", shims / "lh"), ("mise", mise / "lh")):
-            with self.subTest(label):
-                h.mod.CLI_LAUNCHERS = (str(entry),)
-                h.env["PATH"] = "%s:/usr/bin:/bin" % entry.parent
-                self.assertEqual(str(entry), shutil.which("lh", path=h.env["PATH"]), "命中该入口")
-                self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-                self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets,
-                                  h.platform.requests), ([], [], [], []))
-
-    def test_non_executable_real_target_guard_branch(self):
-        """软链入口＋真实目标不可执行：which 仍命中，走 access 守卫。"""
-        h = self.harness()
-        inst = self.work / "opt" / "lobehub"
-        write(inst / "cli", "#!/bin/sh\nexit 0\n", mode=0o755)
-        entry, target = inst / "lh", str(inst / "cli")
-        entry.symlink_to(inst / "cli")
-        h.mod.CLI_LAUNCHERS = (str(entry),)
-        h.env["PATH"] = "%s:/usr/bin:/bin" % inst
-        self.assertEqual(str(entry), shutil.which("lh", path=h.env["PATH"]), "which 选中入口")
-        real_access = h.mod.os.access
-
-        def access(path, mode):
-            return False if path == target else real_access(path, mode)
-        with mock.patch.object(h.mod.os, "access", access):
-            self.assertEqual(str(entry), shutil.which("lh", path=h.env["PATH"]),
-                             "注入不影响 which 命中")
-            self.assert_fail(h.run(), 2, "平台回读", "无法解析 lh 启动器")
-        self.assertEqual((h.platform.views, h.s3.puts, h.s3.gets, h.platform.requests),
-                         ([], [], [], []))
 
 
 if __name__ == "__main__":
