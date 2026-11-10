@@ -13,7 +13,7 @@ case "$rc" in 0|2) ;; *) exit "$rc" ;; esac
 python3 -B - "$ROOT" <<'PY'
 import importlib.util,json,sys
 from pathlib import Path
-root=Path(sys.argv[1]); p=root/'skills/luno-sync/scripts/quick_validate.py'
+root=Path(sys.argv[1]); p=root/'skills/luno-core/scripts/quick_validate.py'
 spec=importlib.util.spec_from_file_location('quick_validate',p)
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 d=json.loads((root/'tools/sync-targets.json').read_text(encoding='utf-8'))

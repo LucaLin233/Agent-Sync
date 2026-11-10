@@ -22,7 +22,7 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 
 ## GitHub 操作
 
-改**规则仓库** `LucaLin233/Agent-Sync`（公开；工作副本 `/var/minis/shared/agent-sync`）之前，先加载 `luno-sync`：该仓库有自己的并发和门禁纪律，按通用 git 流程操作会绕过它。
+改**规则仓库** `LucaLin233/Agent-Sync`（公开；工作副本 `/var/minis/shared/agent-sync`）之前，先加载 `luno-core/references/sync.md`：该仓库有自己的并发和门禁纪律，按通用 git 流程操作会绕过它。
 
 ## 方法
 
@@ -31,13 +31,13 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 - **lint**：按项目入口和 shebang 选择 lint；ShellCheck 不支持的 shell（如 zsh）不能声称通过。
 - **批量替换**：先暂存并校验全部源和备份，再逐项切换；失败要显式退出并按授权恢复。禁止先删后复制，不依赖 `set -e` 或循环末尾的 `||` 兜底。
 - **数据传递**：NUL 分隔的数据（如 `git diff --name-only -z`）不能经过 shell 变量或命令替换，用管道或 Python `subprocess` 的 bytes 输入保留分隔符，否则不能据下游结果判定验证通过。解析 JSON 前分别捕获 stdout、stderr 和退出码，确认 stdout 只有预期的 JSON，不混在一起解析。heredoc 里要由远端或子进程展开的变量，用带引号的定界符。执行权限按需要的主体最小设置并核对实际 mode，不把 `+x` 当作预期权限。
-- **BusyBox/Alpine**：`cut -c` 按字节截断多字节字符，验证中文时不要用。涉及 Minis/iSH 的掩码误改和路径异常时，操作或下结论前另加载 `luno-minis` 并读它的运行时资源；非 Minis 目标不必加载。
+- **BusyBox/Alpine**：`cut -c` 按字节截断多字节字符，验证中文时不要用。涉及 Minis/iSH 的掩码误改和路径异常时，操作或下结论前另加载 `luno-platform/references/minis.md` 并读它的运行时资源；非 Minis 目标不必加载。
 
 ## 安全与测试
 
 - **连接配置**：SSH 主机清单和连接约定在 Minis 端的 `GLOBAL.md`（用户维护，不随技能分发）。本端没有这个文件时，向用户索取别名、主机名、用户、端口等非秘密参数；凭据只用已注入变量引用，不索取也不写入秘密值，不因为缺清单就去连默认主机。
 - **凭据临时文件**必须由脚本自己在 trap 或清理路径里删除；用 `exec` 替换进程的脚本没机会清理，不能用它落盘私钥。
-- **确认**：系统级安装、权限扩大和生产副作用按 `luno-core`〈授权与安全〉判定；只生成未生效的配置不需确认。
+- **确认**：系统级安装、权限扩大和生产副作用按 `luno-core/references/safety.md`〈授权与安全〉判定；只生成未生效的配置不需确认。
 - **测试隔离**：本机测试按执行环境原生隔离；Docker/systemd 只在原生支持的 Linux 目标上用。测试的硬边界：不带生产凭据，不挂生产数据或 Docker socket，不用特权或宿主命名空间；systemd 限额不等于权限隔离。真实的网络、内核、磁盘、服务变更和重测试放在独立的测试 VM 里。
 
 ## 输出

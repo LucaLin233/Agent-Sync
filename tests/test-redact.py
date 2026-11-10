@@ -7,7 +7,7 @@
   （env／printenv／cat／SELECT * 等）只能出现在禁止语境里。
 
 两类都只核离线夹具与模板文本，不证明自由 Shell 已被机械限制；读取侧关口仍由执行者按
-`luno-core`〈秘密面〉与各模板遵守。标记 `ZMARK` 为合成低熵串。
+`luno-core/references/safety.md`〈秘密面〉与各模板遵守。标记 `ZMARK` 为合成低熵串。
 """
 import importlib.util
 import json
@@ -31,14 +31,15 @@ LONG_BLOB = M * 9 + '0123456789abcdef'                 # 40+ 字符不透明串
 JWT = 'eyJ' + M + 'abc.' + M + 'def.' + M + 'gh'
 SK_KEY = 'sk-' + M + '0123456789abcdef'
 
-OPS, HUB, MINIS = ROOT / 'skills/luno-ops', ROOT / 'skills/luno-lobehub', ROOT / 'skills/luno-minis'
+OPS, HUB, MINIS = ROOT / 'skills/luno-ops', ROOT / 'skills/luno-platform', ROOT / 'skills/luno-platform'
 TEMPLATE_FILES = {
+    'platform-entry': HUB / 'SKILL.md',
     'ops-entry': OPS / 'SKILL.md',
     'ops-runtime': OPS / 'references/service-runtime.md',
-    'hub-instance': HUB / 'references/instance.md',
-    'hub-entry': HUB / 'SKILL.md',
-    'minis-config': MINIS / 'references/configuration.md',
-    'sync-workflow': ROOT / 'skills/luno-sync/references/sync-workflow.md',
+    'hub-instance': HUB / 'references/lobehub-instance.md',
+    'hub-entry': HUB / 'references/lobehub.md',
+    'minis-config': MINIS / 'references/minis-configuration.md',
+    'sync-workflow': ROOT / 'skills/luno-core/references/sync-workflow.md',
 }
 OPS_RUNTIME, HUB_INSTANCE, HUB_ENTRY = (TEMPLATE_FILES[k] for k in ('ops-runtime', 'hub-instance', 'hub-entry'))
 # 模板必须真的给出这些声明范围形态（缺锚点 ⇒ 禁止原语检查会空转）

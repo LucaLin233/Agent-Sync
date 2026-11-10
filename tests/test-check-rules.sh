@@ -11,7 +11,8 @@ spec=importlib.util.spec_from_file_location('guard',ROOT/'tools/check-rules.py')
 G=importlib.util.module_from_spec(spec);spec.loader.exec_module(G)
 PASS=FAIL=0
 TMP=Path(tempfile.mkdtemp(prefix='test-check-rules.'))
-SYNC='skills/luno-sync/SKILL.md'
+ENTRY='skills/luno-core/SKILL.md'
+SYNC='skills/luno-core/references/sync.md'
 CLAIMS='tools/rule-claims.tsv'
 
 def check(label,ok,detail=''):
@@ -55,25 +56,31 @@ def scope_files(p):
     return [f for top in ('skills','prompt','subagents') for f in (p/top).rglob('*')
             if f.is_file() and f.suffix in ('.md','.py','.sh')]
 
+# Fixture contracts: entry must retain actual frontmatter; sync is a resource.
+assert (ROOT/ENTRY).read_text(encoding='utf-8').startswith('---\nname: luno-core\n')
+assert not (ROOT/SYNC).read_text(encoding='utf-8').startswith('---\n')
+assert (ROOT/'skills/luno-authoring/SKILL.md').is_file()
+assert not any(m[2]=='luno-authoring' for m in G.LOAD_RE.finditer((ROOT/SYNC).read_text(encoding='utf-8')))
+
 # ── 正控 ──
 case('完整正控',0,'无问题')
 case('frontmatter 内的加载语句不算加载边',0,'无问题',
-     lambda p:edit(p,SYNC,lambda s:s.replace('name: luno-sync','name: luno-sync\nmetadata: "必须加载 `luno-example-only`"',1)))
+     lambda p:edit(p,ENTRY,lambda s:s.replace('name: luno-core','name: luno-core\nmetadata: "必须加载 `luno-example-only`"',1)))
 
 # ── 登记表 ──
 case('缺登记表',3,'读取失败',lambda p:(p/CLAIMS).unlink())
 case('空登记表',3,'条款登记为空',lambda p:(p/CLAIMS).write_text('# empty\n'))
-case('登记字段数错误',3,'条款登记字段',lambda p:claim(p,SYNC,'luno-review','条件加载'))
-case('未知形态',3,'加载形态',lambda p:claim(p,SYNC,'luno-review','未知','x'))
+case('登记字段数错误',3,'条款登记字段',lambda p:claim(p,SYNC,'luno-authoring','条件加载'))
+case('未知形态',3,'加载形态',lambda p:claim(p,SYNC,'luno-authoring','未知','x'))
 case('重复登记',1,'重复登记',lambda p:append(p,CLAIMS,claim_rows(p)[0]+'\n'))
-case('登记来源不存在',3,'加载边来源缺失',lambda p:claim(p,'skills/luno-sync/absent.md','references/a.md','资源条件','x'))
+case('登记来源不存在',3,'加载边来源缺失',lambda p:claim(p,'skills/luno-core/absent.md','references/a.md','资源条件','x'))
 
 # ── 加载边 ──
 LOAD='\n- 写入前先加载 `luno-memory`。\n'
 case('加载语句未登记',3,'加载登记',lambda p:append(p,SYNC,LOAD))
 case('登记该文件后通过',0,'无问题',lambda p:(append(p,SYNC,LOAD),claim(p,SYNC,'luno-memory','必需加载','x')))
 case('加载形态错配',1,'加载形态',lambda p:(append(p,SYNC,LOAD),claim(p,SYNC,'luno-memory','条件加载','x')))
-case('登记的加载边正文未出现',3,'加载边未出现',lambda p:claim(p,SYNC,'luno-review','条件加载','x'))
+case('登记的加载边正文未出现',3,'加载边未出现',lambda p:claim(p,SYNC,'luno-authoring','条件加载','x'))
 def no_loads(p):
     for f in scope_files(p):
         t=f.read_text(encoding='utf-8');u=G.LOAD_RE.sub('加载说明',t)
@@ -82,7 +89,7 @@ case('加载语句核对为空',3,'0 条加载语句被核对',no_loads)
 
 # ── 资源边 ──
 def new_resource(p,register):
-    (p/'skills/luno-sync/references/new-structural.md').write_text('x\n')
+    (p/'skills/luno-core/references/new-structural.md').write_text('x\n')
     append(p,SYNC,'\n`references/new-structural.md`\n')
     if register:claim(p,SYNC,'references/new-structural.md','资源条件','x')
 case('现存资源未登记',3,'资源加载边',lambda p:new_resource(p,False))
@@ -91,20 +98,40 @@ case('登记的资源不存在',1,'资源引用断链',lambda p:claim(p,SYNC,'re
 case('资源目标非路径',1,'资源加载边形态',lambda p:claim(p,SYNC,'这不是路径','资源条件','x'))
 case('资源来源非技能包',1,'资源加载边来源',lambda p:claim(p,'prompt/LUNO.md','references/x.md','资源条件','x'))
 def drift(p):
-    (p/'skills/luno-sync/references/foo.md').write_text('x\n')
+    (p/'skills/luno-core/references/foo.md').write_text('x\n')
     claim(p,SYNC,'references/foo.md','资源条件','x')
 case('登记资源正文未引用＝仅提示（rc=2）',2,'条款真源漂移',drift)
 def no_resources(p):
     for f in scope_files(p):
-        t=f.read_text(encoding='utf-8');u=re.sub(r'`references/[A-Za-z0-9_./-]*`','',t)
+        t=f.read_text(encoding='utf-8');u=G.RESOURCE_RE.sub('',t)
         if u!=t:f.write_text(u,encoding='utf-8')
     (p/CLAIMS).write_text(''.join(l+'\n' for l in claim_rows(p) if not l.split('\t')[2].startswith('资源')))
 case('资源路径核对为空',3,'0 条资源路径被核对',no_resources)
 case('资源引用逃逸',1,'资源引用逃逸',lambda p:append(p,SYNC,'\n`references/../../outside.md`\n'))
 def symlinked(p):
-    (p/'skills/luno-sync/references/linked.md').symlink_to(p/'tools/sync-targets.json')
+    (p/'skills/luno-core/references/linked.md').symlink_to(p/'tools/sync-targets.json')
     append(p,SYNC,'\n`references/linked.md`\n')
 case('资源经 symlink',1,'资源引用逃逸',symlinked)
+
+# Cross-package resources are now part of the same structural contract.
+# These cases stay in the existing gate/full entry: cross edges are used by roles and prompt.
+CROSS='luno-core/references/cross-structural.md'
+def cross_resource(p,register=True,source='prompt/LUNO.md'):
+    (p/('skills/'+CROSS)).write_text('fixture\n',encoding='utf-8')
+    append(p,source,'\n先完整加载 `'+CROSS+'`。\n')
+    if register:claim(p,source,CROSS,'资源条件','cross fixture')
+case('跨包资源完整登记且不误判技能加载',0,'无问题',cross_resource)
+case('跨包资源未登记',3,'资源加载边',lambda p:cross_resource(p,False))
+case('跨包资源登记漂移仅提示',2,'条款真源漂移',
+     lambda p:((p/('skills/'+CROSS)).write_text('fixture\n'),claim(p,'prompt/LUNO.md',CROSS,'资源条件','x')))
+case('跨包资源断链',1,'资源引用断链',
+     lambda p:append(p,'prompt/LUNO.md','\n`luno-core/references/no-cross-file.md`\n'))
+case('跨包资源逃逸',1,'资源引用逃逸',
+     lambda p:append(p,'prompt/LUNO.md','\n`luno-core/references/../../outside.md`\n'))
+def cross_symlink(p):
+    (p/('skills/'+CROSS)).symlink_to(p/'tools/sync-targets.json')
+    append(p,'subagents/LENS.md','\n`'+CROSS+'`\n')
+case('跨包资源经symlink',1,'资源引用逃逸',cross_symlink)
 
 # ── 身份登记 ──
 case('身份登记不可读',3,'身份登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{bad'))
@@ -130,6 +157,13 @@ def ob_empty(s):
 case('义务块缺失',1,'义务块缺失或重复',lambda p:edit(p,OB_SRC,lambda s:s.replace(OB_HEAD,OB_HEAD+'-removed',1)))
 case('义务块重复',1,'义务块缺失或重复',lambda p:append(p,OB_SRC,'\n'+OB_HEAD+'\nx\n'))
 case('义务块为空',1,'义务块为空',lambda p:edit(p,OB_SRC,ob_empty))
+
+# 新入口承载的产品边界同样必须有真实负控；从守卫声明现读，不钉正文措辞。
+ROOT_OBS=[(src,head) for src,head in G.OBLIGATIONS if src=='skills/luno-platform/SKILL.md']
+assert ROOT_OBS, '平台入口义务负控不能空转'
+for src,head in ROOT_OBS:
+    case('平台入口义务缺失 '+head,1,'义务块缺失或重复',
+         lambda p,src=src,head=head:edit(p,src,lambda s:s.replace(head,head+'-removed',1)))
 
 # ── 官方原件：只对 luno-surge 的登记原件、且 manifest 有合法哈希；齐备／缺失两状态同判 ──
 def prepare_official(p,present):
@@ -160,7 +194,7 @@ def exempt(surge,mutate):
             mutate(o.setdefault('officialPackageResources',{'paths':[]}))
         registry(p,fn)
     return setup
-OTHER_PATH='skills/luno-sync/references/x.md'
+OTHER_PATH='skills/luno-core/references/x.md'
 FIRST_OFFICIAL=next(iter(G.OFFICIAL_ORIGINALS))
 def bad_hash(p):
     f=p/G.INVENTORY_MANIFEST;d=json.loads(f.read_text(encoding='utf-8'))
