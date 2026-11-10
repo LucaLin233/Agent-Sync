@@ -56,13 +56,13 @@
 ## 打包与投递
 
 - 只用 `scripts/package_release.py` 打包，ZIP 根不带顶层目录；它过滤敏感的目录和后缀，拒绝符号链接和非常规条目，发现私钥块或 token 前缀就中止。包里不能有凭据、profile、抓包、请求正文、数据库或运行输出。
-- `tools/deploy_skill.py` 对 `skills/luno-surge` 固定使用这个专用打包器，通用工具和专用工具的收集、秘密检查和 ZIP 布局不能分叉。候选哈希门禁、源端复核、平台资源逐字节回读和失败分级按工具和 `luno-sync` 执行。
+- `tools/deploy_skill.py` 对 `skills/luno-surge` 固定使用这个专用打包器，通用工具和专用工具的收集、秘密检查和 ZIP 布局不能分叉。候选哈希门禁、源端复核、平台资源逐字节回读和失败分级按工具和 `luno-core/references/sync.md` 执行。
 - 正文、覆盖层、来源登记或许可附件的任何变化都会改变 ZIP 内容和摘要，从而触发候选摘要门禁、平台 `zipFileHash` 判等和资源清单断言。审批后重新计算待发布的 Git blob、ZIP 和平台资源摘要并按登记更新；不得为了保住旧摘要改回正文或修改脚本断言。
 - 平台投递使用获准的私有 R2 / `lh skill install` 流程，更新后回读实际的 identifier、内容、元数据和资源。预签名 URL 和临时凭据不得写进回复、日志或文件。
 
 ## 模块推送
 
-只推自有仓库 `LucaLin233/Proxy` 的 Surge 模块源。推送前读 `luno-ops/references/github.md`，凭据不进命令行，结果以 `gh api` 回读为准，CDN 延迟不算成功；推送和发布分别需要授权，Git 推送只按 `luno-core/SKILL.md`〈授权与安全〉的窄例外执行，条件不满足就停。
+只推自有仓库 `LucaLin233/Proxy` 的 Surge 模块源。推送前读 `luno-ops/references/github.md`，凭据不进命令行，结果以 `gh api` 回读为准，CDN 延迟不算成功；推送和发布分别需要授权，Git 推送只按 `luno-core/references/safety.md`〈授权与安全〉的窄例外执行，条件不满足就停。
 
 ## 第三方精选改写
 

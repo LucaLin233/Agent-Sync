@@ -20,7 +20,7 @@ Minis 内置技能（如 `skill-creator`）不是同步对象；模型分组参�
 
 ## 授权与同步
 
-操作规则对象或仓库之前，完整读取**当前生效**的 `luno-sync/SKILL.md` 和 `luno-sync/references/sync-workflow.md`，再按入口加载命中的资源；权限和审批以用户当次的授权和现役规则为准。正文改动按 sync-workflow 的风险分级审查和验收；每个会话用独立的副本或分支和原生 PR，由收口者串行合并并同步变化的对象。部署写入前先回读目标，不做自动的三副本互校或全量同名发现。
+操作规则对象或仓库之前，完整读取**当前生效**的 `luno-core/references/sync.md` 和 `luno-core/references/sync-workflow.md`，再按入口加载命中的资源；权限和审批以用户当次的授权和现役规则为准。正文改动按 sync-workflow 的风险分级审查和验收；每个会话用独立的副本或分支和原生 PR，由收口者串行合并并同步变化的对象。部署写入前先回读目标，不做自动的三副本互校或全量同名发现。
 
 Checks 只在当次授权时临时使用 `GH_TOKEN_CLASSIC`：不改变默认的 `$GH_TOKEN`，不把经典令牌用于普通仓库操作，不自动回退；临时覆盖只限进程变量，秘密不回显、不写文件。查询结果为 0 条只表示没有检查记录，不等于 CI 通过；GitHub Actions、Commit Status 和 Check Runs 不能互相冒充。
 
@@ -54,4 +54,4 @@ git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths | s
 
 结构守卫 `tools/check-rules.py` 的退出码固定为 **0 = 无问题，1 = 结构错误（阻断），2 = 仅提示，3 = 检查不完整（阻断）**。`tools/sync-all.sh` 按 0 和 2 放行（rc=2 的提示保留输出但不阻断）；`tests/run-tests.sh` 把任何非零（含 rc=2）都记为 FAIL，也就是测试门禁要求零提示。两者口径不同是有意的，`tests/test-check-rules.sh` 回归固定这四种状态。`tools/sync-all.sh` 只跑结构守卫和包内校验，不访问生效端。
 
-测试的准入和成本纪律见 `skills/luno-sync/references/test-authoring.md`；技能结构校验直接调用 `skills/luno-sync/scripts/quick_validate.py`。
+测试的准入和成本纪律见 `skills/luno-core/references/test-authoring.md`；技能结构校验直接调用 `skills/luno-core/scripts/quick_validate.py`。

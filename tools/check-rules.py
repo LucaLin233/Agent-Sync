@@ -10,9 +10,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOAD_RE = re.compile(r'(先加载|先完整加载|另加载|必须加载|必须完整加载|一律加载|按需加载|条件加载)\s*`?(luno-[a-z0-9-]+)`?')
+LOAD_RE = re.compile(r'(先加载|先完整加载|另加载|必须加载|必须完整加载|一律加载|按需加载|条件加载)\s*`?(luno-[a-z0-9-]+)(?![a-z0-9/-])`?')
 REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加载','一律加载'}
-RESOURCE_RE = re.compile(r'`(references/[A-Za-z0-9_./-]+)`')
+RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
+CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 FORMS = {'必需加载','条件加载','资源必需','资源条件'}
 HEX64 = re.compile(r'[0-9a-f]{64}\Z')
 # 只由部署取件装入的 luno-surge 官方参考原件：仓库路径 → manifest raw_sha256 的包内键
@@ -25,7 +26,7 @@ OFFICIAL_ORIGINALS = {
 }
 INVENTORY_MANIFEST = 'skills/luno-surge/references/upstream-manifest.json'
 # __OBLIGATIONS__
-OBLIGATIONS = (('skills/luno-lobehub/SKILL.md', '## 范围'), ('skills/luno-review/SKILL.md', '## 审查'), ('skills/luno-writing/SKILL.md', '## 分支'), ('skills/luno-minis/SKILL.md', '## 资源与触发'), ('skills/luno-minis/references/runtime.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-sync/SKILL.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
+OBLIGATIONS = (('skills/luno-platform/SKILL.md', '## 实例与端点'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/SKILL.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis-runtime-context.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/safety.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
 
 class Guard:
     def __init__(self, root):
@@ -120,7 +121,7 @@ class Guard:
 
     def resource(self, src, target):
         """技能内资源须存在；仅已登记的官方原件可缺。"""
-        rel = skill_root(src)+'/'+target
+        rel = 'skills/'+target if CROSS_RESOURCE_RE.fullmatch(target) else skill_root(src)+'/'+target
         path = self.path(rel)
         if path is not None and not path.is_file():
             if not self.official_ok(): self.problem('资源引用断链未核', incomplete=True)
@@ -163,9 +164,10 @@ class Guard:
             if src not in bodies:
                 self.problem('加载边来源缺失',incomplete=True);continue
             if form.startswith('资源'):
-                if not target.startswith('references/'):
+                cross = bool(CROSS_RESOURCE_RE.fullmatch(target))
+                if not target.startswith('references/') and not cross:
                     self.problem('资源加载边形态');continue
-                if not own_skill(src):
+                if not own_skill(src) and not cross:
                     self.problem('资源加载边来源');continue
                 if target not in RESOURCE_RE.findall(bodies[src]):
                     self.soft.append('条款真源漂移')
@@ -185,8 +187,9 @@ class Guard:
                 form='必需加载' if m[1] in REQUIRED_VERBS else '条件加载'
                 if (src,m[2],form) not in rows:
                     self.problem('加载登记',incomplete=True)
-            if own_skill(src):
+            if own_skill(src) or any(CROSS_RESOURCE_RE.fullmatch(t) for t in RESOURCE_RE.findall(body)):
                 for target in RESOURCE_RE.findall(body):
+                    if not own_skill(src) and not CROSS_RESOURCE_RE.fullmatch(target): continue
                     resource_count += 1
                     self.resource(src,target)
                     if not any((src,target,f) in rows for f in ('资源必需','资源条件')):

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "对象身份与落点的唯一活真源。present 仅表示受管存在性，不表示已部署或验收；写前按明确 ID 回读，冲突即停。不再自动互校或全量同名发现。",
+  "note": "对象身份与落点的唯一活真源。present 仅表示受管存在性，不表示已部署或验收；写前按明确 ID 回读，冲突即停。不再自动互校或全量同名发现。 本候选把review与sync合并到core任务分支；原两对象退休，端上迁移未执行。仅适用于本候选终态，不表示现役登记已变。",
   "contract": {
     "spec": "tools/body_contract.py",
     "implementation": "tools/body_contract.py",
@@ -112,12 +112,27 @@
       "type": "skill",
       "source": "skills/luno-core/SKILL.md",
       "resources": [
-        "skills/luno-core/references/retrieval.md",
-        "skills/luno-core/references/delegation.md",
+        "skills/luno-core/LICENSE.anthropic-plugins.txt",
+        "skills/luno-core/LICENSE.code-review.txt",
         "skills/luno-core/LICENSE.matt-pocock.txt",
+        "skills/luno-core/LICENSE.obra-superpowers.txt",
+        "skills/luno-core/LICENSE.openminis.txt",
         "skills/luno-core/LICENSE.retrieval-sources.txt",
+        "skills/luno-core/LICENSE.skill-authoring.txt",
+        "skills/luno-core/references/agent-document-writing.md",
+        "skills/luno-core/references/code-review.md",
+        "skills/luno-core/references/delegation.md",
+        "skills/luno-core/references/execution.md",
         "skills/luno-core/references/handoff.md",
-        "skills/luno-core/references/writing-safety.md"
+        "skills/luno-core/references/retrieval.md",
+        "skills/luno-core/references/review.md",
+        "skills/luno-core/references/safety.md",
+        "skills/luno-core/references/skill-authoring.md",
+        "skills/luno-core/references/sync-workflow.md",
+        "skills/luno-core/references/sync.md",
+        "skills/luno-core/references/test-authoring.md",
+        "skills/luno-core/references/writing-safety.md",
+        "skills/luno-core/scripts/quick_validate.py"
       ],
       "ends": {
         "repo": {
@@ -132,35 +147,6 @@
           "present": true,
           "kind": "skill",
           "id": "skl_dKSYlAHj814x",
-          "fields": "content,name,description"
-        }
-      }
-    },
-    {
-      "id": "luno-review",
-      "type": "skill",
-      "source": "skills/luno-review/SKILL.md",
-      "resources": [
-        "skills/luno-review/references/code-review.md",
-        "skills/luno-review/LICENSE.code-review.txt",
-        "skills/luno-review/LICENSE.anthropic-plugins.txt",
-        "skills/luno-review/LICENSE.matt-pocock.txt",
-        "skills/luno-review/LICENSE.obra-superpowers.txt",
-        "skills/luno-review/LICENSE.openminis.txt"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-review/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_KQgebKvYSrEz",
           "fields": "content,name,description"
         }
       }
@@ -198,15 +184,17 @@
       }
     },
     {
-      "id": "luno-writing",
+      "id": "luno-authoring",
       "type": "skill",
-      "source": "skills/luno-writing/SKILL.md",
+      "source": "skills/luno-authoring/SKILL.md",
       "resources": [
-        "skills/luno-writing/LICENSE.davila7.txt",
-        "skills/luno-writing/LICENSE.matt-pocock.txt",
-        "skills/luno-writing/references/i18n.md",
-        "skills/luno-writing/references/prose.md",
-        "skills/luno-writing/references/wordpress.md"
+        "skills/luno-authoring/LICENSE.davila7.txt",
+        "skills/luno-authoring/LICENSE.matt-pocock.txt",
+        "skills/luno-authoring/LICENSE.obra-superpowers.txt",
+        "skills/luno-authoring/references/coding.md",
+        "skills/luno-authoring/references/i18n.md",
+        "skills/luno-authoring/references/prose.md",
+        "skills/luno-authoring/references/wordpress.md"
       ],
       "ends": {
         "repo": {
@@ -215,7 +203,7 @@
         "minis": {
           "present": true,
           "kind": "file",
-          "path": "/var/minis/skills/luno-writing/SKILL.md"
+          "path": "/var/minis/skills/luno-authoring/SKILL.md"
         },
         "lobehub": {
           "present": true,
@@ -226,41 +214,12 @@
       }
     },
     {
-      "id": "luno-sync",
-      "type": "skill",
-      "source": "skills/luno-sync/SKILL.md",
-      "resources": [
-        "skills/luno-sync/references/sync-workflow.md",
-        "skills/luno-sync/references/agent-document-writing.md",
-        "skills/luno-sync/references/skill-authoring.md",
-        "skills/luno-sync/references/test-authoring.md",
-        "skills/luno-sync/scripts/quick_validate.py",
-        "skills/luno-sync/LICENSE.skill-authoring.txt",
-        "skills/luno-sync/LICENSE.matt-pocock.txt"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-sync/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_4D5PRoCxRUxt",
-          "fields": "content,name,description"
-        }
-      }
-    },
-    {
       "id": "luno-memory",
       "type": "skill",
       "source": "skills/luno-memory/SKILL.md",
       "resources": [
         "skills/luno-memory/references/maintenance.md",
+        "skills/luno-memory/references/correction.md",
         "skills/luno-memory/LICENSE.matt-pocock.txt"
       ],
       "ends": {
@@ -281,15 +240,36 @@
       }
     },
     {
-      "id": "luno-minis",
+      "id": "luno-platform",
       "type": "skill",
-      "source": "skills/luno-minis/SKILL.md",
+      "source": "skills/luno-platform/SKILL.md",
       "resources": [
-        "skills/luno-minis/references/configuration.md",
-        "skills/luno-minis/references/runtime.md",
-        "skills/luno-minis/references/memory.md",
-        "skills/luno-minis/references/session-groups.md",
-        "skills/luno-minis/LICENSE.openminis.txt"
+        "skills/luno-platform/LICENSE.openminis.txt",
+        "skills/luno-platform/LICENSE.upstream.txt",
+        "skills/luno-platform/references/cchp-coverage-rules.md",
+        "skills/luno-platform/references/cchp-interfaces.md",
+        "skills/luno-platform/references/cchp-source.md",
+        "skills/luno-platform/references/cchp-workflow-import.md",
+        "skills/luno-platform/references/cchp-workflow-providers.md",
+        "skills/luno-platform/references/cchp-workflow-requests.md",
+        "skills/luno-platform/references/cchp-workflow-tokens.md",
+        "skills/luno-platform/references/cchp-workflow-usage.md",
+        "skills/luno-platform/references/cchp-workflow-writes.md",
+        "skills/luno-platform/references/cchp-workflows.md",
+        "skills/luno-platform/references/cchp.md",
+        "skills/luno-platform/references/lobehub-access.md",
+        "skills/luno-platform/references/lobehub-agents.md",
+        "skills/luno-platform/references/lobehub-instance.md",
+        "skills/luno-platform/references/lobehub-knowledge.md",
+        "skills/luno-platform/references/lobehub-skills.md",
+        "skills/luno-platform/references/lobehub.md",
+        "skills/luno-platform/references/minis-configuration.md",
+        "skills/luno-platform/references/minis-memory.md",
+        "skills/luno-platform/references/minis-runtime-context.md",
+        "skills/luno-platform/references/minis-runtime-device.md",
+        "skills/luno-platform/references/minis-runtime.md",
+        "skills/luno-platform/references/minis-session-groups.md",
+        "skills/luno-platform/references/minis.md"
       ],
       "ends": {
         "repo": {
@@ -298,7 +278,7 @@
         "minis": {
           "present": true,
           "kind": "file",
-          "path": "/var/minis/skills/luno-minis/SKILL.md"
+          "path": "/var/minis/skills/luno-platform/SKILL.md"
         },
         "lobehub": {
           "present": true,
@@ -318,6 +298,9 @@
         "skills/luno-surge/references/official-sources.md",
         "skills/luno-surge/references/SOURCE.md",
         "skills/luno-surge/references/http-api.md",
+        "skills/luno-surge/references/http-sections.md",
+        "skills/luno-surge/references/http-descriptor.md",
+        "skills/luno-surge/references/http-metrics.md",
         "skills/luno-surge/references/controller-cli.md",
         "skills/luno-surge/references/upstream-manifest.json",
         "skills/luno-surge/references/diagnostics.md",
@@ -359,87 +342,6 @@
           "skills/luno-surge/references/upstream-SKILL.md",
           "skills/luno-surge/references/upstream-command-reference.md"
         ]
-      }
-    },
-    {
-      "id": "luno-coding",
-      "type": "skill",
-      "source": "skills/luno-coding/SKILL.md",
-      "resources": [
-        "skills/luno-coding/LICENSE.matt-pocock.txt",
-        "skills/luno-coding/LICENSE.obra-superpowers.txt"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-coding/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_jm396MpmCiSu",
-          "fields": "content,name,description"
-        }
-      }
-    },
-    {
-      "id": "luno-lobehub",
-      "type": "skill",
-      "source": "skills/luno-lobehub/SKILL.md",
-      "resources": [
-        "skills/luno-lobehub/references/skills.md",
-        "skills/luno-lobehub/references/knowledge.md",
-        "skills/luno-lobehub/references/instance.md",
-        "skills/luno-lobehub/references/access.md",
-        "skills/luno-lobehub/references/agents.md"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-lobehub/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_7xX0aEXWaXlg",
-          "fields": "content,name,description"
-        }
-      }
-    },
-    {
-      "id": "luno-cchp",
-      "type": "skill",
-      "source": "skills/luno-cchp/SKILL.md",
-      "resources": [
-        "skills/luno-cchp/SOURCE.md",
-        "skills/luno-cchp/references/interfaces.md",
-        "skills/luno-cchp/references/workflows.md",
-        "skills/luno-cchp/references/coverage-rules.md",
-        "skills/luno-cchp/LICENSE.upstream.txt"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-cchp/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_tmxDluMgdcYG",
-          "fields": "content,name,description"
-        }
       }
     }
   ]

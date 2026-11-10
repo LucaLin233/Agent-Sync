@@ -252,3 +252,56 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 3. 逗号和分号只是第 ③ 种情形（其余裸值）的终止符，其后的内容视为独立字段而保留，所以契约禁止在这一情形里用 `,` 或 `;` 在值中承载凭据（`Authorization: <标记>,SECRET` 不在覆盖范围内）。第 ② 种带方案词的字段整行抹除，不适用本条：`Authorization: Bearer <值>,status=502` 里的 `status=502` 同样会被抹掉，同行的诊断信息须移到独立行或独立的结构化字段。
 4. 多行结构化值与「同一行」规则不冲突。规则 2 约束的是裸值；`{"auth":\n"值"}` 这种键与值之间换行缩进的引号值属于第 ① 种情形，正常脱敏。
 5. 生产者不满足上述任一条时，必须先解析和规范化认证字段再调用脱敏，或者拒绝输出有歧义的段落。
+
+
+## 优化后合并候选的路径迁移
+
+上文旧技能名和本地路径是取材时的历史坐标，固定提交、日期、作者、许可和缺口全部保留；不是活动加载入口。本次候选将review/sync迁入core，CCHP/Minis/LobeHub迁入platform，Coding/Writing迁入用户已定名authoring。完整旧身份和真实资源以本版本migration.json及provenance.json为准，不以中间稿新增文件冒充原资源。现役书写启发式未增加合并豁免；本次选择来自用户明确要求，仍需独立预审。
+
+|固定基线真实路径|候选路径|
+|---|---|
+|`skills/luno-cchp/LICENSE.upstream.txt`|`skills/luno-platform/LICENSE.upstream.txt`|
+|`skills/luno-cchp/SKILL.md`|`skills/luno-platform/SKILL.md`、`skills/luno-platform/references/cchp.md`|
+|`skills/luno-cchp/SOURCE.md`|`skills/luno-platform/references/cchp-source.md`|
+|`skills/luno-cchp/references/coverage-rules.md`|`skills/luno-platform/references/cchp-coverage-rules.md`|
+|`skills/luno-cchp/references/interfaces.md`|`skills/luno-platform/references/cchp-interfaces.md`|
+|`skills/luno-cchp/references/workflows.md`|`skills/luno-platform/references/cchp-workflows.md`、`skills/luno-platform/references/cchp-workflow-writes.md`、`skills/luno-platform/references/cchp-workflow-usage.md`、`skills/luno-platform/references/cchp-workflow-requests.md`、`skills/luno-platform/references/cchp-workflow-providers.md`、`skills/luno-platform/references/cchp-workflow-tokens.md`、`skills/luno-platform/references/cchp-workflow-import.md`|
+|`skills/luno-coding/LICENSE.matt-pocock.txt`|`skills/luno-authoring/LICENSE.matt-pocock.txt`|
+|`skills/luno-coding/LICENSE.obra-superpowers.txt`|`skills/luno-authoring/LICENSE.obra-superpowers.txt`|
+|`skills/luno-coding/SKILL.md`|`skills/luno-authoring/references/coding.md`|
+|`skills/luno-core/SKILL.md`|`skills/luno-core/SKILL.md`、`skills/luno-core/references/execution.md`、`skills/luno-core/references/safety.md`|
+|`skills/luno-lobehub/SKILL.md`|`skills/luno-platform/SKILL.md`、`skills/luno-platform/references/lobehub.md`|
+|`skills/luno-lobehub/references/access.md`|`skills/luno-platform/references/lobehub-access.md`|
+|`skills/luno-lobehub/references/agents.md`|`skills/luno-platform/references/lobehub-agents.md`|
+|`skills/luno-lobehub/references/instance.md`|`skills/luno-platform/references/lobehub-instance.md`|
+|`skills/luno-lobehub/references/knowledge.md`|`skills/luno-platform/references/lobehub-knowledge.md`|
+|`skills/luno-lobehub/references/skills.md`|`skills/luno-platform/references/lobehub-skills.md`|
+|`skills/luno-memory/references/maintenance.md`|`skills/luno-memory/references/maintenance.md`、`skills/luno-memory/references/correction.md`|
+|`skills/luno-minis/LICENSE.openminis.txt`|`skills/luno-platform/LICENSE.openminis.txt`|
+|`skills/luno-minis/SKILL.md`|`skills/luno-platform/SKILL.md`、`skills/luno-platform/references/minis.md`|
+|`skills/luno-minis/references/configuration.md`|`skills/luno-platform/references/minis-configuration.md`|
+|`skills/luno-minis/references/memory.md`|`skills/luno-platform/references/minis-memory.md`|
+|`skills/luno-minis/references/runtime.md`|`skills/luno-platform/references/minis-runtime.md`、`skills/luno-platform/references/minis-runtime-context.md`、`skills/luno-platform/references/minis-runtime-device.md`|
+|`skills/luno-minis/references/session-groups.md`|`skills/luno-platform/references/minis-session-groups.md`|
+|`skills/luno-review/LICENSE.anthropic-plugins.txt`|`skills/luno-core/LICENSE.anthropic-plugins.txt`|
+|`skills/luno-review/LICENSE.code-review.txt`|`skills/luno-core/LICENSE.code-review.txt`|
+|`skills/luno-review/LICENSE.matt-pocock.txt`|`skills/luno-core/LICENSE.matt-pocock.txt`|
+|`skills/luno-review/LICENSE.obra-superpowers.txt`|`skills/luno-core/LICENSE.obra-superpowers.txt`|
+|`skills/luno-review/LICENSE.openminis.txt`|`skills/luno-core/LICENSE.openminis.txt`|
+|`skills/luno-review/SKILL.md`|`skills/luno-core/references/review.md`|
+|`skills/luno-review/references/code-review.md`|`skills/luno-core/references/code-review.md`|
+|`skills/luno-surge/references/http-api.md`|`skills/luno-surge/references/http-api.md`、`skills/luno-surge/references/http-sections.md`、`skills/luno-surge/references/http-descriptor.md`、`skills/luno-surge/references/http-metrics.md`|
+|`skills/luno-sync/LICENSE.matt-pocock.txt`|`skills/luno-core/LICENSE.matt-pocock.txt`|
+|`skills/luno-sync/LICENSE.skill-authoring.txt`|`skills/luno-core/LICENSE.skill-authoring.txt`|
+|`skills/luno-sync/SKILL.md`|`skills/luno-core/references/sync.md`|
+|`skills/luno-sync/references/agent-document-writing.md`|`skills/luno-core/references/agent-document-writing.md`|
+|`skills/luno-sync/references/skill-authoring.md`|`skills/luno-core/references/skill-authoring.md`|
+|`skills/luno-sync/references/sync-workflow.md`|`skills/luno-core/references/sync-workflow.md`|
+|`skills/luno-sync/references/test-authoring.md`|`skills/luno-core/references/test-authoring.md`|
+|`skills/luno-sync/scripts/quick_validate.py`|`skills/luno-core/scripts/quick_validate.py`|
+|`skills/luno-writing/LICENSE.davila7.txt`|`skills/luno-authoring/LICENSE.davila7.txt`|
+|`skills/luno-writing/LICENSE.matt-pocock.txt`|`skills/luno-authoring/LICENSE.matt-pocock.txt`|
+|`skills/luno-writing/SKILL.md`|`skills/luno-authoring/SKILL.md`|
+|`skills/luno-writing/references/i18n.md`|`skills/luno-authoring/references/i18n.md`|
+|`skills/luno-writing/references/prose.md`|`skills/luno-authoring/references/prose.md`|
+|`skills/luno-writing/references/wordpress.md`|`skills/luno-authoring/references/wordpress.md`|
