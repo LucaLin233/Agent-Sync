@@ -141,7 +141,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_dKSYlAHj814x",
+          "id": "skl_ZOfk8YUmIHHK",
           "fields": "content,name,description"
         }
       }
@@ -169,7 +169,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_m9EH1iQ34axx",
+          "id": "skl_rwV1Jo4OtDUC",
           "fields": "content,name,description"
         }
       }
@@ -197,7 +197,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_JHTvKTtYurcI",
+          "id": "skl_4RxZPYI52gQ3",
           "fields": "content,name,description"
         }
       }
@@ -222,7 +222,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_alFYKsBbc7b2",
+          "id": "skl_DPGuJSBiiKKp",
           "fields": "content,name,description"
         }
       }
@@ -256,7 +256,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_YZMjnPkCJWSs",
+          "id": "skl_rz3RoxsUKelk",
           "fields": "content,name,description"
         }
       }
@@ -296,7 +296,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_Pt6WMTLPKKgy",
+          "id": "skl_1yKBFkPYoTGd",
           "fields": "content,name,description",
           "key": "surge-ca269bdf3861.zip"
         }
