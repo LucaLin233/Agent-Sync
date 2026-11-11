@@ -4,26 +4,22 @@
 
 ## 约定
 
-- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-sync/references/skill-authoring.md`、`skills/luno-sync/scripts/quick_validate.py`、`skills/luno-review/references/code-review.md`。
+- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-core/references/skill-authoring.md`、`skills/luno-core/scripts/quick_validate.py`、`skills/luno-core/references/code-review.md`。
 - 许可全文随技能包分发，文件名为 `skills/<技能>/LICENSE.*.txt`；本文件不是许可原文。对外分发含第三方改写内容的产物时，必须随附对应的版权行和许可全文。
 - 「精选改写」指按本端需要用中文改写选定的判据，不是原文翻译，也不整段照抄。
 - 「核对」指所注日期的本地或在线取证。标「在线可取性未复核」的条目此后没有再访问上游；整理本文件时也没有重新访问任何上游。
-- 新增或退役吸收件、改动取材范围时，按 `skills/luno-sync/references/sync-workflow.md`〈变更纪律〉中的来源与许可规则同步更新本文件，缺少登记不算完成。
+- 新增或退役吸收件、改动取材范围时，按 `skills/luno-core/references/sync-workflow.md`〈变更纪律〉中的来源与许可规则同步更新本文件，缺少登记不算完成。
+- 标「已并入」的各节保留六技能合并前的旧技能名；旧技能名与各节的日期记录一样是取材时的历史坐标。节内本地路径已改为现役路径，相对路径按所并入的现役技能根解析；合并前后的路径对照见〈六技能合并的路径迁移〉。
 
 ## 总览
 
 | 技能 | 性质 | 第三方上游 | 随包许可文件 |
 |---|---|---|---|
-| luno-core | 自编＋精选改写 | mattpocock/skills、OpenMinis/MinisSkills、Exa 与 Keenable 的技能文件（S1–S5） | `LICENSE.matt-pocock.txt`、`LICENSE.retrieval-sources.txt` |
-| luno-sync | 自编＋精选改写 | openai/skills（Apache-2.0）、mattpocock/skills | `LICENSE.skill-authoring.txt`、`LICENSE.matt-pocock.txt` |
+| luno-core（并入原 luno-review、luno-sync） | 自编＋精选改写 | mattpocock/skills、OpenMinis/MinisSkills、Exa 与 Keenable 的技能文件（S1–S5）、openai/skills、anthropics/knowledge-work-plugins、anthropics/claude-plugins-official（以上三者为 Apache-2.0）、obra/superpowers | `LICENSE.matt-pocock.txt`、`LICENSE.retrieval-sources.txt`、`LICENSE.openminis.txt`、`LICENSE.skill-authoring.txt`、`LICENSE.code-review.txt`、`LICENSE.anthropic-plugins.txt`、`LICENSE.obra-superpowers.txt` |
 | luno-ops | 自编＋精选改写 | openclaw/openclaw | `LICENSE.openclaw.txt` |
-| luno-lobehub | 自编 | 无 | 无 |
-| luno-minis | 自编＋精选改写 | OpenMinis/MinisSkills | `LICENSE.openminis.txt` |
-| luno-review | 自编＋精选改写 | anthropics/knowledge-work-plugins、anthropics/claude-plugins-official（均为 Apache-2.0）、mattpocock/skills、obra/superpowers、OpenMinis/MinisSkills | `LICENSE.code-review.txt`、`LICENSE.anthropic-plugins.txt`、`LICENSE.matt-pocock.txt`、`LICENSE.obra-superpowers.txt`、`LICENSE.openminis.txt` |
-| luno-writing | 自编＋精选改写 | davila7/claude-code-templates、mattpocock/skills | `LICENSE.davila7.txt`、`LICENSE.matt-pocock.txt` |
 | luno-memory | 自编＋精选改写 | mattpocock/skills | `LICENSE.matt-pocock.txt` |
-| luno-coding | 自编＋精选改写 | mattpocock/skills、obra/superpowers | `LICENSE.matt-pocock.txt`、`LICENSE.obra-superpowers.txt` |
-| luno-cchp | 第三方改编（含精选改写） | CCH-HQ/cchp-cli | `LICENSE.upstream.txt` |
+| luno-authoring（并入原 luno-coding、luno-writing） | 自编＋精选改写 | davila7/claude-code-templates、mattpocock/skills、obra/superpowers | `LICENSE.davila7.txt`、`LICENSE.matt-pocock.txt`、`LICENSE.obra-superpowers.txt` |
+| luno-platform（并入原 luno-cchp、luno-lobehub、luno-minis） | 自编＋精选改写（Minis 部分）＋第三方改编（CCHP 部分，含精选改写） | OpenMinis/MinisSkills、CCH-HQ/cchp-cli | `LICENSE.openminis.txt`、`LICENSE.upstream.txt` |
 | luno-surge | 自编运行资料＋历史来源证据＋精选改写 | Surge Mac 应用包（官方来源例外）、OpenMinis/MinisSkills | `LICENSE.openminis.txt`、`LICENSE.openminis-ios-dev.txt` |
 
 已移除和已退役的来源见文末〈已移除与退役的来源〉。
@@ -34,8 +30,8 @@
 
 许可为 MIT，版权行 `Copyright (c) 2026 Matt Pocock`；用到它的技能各自随包附 `LICENSE.matt-pocock.txt`。涉及三个固定提交：
 
-- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-coding、luno-review、luno-memory。
-- `6fd947921b935b7e1e69293a200400f0fdd5c15f`：依据 2026-10-07 的记录。用于 luno-sync。
+- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-authoring（原 luno-coding）、luno-core（原 luno-review）、luno-memory。
+- `6fd947921b935b7e1e69293a200400f0fdd5c15f`：依据 2026-10-07 的记录。用于 luno-core（原 luno-sync）。
 - `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d`：2026-11-05（luno-core、luno-review、luno-writing）和 2026-11-06（luno-coding）核对时上游可取。
 
 ### obra/superpowers
@@ -44,7 +40,7 @@
 
 ### OpenMinis/MinisSkills
 
-固定提交 `164395f193a56e3507ca98415383c7c16780da00`，2026-10-25 本地核对；所有取自它的条目，在线可取性和本机行为都未复核。用于 luno-minis、luno-surge、luno-review、luno-core。
+固定提交 `164395f193a56e3507ca98415383c7c16780da00`，2026-10-25 本地核对；所有取自它的条目，在线可取性和本机行为都未复核。用于 luno-platform（原 luno-minis）、luno-surge、luno-core（含原 luno-review）。
 
 **许可事实**：该提交的根 `LICENSE`（1,066 B，sha256 `2858f336d8173207aa079c4711085a28d22615d464b6a387363f7824116d00f0`，版权行 `Copyright (c) 2026 OpenMinis`）和 `ios-dev/LICENSE`（1,770 B，sha256 `06dfb33ed30ecda0338b8318d8243f36c501281a5d44398a7e3425ce149bd4f3`，版权行 `Copyright (c) 2026 OpenMinis contributors`）都记载 MIT，而 `README.md` 标的是 Apache-2.0。这是上游文件自身的不一致，作为事实保留。
 
@@ -54,8 +50,8 @@
 
 - `skills/luno-surge/LICENSE.openminis.txt`：根 `LICENSE` 原文，取自该固定提交的公开 raw URL，sha256 `2858f336d8173207aa079c4711085a28d22615d464b6a387363f7824116d00f0`。
 - `skills/luno-surge/LICENSE.openminis-ios-dev.txt`：`ios-dev/LICENSE` 原文，取自同一提交的公开 raw URL，sha256 `06dfb33ed30ecda0338b8318d8243f36c501281a5d44398a7e3425ce149bd4f3`；原文中的目录范围、第三方排除和致谢一并保留。
-- `skills/luno-review/LICENSE.openminis.txt`：完整 MIT 正文，sha256 `2858f336d8173207aa079c4711085a28d22615d464b6a387363f7824116d00f0`。
-- `skills/luno-minis/LICENSE.openminis.txt`：完整 MIT 正文，附件 sha256 `78a0f6fa39ad99be9494b462b98081023fc3fd21616a9eaa20924ef9332d2005`。
+- `skills/luno-core/LICENSE.openminis.txt`（原 luno-review 附件）：完整 MIT 正文，sha256 `2858f336d8173207aa079c4711085a28d22615d464b6a387363f7824116d00f0`。
+- `skills/luno-platform/LICENSE.openminis.txt`（原 luno-minis 附件）：完整 MIT 正文，附件 sha256 `78a0f6fa39ad99be9494b462b98081023fc3fd21616a9eaa20924ef9332d2005`。
 - `skills/luno-core/LICENSE.retrieval-sources.txt`：合并的 MIT 通知，其中含 OpenMinis 版权行，见〈luno-core〉。
 
 ## luno-core
@@ -88,7 +84,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **历史成品哈希**：2026-11-01 制稿的 `luno-core/references/retrieval.md` 的 SHA-256 为 `4d5061133bce8061bc8e00e26dbb90e1adb7a0aef42e86e895fe1354074d7766`。当时 S1–S5 的逐文件复查基线是各固定提交加这个成品哈希；它不用于当前部署判等。
 
-## luno-sync
+## luno-sync（已并入 luno-core）
 
 **openai/skills@`49f948faa9258a0c61caceaf225e179651397431`**（提交时间 2026-06-24T02:36:12Z；2026-11-05 经公开 API 确认可取）：取自 `skills/.system/skill-creator/`，许可 Apache-2.0，许可原字节随包为 `LICENSE.skill-authoring.txt`。
 
@@ -114,15 +110,15 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - `references/cfst.md` 的固定用法和脚本由用户 2026-10-30 指定，脚本行为据 2026-10-31 静态核对，没有实际执行测速。
 - `references/onlyboxes-baseline.md` 自带 OnlyBoxes 官方文档链接、访问日期和实测证据层。
 
-## luno-minis
+## luno-minis（已并入 luno-platform）
 
-全部来自 **OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**，精选改写进 `references/runtime.md`〈本机特性〉，许可见〈OpenMinis/MinisSkills〉，完整 MIT 正文随包为 `LICENSE.openminis.txt`。
+全部来自 **OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**，精选改写进 `references/minis-runtime-device.md`〈本机特性〉，许可见〈OpenMinis/MinisSkills〉，完整 MIT 正文随包为 `LICENSE.openminis.txt`。
 
 - `ios-dev/SKILL.md` → iSH 文件与进程异常一段。许可依据 `ios-dev/LICENSE`（MIT）。正文所列复制样本之外的上游所述行为，本机未复核。
 - `codex-on-ish/SKILL.md` → Codex/iSH TLS 排障一段。许可按 2026-10-25 的 MIT 裁定。
 - `apple-reminders/SKILL.md` 第 94–103 行 → 原生 `apple-*` 条款之后关于原生查询完整性的一段。许可依据根 `LICENSE`（MIT，`Copyright (c) 2026 OpenMinis`）。
 
-## luno-review
+## luno-review（已并入 luno-core）
 
 **anthropics/knowledge-work-plugins@`d3ee81913e5e179273313345847a2a4f42449bd2`**（2026-09-11）：`engineering/skills/code-review/SKILL.md` → `references/code-review.md`。精选改写了上游的四维清单和输出要素；架构维、依赖纪律、结构整改和诚实与分歧是自撰或扩写的；GitHub 长版没有整体采用。许可 Apache-2.0，原字节随包为 `LICENSE.code-review.txt`（11607 B，sha256 `a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26`）。在线可取性未复核。
 
@@ -133,7 +129,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **mattpocock/skills@`5beb35b040e3de97e54fa9e386d7e42d15c295c2`**：
 
-- `skills/productivity/grilling/SKILL.md` → `SKILL.md`〈输出〉：只吸收提问按依赖分层。
+- `skills/productivity/grilling/SKILL.md` → `references/review.md`〈输出〉：只吸收提问按依赖分层。
 - `skills/engineering/tdd/SKILL.md` → `references/code-review.md`〈四、审查过程要点〉：只吸收期望值须有独立来源的判据。
 - 未采纳 design tree 全量穷举、自动派子代理和强制 TDD。
 
@@ -146,9 +142,9 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **obra/superpowers@`22f0b463e7a5e579904dd6211a520321035526f7`**：`skills/requesting-code-review/SKILL.md`、`skills/receiving-code-review/SKILL.md`、`skills/verification-before-completion/SKILL.md` → `references/code-review.md`。只吸收采纳反馈前先核对当前调用方、平台和既有设计理由，以及没有消费者就不扩项的判据。
 
-**OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**：`evidence-chain-builder/SKILL.md` → `SKILL.md`〈审查〉中事实核证按命题逐项进行的一段；不采用其打分脚本和二分标签门禁。许可依据根 `LICENSE`（MIT），附件为 `LICENSE.openminis.txt`。
+**OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**：`evidence-chain-builder/SKILL.md` → `references/review.md`〈审查〉中事实核证按命题逐项进行的一段；不采用其打分脚本和二分标签门禁。许可依据根 `LICENSE`（MIT），附件为 `LICENSE.openminis.txt`。
 
-## luno-writing
+## luno-writing（已并入 luno-authoring）
 
 **davila7/claude-code-templates@`c93d4ee1e1a2ffabbc5084ccf4715d10683f4b82`**（2026-09-11）：`cli-tool/components/skills/development/i18n-localization/` → `references/i18n.md`，要点精选并入，原脚本已退役。退役前的市场版与上游逐字节一致（2026-10-11 实测复核），2026-10-11 实测上游可访问。许可为 MIT：该提交根 `LICENSE` 的头三行含 `Copyright (c) 2025 Daniel (San) Ávila`；2026-11-06 按该提交逐字节取回，1075 B，sha256 `15cc073f…a705`，全文随包为 `LICENSE.davila7.txt`。
 
@@ -160,7 +156,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **mattpocock/skills@`5beb35b040e3de97e54fa9e386d7e42d15c295c2`**：`skills/engineering/retro/SKILL.md` → `references/maintenance.md` 的固化落点条款，即机械可判定的编码规范违规，先核对既有检查是否实际接通。不采用「没有护栏即缺陷」，也不无条件新建检查器或门禁。
 
-## luno-coding
+## luno-coding（已并入 luno-authoring 的 `references/coding.md`）
 
 **mattpocock/skills@`4ae2317ddb22b046e26455e4f9c9b3aaaf62212d`**（2026-11-06 核对）：`skills/engineering/tdd/SKILL.md`、`skills/engineering/implement/SKILL.md`。只吸收〈动手前〉的「沿用领域词表与 ADR 的词汇」「按纵切片而非横向分层推进」，〈改动〉的「不为未出现的用法做投机扩展」，以及 implement 的「收尾时再跑一次完整检查」。
 
@@ -172,25 +168,25 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 原吸收来源已移除，见〈已移除与退役的来源〉。
 
-## luno-cchp
+## luno-cchp（已并入 luno-platform）
 
 上游是 GitHub `CCH-HQ/cchp-cli`，包含 `cchp` CLI 和内置的 Agent Skill。
 
 - **取材基线**：`d9da5760a8d2f6ce689c01b98b6c96540513045d`（2026-10-25，CLI v0.1.3，spec v1.0.12）。只有采纳更新且包内正文随之改动时才更新基线；只核对而未采纳时不改基线。
-- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`，原文随包为 `skills/luno-cchp/LICENSE.upstream.txt`。上游 MIT 原文和版权行随包分发，中文改写也可以按 MIT 再分发。
+- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`，原文随包为 `skills/luno-platform/LICENSE.upstream.txt`。上游 MIT 原文和版权行随包分发，中文改写也可以按 MIT 再分发。
 - **取材文件**（上游路径）：`skills/cchp/SKILL.md`、`skills/cchp/references/auth.md`、`skills/cchp/references/errors.md`、`skills/cchp/references/output-contract.md`、`skills/cchp/references/pagination.md`、`skills/cchp/references/workflows.md`、`docs/agent-guide.md`、`docs/output-contract.md`、`docs/safety-model.md`、`LICENSE`。
 - 契约另以 CLI 内置的 spec、schema、命令元数据、指南和实例只读结果核对，动作前仍要核对当次的版本和契约。本机的非生效副本只用于对照锁定的基线，不代替最新上游，也不覆盖正文。
 
-| 本地文件 | 主要上游来源 | 处理 |
+| 本地文件（相对 `skills/luno-platform/`） | 主要上游来源 | 处理 |
 |---|---|---|
-| `SKILL.md` | `skills/cchp/SKILL.md`、`docs/agent-guide.md` | 保留「发现 → schema → 调用」、门禁和停止条件；补本端位置、版本、认证和授权边界 |
-| `references/interfaces.md` | auth、errors、output-contract、pagination 及 docs 中的契约与安全文档 | 合并认证、直连、错误、分页、流式与下载、重试契约；删去面向人的入门叙述；列表形状、操作字段和分页只在命中操作时按当前内置 spec 核对，不缓存旧表 |
-| `references/workflows.md` | `skills/cchp/references/workflows.md` | 保留业务骨架，补范围、变更前后和恢复等通用约束；实例数字不落值，以当次实测为准 |
-| `references/coverage-rules.md` | `skills/cchp/references/workflows.md` | 迁入本地 request-overrides 的完整分支，保留精选改写和实例验证边界 |
+| `SKILL.md`〈实例与端点〉、`references/cchp.md` | `skills/cchp/SKILL.md`、`docs/agent-guide.md` | 保留「发现 → schema → 调用」、门禁和停止条件；补本端位置、版本、认证和授权边界 |
+| `references/cchp-interfaces.md` | auth、errors、output-contract、pagination 及 docs 中的契约与安全文档 | 合并认证、直连、错误、分页、流式与下载、重试契约；删去面向人的入门叙述；列表形状、操作字段和分页只在命中操作时按当前内置 spec 核对，不缓存旧表 |
+| `references/cchp.md`〈业务分支〉、`references/cchp-workflow-writes.md`、`references/cchp-workflow-providers.md`、`references/cchp-workflow-org.md` | `skills/cchp/references/workflows.md` | 保留业务骨架，补范围、变更前后和恢复等通用约束；实例数字不落值，以当次实测为准 |
+| `references/cchp-coverage-rules.md` | `skills/cchp/references/workflows.md` | 迁入本地 request-overrides 的完整分支，保留精选改写和实例验证边界 |
 
-未纳入入门流程、Restish 隔离和本地凭据存储；安装只保留获准安装器的版本、目录、校验和入口验收，不纳入 Homebrew 或源码构建。上游的凭据回退不适用于本端（见 `luno-cchp/SKILL.md`〈认证边界〉）；`--allow-write`、`--confirm` 和上游新增的命令都不扩大授权。
+未纳入入门流程、Restish 隔离和本地凭据存储；安装只保留获准安装器的版本、目录、校验和入口验收，不纳入 Homebrew 或源码构建。上游的凭据回退不适用于本端（见 `luno-platform/references/cchp.md`〈认证边界〉）；`--allow-write`、`--confirm` 和上游新增的命令都不扩大授权。
 
-**追新**：不自动跟版。核对时以取材基线为旧 ref，锁定默认分支 HEAD 和技能目录的末次提交，比较期间不改基线。全部取材文件（含目录外的 docs 和 LICENSE）逐个比较哈希，变化项逐文件 diff；404 不等于未变，旧 ref 缺失是新增，新 ref 缺失是删除或可能改名，要结合 compare 的 added、removed、renamed 核对；取不齐就报缺证。文件未变也要对照 CHANGELOG、最新 release 和 CLI 与 spec 的实际契约。门禁、退出码、输出、分页、错误、认证、安全与脱敏、参数与 schema、默认值、重试与超时、流式与下载中任一项变化都算契约变化；CLI 实现、安装方式或面向人界面的变化不能用来排除契约变化。判定无需跟版，必须同时有取材文件 diff 为空和 CHANGELOG、release 未见上述语义改动的正面证据。需要跟版时，先列出上表四个本地文件的受影响小节、旧到新的差异和实例兼容性，再按 `luno-sync/references/sync-workflow.md` 和当次授权处理；核对本身不授权实施或部署，包变化后重算部署哈希并以部署回读为准。上游只新增命令而本端没有授权场景时，不补步骤。
+**追新**：不自动跟版。核对时以取材基线为旧 ref，锁定默认分支 HEAD 和技能目录的末次提交，比较期间不改基线。全部取材文件（含目录外的 docs 和 LICENSE）逐个比较哈希，变化项逐文件 diff；404 不等于未变，旧 ref 缺失是新增，新 ref 缺失是删除或可能改名，要结合 compare 的 added、removed、renamed 核对；取不齐就报缺证。文件未变也要对照 CHANGELOG、最新 release 和 CLI 与 spec 的实际契约。门禁、退出码、输出、分页、错误、认证、安全与脱敏、参数与 schema、默认值、重试与超时、流式与下载中任一项变化都算契约变化；CLI 实现、安装方式或面向人界面的变化不能用来排除契约变化。判定无需跟版，必须同时有取材文件 diff 为空和 CHANGELOG、release 未见上述语义改动的正面证据。需要跟版时，先列出上表本地文件的受影响小节、旧到新的差异和实例兼容性，再按 `luno-core/references/sync-workflow.md` 和当次授权处理；核对本身不授权实施或部署，包变化后重算部署哈希并以部署回读为准。上游只新增命令而本端没有授权场景时，不补步骤。
 
 ## luno-surge
 
@@ -213,7 +209,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## 追新核对
 
-通用判据见 `luno-sync/SKILL.md`〈真源与落点〉：只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff。补充以下做法：
+通用判据见 `luno-core/references/sync.md`〈真源与落点〉：只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff。补充以下做法：
 
 - 先查默认分支的 `/commits/HEAD`，再按路径查逐文件 commits；按固定提交复查日期时，在同一查询上加 `&sha=<固定提交>`。文件日期取 committer 日期，不用目录的最后更新日期代替。
 - `releases/latest` 返回 404 只说明没有 latest release，要再查同仓库的 `/releases?per_page=1`，不能把没有 tag 当作没有更新。
@@ -256,18 +252,18 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 5. 生产者不满足上述任一条时，必须先解析和规范化认证字段再调用脱敏，或者拒绝输出有歧义的段落。
 
 
-## 优化后合并候选的路径迁移
+## 六技能合并的路径迁移
 
-上文旧技能名和本地路径是取材时的历史坐标，固定提交、日期、作者、许可和缺口全部保留；不是活动加载入口。本次候选将review/sync迁入core，CCHP/Minis/LobeHub迁入platform，Coding/Writing迁入用户已定名authoring。完整旧身份和真实资源以本版本migration.json及provenance.json为准，不以中间稿新增文件冒充原资源。现役书写启发式未增加合并豁免；本次选择来自用户明确要求，仍需独立预审。
+2026-11-10 的六技能合并（PR #25，`484de55`）把 luno-review、luno-sync 并入 luno-core，luno-cchp、luno-lobehub、luno-minis 并入 luno-platform，luno-coding、luno-writing 并入 luno-authoring。左列是合并前固定基线的真实路径，只作历史坐标，不是加载入口；右列是现役路径。PR #25 在 luno-platform 内拆出的 CCHP 业务路由与分支文件已再合并，Minis 会话归组已并入客户端配置资源，右列按现役文件列出。固定提交、日期、作者、许可和缺口仍以上文各节为准。
 
-|固定基线真实路径|候选路径|
+|合并前路径（历史坐标）|现役路径|
 |---|---|
 |`skills/luno-cchp/LICENSE.upstream.txt`|`skills/luno-platform/LICENSE.upstream.txt`|
 |`skills/luno-cchp/SKILL.md`|`skills/luno-platform/SKILL.md`、`skills/luno-platform/references/cchp.md`|
 |`skills/luno-cchp/SOURCE.md`|`skills/luno-platform/references/cchp-source.md`|
 |`skills/luno-cchp/references/coverage-rules.md`|`skills/luno-platform/references/cchp-coverage-rules.md`|
 |`skills/luno-cchp/references/interfaces.md`|`skills/luno-platform/references/cchp-interfaces.md`|
-|`skills/luno-cchp/references/workflows.md`|`skills/luno-platform/references/cchp-workflows.md`、`skills/luno-platform/references/cchp-workflow-writes.md`、`skills/luno-platform/references/cchp-workflow-usage.md`、`skills/luno-platform/references/cchp-workflow-requests.md`、`skills/luno-platform/references/cchp-workflow-providers.md`、`skills/luno-platform/references/cchp-workflow-tokens.md`、`skills/luno-platform/references/cchp-workflow-import.md`|
+|`skills/luno-cchp/references/workflows.md`|`skills/luno-platform/references/cchp.md`〈业务分支〉、`skills/luno-platform/references/cchp-workflow-writes.md`、`skills/luno-platform/references/cchp-workflow-providers.md`、`skills/luno-platform/references/cchp-workflow-org.md`|
 |`skills/luno-coding/LICENSE.matt-pocock.txt`|`skills/luno-authoring/LICENSE.matt-pocock.txt`|
 |`skills/luno-coding/LICENSE.obra-superpowers.txt`|`skills/luno-authoring/LICENSE.obra-superpowers.txt`|
 |`skills/luno-coding/SKILL.md`|`skills/luno-authoring/references/coding.md`|
@@ -284,7 +280,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 |`skills/luno-minis/references/configuration.md`|`skills/luno-platform/references/minis-configuration.md`|
 |`skills/luno-minis/references/memory.md`|`skills/luno-platform/references/minis-memory.md`|
 |`skills/luno-minis/references/runtime.md`|`skills/luno-platform/references/minis-runtime.md`、`skills/luno-platform/references/minis-runtime-context.md`、`skills/luno-platform/references/minis-runtime-device.md`|
-|`skills/luno-minis/references/session-groups.md`|`skills/luno-platform/references/minis-session-groups.md`|
+|`skills/luno-minis/references/session-groups.md`|`skills/luno-platform/references/minis-configuration.md`〈会话归组〉|
 |`skills/luno-review/LICENSE.anthropic-plugins.txt`|`skills/luno-core/LICENSE.anthropic-plugins.txt`|
 |`skills/luno-review/LICENSE.code-review.txt`|`skills/luno-core/LICENSE.code-review.txt`|
 |`skills/luno-review/LICENSE.matt-pocock.txt`|`skills/luno-core/LICENSE.matt-pocock.txt`|
