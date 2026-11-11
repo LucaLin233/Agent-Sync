@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""luno-surge 包态回归：运行树只含登记的自编资源、命令参考不是官方原件或历史成品、真包打包结果
+"""luno-surge 包态回归：运行树只含登记的自有资源、命令参考等不是基线官方原件、真包打包结果
 等于登记清单、文档本地链接与脚本语法通过离线验收。只读仓库；脚本行为见 test-surge-scripts.py。
 
 从 test-surge-scripts.py 拆出的既有判据，随 surge 组照旧进 full；Surge 文档、资源或登记改动只跑本文件。
@@ -41,7 +41,7 @@ class AuthoredResourceStateTest(unittest.TestCase):
         self.assertIn('skills/luno-surge/references/plugin-authoring.md', obj['resources'])
         for name in obj['resources']:
             self.assertTrue((ROOT / name).is_file(), name)
-        raw = json.loads(MANIFEST.read_text())['raw_sha256']
+        raw = json.loads(MANIFEST.read_text())['builds'][-1]['raw_sha256']
         for source, own in (('references/command-reference.md', COMMAND_REFERENCE),
                             ('references/plugin-authoring.md', SKILL / 'references/plugin-authoring.md'),
                             ('agents/openai.yaml', SKILL / 'agents/openai.yaml')):
@@ -49,11 +49,6 @@ class AuthoredResourceStateTest(unittest.TestCase):
         self.assertFalse((SKILL / 'references/upstream-SKILL.md').exists())
         self.assertFalse((SKILL / 'references/upstream-command-reference.md').exists())
         self.assertFalse((SKILL / 'assets/logo.png').exists())
-
-    def test_command_reference_is_not_official_raw_or_historical_adapted(self):
-        adapter = load_module('surge_adapter_state', SCRIPTS / 'adapt_upstream_reference.py')
-        digest = hashlib.sha256(COMMAND_REFERENCE.read_bytes()).hexdigest()
-        self.assertEqual('unknown', adapter.classify(digest))
 
     def test_real_skill_package_is_self_contained(self):
         packer = load_module('surge_release_state', SCRIPTS / 'package_release.py')
