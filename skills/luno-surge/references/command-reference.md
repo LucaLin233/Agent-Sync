@@ -1,29 +1,118 @@
-# Surge 命令参考：Minis 覆盖层
+# Surge 命令知识与操作参考（自编，非官方）
 
-查命令语法或 key-path 时，先完整读本覆盖层，再完整读目标命令需要的 `luno-surge/references/upstream-command-reference.md` 相关部分：适用的全局语义（§1 CLI Usage 和 Response envelope，以及判断命令是否存在所需的 §2 目录）和对应的命令节（§3/§4 及其中明确的交叉引用）。未知的命令、节或定位不到的交叉引用不要猜，停止依赖它的部分；动作之前还要按入口的触发读对应的专题资源。
+这是面向本端任务的离线接口事实表，不是 Surge 官方技能或原件译本。历史依据为 Surge Mac 6.11.0（12680）官方命令目录及对应说明节，取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
 
-原件是部署时按 manifest 哈希从官方包取件装入的官方快照，公开仓库不含；没装入就停止依赖，不猜内容。它**不是本端的执行许可**，版本或平台条件未知或不满足时不执行。冲突时的优先级：安全与授权底线 → 入口和对应专题 → 本覆盖层 → 官方原文。协议、平台和历史验证只以 `platform-compatibility.md` 为准，官方原文里的协议号和版本描述只作历史说明。
+## 调用与证据
 
-## 不适用于 Minis 的官方说法
+基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。2026-11-10 已在清空凭据环境、禁止写入/网络的审计下核过当前安装桥帮助；该证据只对 SOURCE 所述桥版本有效，升级须重核。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
 
-- **超时**：官方 §1 的「无进展 60 秒」不适用于本客户端。现行实现里，建立连接超时 **8 秒**；认证、普通命令和有限事件流的 socket 读超时 **30 秒**（不是整项任务的总时限）。有限流指 `test-policy-bandwidth`、`benchmark encryption`、`test-ponte`。`watch <event...>`、`log watch`、`diagnostics` 进入连续流读取后不设 socket 读超时（包含首帧等待），要按诊断资源由外部限时停止；它们的认证阶段仍是 30 秒。`--check` 的网络请求超时 30 秒。这些只是陈述现行实现，不据此修改客户端阈值，也不把官方的 60 秒当本端保障。
-- **输出和凭据**：官方 §1 关于 rendered 默认、`--raw`、密码文件、其他环境变量、TTY 提示、无命令时进交互和 Mac 可执行位置的说明，不是 Minis 的实现。本端优先用 `--raw`，它的 JSON 已由客户端脱敏、不是服务端原文；客户端非交互。凭据优先级、非交互和传输按 `references/controller-cli.md`，授权和不回退的边界按入口 §3。
-- **`--check`** 在本端是远程上传，不是本地解析，调用前完整读 `references/controller-cli.md` 的上传和告知规则。
-- **`lsp [--stdio]`** 是官方离线编辑器的语言服务器，Minis 不实现，不得向 Controller 转发，不当一次性校验用，也不和 remote 或认证参数一起用；官方 VS Code 扩展需要 Surge Mac 6.10.0+，不是 iOS 能力。
-- **修改前的收集**：官方 §5 建议修改前收集 `environment`、`dump policy`、`dump profile`，本端不作默认。先按入口预检，只在任务必要时最小读取，不得默认全量收集 `dump policy` 或 `dump profile`；后者只取需要的字段、脱敏引用、不写进支持包。多帧、真实流量和临时规则清理先读 `references/diagnostics.md`。
-- **官方示例**：插件的 `insecure: true`、`token=…` 等不作本端默认，敏感参数和平台限制按 `references/platform-compatibility.md`。其他官方示例也要先核对授权、平台和专题边界，不能直接当执行指令。
+本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识；reload 帮助未揭示自动完整重启风险，必须读本参考和入口。plugin、capture-filter 帮助在已核桥上回落主帮助，没有该族的实际契约。
 
-## Surge 6 的分节与捕获过滤
+本端 default 同机不授予远程连接权；IPv6 地址使用方括号加端口，参数含 CR/LF 会在本地拒绝。凭据只用入口允许的变量或 stdin，不采纳官方客户端的密码文件、其他凭据变量和交互提示。
 
-官方新快照包含 `profile section list`/`get`/`set` 和 `capture-filter`，版本和协议门槛见 `references/platform-compatibility.md`。官方 `get` 可能含密码；官方的 `--raw` 和本端脱敏的 `--raw` 不是同一个接口。
+**本桥的纯帮助调用仅保证：无命令、以 `help` 为首个命令词，或 `-h`/`--help` 出现在首个命令词之前时，走本地帮助而不连接 Controller；不要混入 `--check`、远端或认证参数。命令词之后的 `-h`/`--help` 不保证本地截获，可能进入认证及 Controller 路径，禁止用这种位置做无连接帮助取证，例如不得为此执行 `version --help` 或 `rule match -h`。本地帮助不能证明远端支持该命令。** 不要换 `--raw` 绕过。需官方帮助时，在用户明确指定且获准的 Mac 上先确认是官方应用包内 `/Applications/Surge.app/Contents/Applications/surge-cli`、核应用身份/版本，再读该二进制的帮助；帮助是否需要远程认证由该工具实际契约决定，不自动连接或换实例。没有获准 Mac 时用 `references/official-sources.md` 路由的官方正文；取不到就停缺证部分。查帮助不豁免身份、平台、网络和秘密门禁。
 
-本端还没实现 `profile section set` 的本地文件和 stdin 转换，因此**禁止通过本端调用 `set`（含 `--raw`）**。现有的桥会在建立 Controller 连接、读文件和取密之前用固定错误拦下这个命令，但这只是程序护栏，不等于适配了这个命令，官方的文件和 stdin 语义仍不可用；也不要靠猜 Controller 编码去实现它。`list`/`get` 不因为写入风险而整体禁用，但仍受「读之前已有明确的非秘密来源」和当次授权的限制，不能拿脱敏输出回写。要永久修改内容，执行前完整读 `references/http-api.md` 的安全入口规则。
+结果通常是含 `result`、`error` 与任务载荷的 JSON 对象；`hasMore=true` 表示后续还有块。本端优先 `--raw`，但该 JSON 已经客户端脱敏，既不是服务端原始字节，也不保证可以公开。变更需回读同一对象；脱敏的 profile、diff 或单节正文不能回写。
 
-## 必要语法索引
+连接超时 8 秒；认证、普通命令及有限流的 socket 读超时 30 秒，均不是任务总时限。有限流包括带宽、加密 benchmark 和 test-ponte；watch、log watch、diagnostics 在认证后无 socket 读超时，首帧也须外部限时。流完成应核 `hasMore=false` 或该命令明确终态，不以首帧当完成。
 
-调用形式：`surge-cli [--remote host:port] [--password-stdin] [--raw] <command> [args...]`。入口 `/usr/local/bin/surge-cli` 是自建的 Python 桥，不是官方二进制；默认端点和远端选择见 `references/controller-cli.md`。短选项：`--remote`/`-r`、`--check`/`-c`、`--help`/`-h`。不带命令时打印帮助；命令关键字由所连的 Controller 解析。
+## 先观察，再决定变更
 
-- 命令全集和响应格式看官方 §2/§1.2；具体参数和响应字段看 §3；批量 `set` 和环境 key-path 看 §4；§5 只在不和本覆盖层及本地规则冲突时参考。
-- `set` 里的 `<nil>`/`(null)` 表示 null。shell 里含 `<nil>` 的赋值要整体加引号，避免被当成重定向，例如 `surge-cli set 'AutoPolicyGroupOverride.Streaming=<nil>'`。
-- 临时规则的语法、名称和清理以官方 §3.9、实际返回和 `references/diagnostics.md` 为准；不得猜索引，也不能用清空全部代替只清理本次新增的项。
-- `proxy-runtime-status` 可以传策略名或 line-hash；`dump policy` 给策略名、不打印 line-hash，line-hash 要从 `policy-group list` 或 `dump policy-group-sub-policies` 取，判读见 `references/diagnostics.md`。
+以下读取也须先限定已确认非秘密的字段和实际需要的量；本表不授权全量导出。
+
+|任务|离线调用知识与结果判读|
+|---|---|
+|识别实例|通过 help version/status 取字段概览；`profile-path` 为本地文件路径，非文件来源可无路径；`environment` 是环境字典，不默认全量展示。Controller 响应不能证明引擎/VPN 正在处理流量。|
+|被动网络概览|summary 的用法/被动查询性质已在 help；桥把它转为 `dump summary`。Network Indicators 不是新测量。`canPingRouter`、`canTestDNS`、`canTestEncryptDNS` 只表示后续测试资格。`network` 中 type/ssid/interface/ipv4-address/ipv4-router、后增 ipv4/ipv6 与 encrypted-dns 的协议门槛见平台表。|
+|读取模式与组|语法分别查 help mode/global-policy/policy-group。组结果中的 line-hash 可用于单代理诊断，不从 dump policy 猜 line-hash。|
+|配置与模块|语法查 help profile；本桥 diff 会取原始与有效配置并在本地比较，可能含秘密。profile 的 list/check 仅 Mac；check 不合格是命令错误。模块/特性语法查 help module/feature。|
+|外部资源|`external-resource list` 含 ready，远程资源可含 updatedAt。|
+|单代理/隧道|`show-policy <policy-name>` 查看策略详情；`proxy-runtime-status <policy-name|line-hash>` 观察流量/速率、UDP relay、测试能力、近期连接错误。WireGuard 还看有效底层策略、活动 TCP/UDP 数与 peer 握手；Tailscale 看会话错误、本地地址、Exit Node、DERP、peer path 和 MagicDNS 等实际提供的信息。先此项，后定向日志。|
+|设备/网关|device list/show <identifier|mac> 仅 Mac；VMNET 语法及各表用途查 help vmnet。status 在未运行时仍报告 running=false；其他表未运行会报错。status 看接口/MAC/IPv4/IPv6、前缀/路由器/MTU 和表大小；arp/ndp 记录 ip、mac、age-seconds；ra 看客户端 MAC/link-local、最近发送时间、有效路由器寿命和黑名单。|
+|数据通道|`retrieve-data <record-id> <request|response> [replica-dir]` 读取抓取正文；`get-resource device-icon <id...>` 返回 Base64 图标；两者不是普通状态查询，正文/资源须单独授权和限制，不进入支持包。`provider-message <base64-data>` 发 Packet Tunnel Provider 消息，不支持 Mac，不能当只读探测。|
+
+## 路由、DNS 和主动测量
+
+路由/DNS/临时规则/性能/Tailscale/WireGuard 工作先完整读 `references/diagnostics.md`。
+
+rule 的基本形式查 help rule；匹配只评价当前规则，不创建业务连接；match 看命中规则与最终策略，explain 另给组解析链、决策理由、smart 选择、底层代理链及评价说明。裸 hostname 默认 TCP/443，HTTP(S) URL 提供 URL、Host、SNI、协议与端口。可覆盖 hostname、dest-port（别名 port）、process-path、user-agent、url、sni、http-host、source-address、source-port、is-local（别名 local）、client-mac、listen-port、protocol、device-name；空值用于清除可选字段，不按返回内容猜新键。
+
+DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup 看 A/AAAA、回答服务器、接口/路径、耗时与缓存到期，trace 增加解析轨迹。指定接口不存在会失败。GeoIP 用法查 help geoip；它本地查询国家/ASN/组织及两个数据库日期，无记录字段可为 null。
+
+|测量目标|语法、负载与限制|
+|---|---|
+|当前网络|环境测试类型和调用查 help test；test-network 返回 time。它们不属于 dump，也不是 test-policy 的子命令。|
+|策略 RTT/组|调用查 help test；当前历史 Controller 支持 test-policy 多个策略参数，不把单参数帮助当上限。test-group 立即重测组，test-all-policies 重测所有策略，影响范围更大，不能默认替代单策略测试。|
+|UDP/STUN|UDP 调用查 help test，支持多个策略参数且需 Internet 出网；P2P Tailscale/WireGuard 的 rtt-only 返回 not-applicable 不证明隧道坏，改用 RTT。external-ip/nat-type 的策略测试为 STUN 探测。|
+|真实 HTTP|用法查 help http；probe 发 HEAD，未给策略则按规则选路；结果看状态、时序、路由及 headers，非无副作用模拟。|
+|带宽/Ponte|语法查 help test；带宽和 Ponte 测试是流，必须限时并核终态。|
+|本地计算负载|基本调用查 help benchmark；encryption 测 Surge 所在设备而非 CLI 主机的加密吞吐/正确性，不是网络带宽；默认 100 MiB，整数 1–1024，块 type=start/line/complete，中断后当前 primitive 完成才取消。rule-matching 对随机 hostname 做最坏全扫描，返回单个 average-ns，不是流。|
+
+## 运行数据、日志与事件
+
+`dump <type> [extra]` 的历史类型全集按用途列在下表；某类型不提供更细字段契约时只能承认其目录存在，不能自造 payload。多数原始运行数据具有隐私面，先定字段、数量和时间窗。
+
+|用途|type 及已核说明|
+|---|---|
+|请求/地址|active、recent、request、dns；dns-lookup-times 为最近 24 次实际发往服务器的查询耗时（ms，旧到新，协议≥28）；virtual-ip-db 是全库，优先 `virtual-ip <ip|domain-substring>`：IPv4 精确匹配、域名不区分大小写子串匹配。|
+|策略/配置|policy、auto-test-group-result、policy-group-sub-policies、smart-group-info、rule、map-remote、map-local、temp-rule、profile、event；`dump profile original|effective` 分别看原始与有效配置，可能含秘密，不默认读取。|
+|流量/使用度|traffic（testBytes 是策略测试产生的字节，协议≥35）；traffic-stat 可加 prefix；traffic-stat-host；traffic-stat-hourly 是本地今日逐小时 total/DIRECT（协议≥28），其中 policy 映射是今日有流量的策略分小时数据（协议≥29）；policy-usage 按 line-hash 给近期使用分数，最后使用十分钟后衰减为零（协议≥29）。|
+|概览/性能|summary；performance 含 memory-bytes、运行时长、活动请求/DNS cache/virtual IP/临时规则/封禁数量；rule-usage 是两次 App 收集间的命中计数，App 会定期取走（历史 iOS 每六小时），dump 本身不清空，不应误称自启动累计。|
+
+日志基本调用查 help log；省略为 file/100，单给数量沿用 file，范围 1–10000，旧到新。memory 保留近期各级，file 受运行日志级别限制。log 的 watch 只订阅新日志，不重放旧内容，可能一直无事件；外部限时。保留日志的字段为 source、requested-line-count、line-count、log，事件字段为 level、module、log。语法查 help set-log-level；它改运行级别，不写 Profile，level 允许值未在本历史资料穷举，需当前证据；不能猜。用法查 help logbook；它返回 records 与 truncated，新到旧；协议≥27 的响应大小上限历史约 iOS 3 MB/Mac 15 MB，会跳过放不下的记录，truncated=true 不是所有记录已取到。`script-log <log-name> <session-id>` 定位单次脚本记录。
+
+订阅的已知基本形式查 help watch，但该帮助未列全事件；支持多个 event 参数；无参数表示取消订阅，本桥 `watch speed` 转 real-time-speed。离线事件名全集按用途为：速度/策略 real-time-speed、auto-test-group、policy-benchmark；流量 request、request-update、traffic、dns；状态 summary、environment、reload、shutdown、network-changed；设备 device-name-map、device-info；诊断 diagnostics、dns-flush、log。network-changed 在新网络稳定后发送，无 payload，协议≥29；log 推荐走 log watch。未在原资料定义的事件字段不在此臆造。诊断用法查 help diagnostics；它启动诊断流，配合 `stop-diagnostics` 停止；长期流按外部限时及真实终态处理。
+
+## 变更路径与隐含副作用
+
+下列是语法知识，不是授权。模式/策略、profile 切换或更新、批量连接终止、stop/restart 等保持入口的再次单独确认；其他操作按实际影响核授权。
+
+|目标|语法与变化契约|
+|---|---|
+|模式/策略|语法分别查 help mode/global-policy/policy-group；auto 清自动组 override。任务型命令优先于内部 set；返回变化后的状态，仍要同对象回读。|
+|特性|共享名及基本用法查 help feature；Mac 才有 system-proxy/enhanced-mode，后两者等待实际切换，未完成报错。启 MITM/Rewrite/脚本/抓包先说明隐私影响。|
+|捕获范围|协议≥36：`capture-filter list`、`get <in-memory|on-disk>`、`set <scope> <option=value>...`；in-memory 管未开 HTTP capture 时的近期记录，on-disk 管 capture 会话。选项顺序应用，任一无效则不修改。http-only/hide-crash-reporter/hide-apple/hide-udp 为 on/off，crash reporter 默认隐藏；type=off/with-keywords/without-keywords/pattern；keywords=a,b,... 替换（空清除），add-keyword/remove-keyword 单项增删，enable-keyword/disable-keyword 保留但切换。含逗号单项用 add-keyword。pattern 的 *、? 与前缀 - 排除主机语义需保留。list 返回 active 和 filters，get/set 返回 scope、active 布尔与 filter；filter 字段为 httpOnly、hideCrashReporterRequests、hideAppleRequests、hideUDP、type、keywords、disabledKeywords。隐藏项、http-only 和关键词过滤共同决定记录范围，不改变网络是否通。|
+|模块/资源|语法查 help module；改变模块状态会安排 profile reload；`external-resource update <key|all>` 会更新资源，all 不作为默认；Mac 的 `managed-profile update` 强制检查活动托管配置，等待下载/校验/替换，变化才安排 reload，返回 updated/unchanged。|
+|配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先应用变化，但必要时会自动完整重启；无法保证保留连接、缓存和临时规则。若本次直接或间接 reload 无法排除完整重启，即使整批获准仍须再次单独确认这些影响，未准不执行。`restart-engine` 总是完整重启并清连接、缓存、临时规则；`stop` 仅用户明确要求时执行。|
+|临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。规则立即生效、先于 Profile、引擎停止后丢失。先列已有项，只按实际规则标识删除本次新增项，不猜索引；flush 不是常规清理。|
+|连接与封禁|语法查 help kill；它断连接；批量断开再确认。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
+|Mac 设备/升级|`set-dhcp-device <mac> <type> [value]`：takeover 与 disable-udp-fast-path 接 0/1；address 接 IPv4 或空；name/icon 接名字或空。`remove-device-record <identifier...>` 删除记录；`reconnect-device <mac>` 重连 AP 客户端；`unattended-upgrade` 升级；均不套到 iOS，升级/断网/删除不因在目录出现而获准。|
+
+分节读取/编辑/恢复先完整读 `references/http-api.md` 和 `references/http-sections.md`。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
+
+## 脚本、Mac 插件与本地能力
+
+基础语法查 help script；run 可执行已启用或已禁用的配置 cron，返回输出与结果/异常，并非只读。桥的 `script evaluate <file> [mock-type] [timeout] [engine] [argument]` 读取显式 JS 文件，转 Base64 并转换 mock 名：http-request/http-response/cron/event/rule/dns/generic；engine=auto/jsc/webview。Controller 接口本身为 evaluate <base64-js> 等后续位置参数；不能把 Controller 编码与本地文件入口混用。先审脚本/读取授权，评估可有真实网络或修改行为，mock 不保证隔离。
+
+Mac 插件在线命令（协议≥24）：`plugin list`、`info <id>`、`parameters <id>`、`load-unpacked <directory>`、`configure <id> <key=value>...`、`enable|disable <id>`、`select <type> <id|none>`、`uninstall <id>`。list 的 plugins/单对象可含 id/name/version/type/state/source/parameters/values；state=unconfigured/enabled/disabled/error，source=builtin/url/unpacked，values 可能含秘密，先限制读取。configure 成功后启用，支持时运行 system.validate；enable 也选择为该类型活动项；builtin 只能 disable。load-unpacked 重读 manifest，schema 不兼容可能清配置；uninstall 可丢持久数据。`plugin install <manifest-url>` 在历史版本尚未开放，不靠透明转发假定可用。完整自编开发/事件/限制先读 `references/plugin-authoring.md`。
+
+`plugin validate <directory>`、`plugin pack <directory> [asset-url]` 和 `lsp [--stdio]` 是官方 Mac 本地能力，本桥不实现，不能发 Controller。pack 的 ZIP 不含 manifest，另产带 asset.sha256 的托管 manifest；构建不自动授权上传/发布。官方 LSP 是编辑器长驻服务而非一次校验，历史支持 surge/surge-module/surge-ruleset、全量文本同步与诊断，配套 VS Code 扩展需 Mac 6.10.0+；本端不提供该编辑器离线能力。`--check <file>` 在本桥是向官方 HTTPS 服务上传，不是 Mac 本地解析；先告知，禁止默认上传活动 Profile，只按授权用无秘密副本。
+
+## 环境 key-path：类型、合并与回读
+
+基本语法查 help set；可一次多项，缺等号报 Illegal parameter；值经 CLI 作为字符串传输，bool/int 靠运行时转换，不表示任意 JSON 会解析。`<nil>`/`(null)` 为 null，含 `<nil>` 的整项须 shell 引用，避免重定向。普通键走 key-path 赋值；ProxyGroupSelection. 和 AutoPolicyGroupOverride. 特殊处理为映射合并，不是整个字典替换。复杂数组/字典不直接塞 shell 字面量；只有核实具体 JSON/SDK 入口、类型及授权后才用，不虚构本桥的 JSON 支持。先确认相关现值，只改必要叶子，不默认导出环境全文。
+
+|key 或字典|离线类型与语义|
+|---|---|
+|ProxyGroupSelection|dict<string,string>；`ProxyGroupSelection.<group>=<policy>` 指定 select 组选择。|
+|AutoPolicyGroupOverride|dict<string,string或null>；`AutoPolicyGroupOverride.<group>=<policy>` 强制自动组，引用的 `<nil>` 清 override。组名含点或其他歧义的编码没有本历史契约，不猜。|
+|ProxyMode|int；0=Direct、1=Global Proxy、2=Rule；优先 mode。|
+|AllProxyModePolicyNameKey|string；全局代理策略名，优先 global-policy。全局模式下非法值可能自动退到有效策略或 DIRECT，不能以发送值当生效值。|
+|MitMEnabled、RewriteEnabled、ScriptingEnabled、Replica|bool，分别为 MITM、Rewrite、脚本、HTTP capture 开关；MITM 条件不满足时会自动纠正回 0。|
+|PacketCaptureEnabled|bool；历史仅 iOS/tvOS 有效；不是打开 capture 的同义词。|
+|SGEnvironmentCellularModeEnabledKey|bool，蜂窝模式；优先 feature。|
+|SGEnvironmentCellularModeProcessPathsKey|array<string>，蜂窝模式允许进程路径；复杂结构不拼接未经核实的 shell 值。|
+
+捕获会话字典 `ReplicaSessionParameters`：sizeLimit:int 默认 52428800 字节，requestCountLimit:int 默认 100，timeLimit:int 默认 180 秒，mitmOverride:bool 默认 1，mitmOverrideHostnames:array<string> 为内建名单，mitmOverrideHostnamesDisabled:array<string> 默认空。扩大捕获和 MITM 范围先说明影响；数组的当前内容与安全入口要另核。
+
+内存/磁盘过滤字典 `InMemoryCaptureFilter`、`OnDiskCaptureFilter`：httpOnly、hideCrashReporterRequest、hideAppleRequest、hideUDP 为 bool（crash reporter 默认 1）；filterType:int 的 0/1/2/3 分别为无/白名单/黑名单/pattern；keywordFilter、disabledKeywordFilter 是 array<string>。注意内部 key 的 Request 单数与 capture-filter 结果字段 Requests 复数不同，不能互相代换。协议≥36 优先任务型 capture-filter set，而非原始复杂 key-path。
+
+`PacketCaptureParameters`：sizeLimit:int 默认 1048576 字节，packetCountLimit:int 默认 100，timeLimit:int 默认 180 秒，packetType:int 的 0/1/6/17 为 Unknown/ICMP/TCP/UDP。成功 set 会发送环境变更通知，但通知、成功回执和真实状态是三件事；必须最小回读，并核自动纠正/回退。
+
+## 覆盖与停止边界
+
+本参考与已核本地帮助共同覆盖历史官方 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型自编，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
+
+离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
+
+来源与许可：Surge 历史接口事实的自编工作流说明，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。

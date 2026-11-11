@@ -1,195 +1,92 @@
 #!/usr/bin/env python3
-"""Stage official files for review, then explicitly apply the reviewed transaction.
+"""Read-only provenance inspection. No download, staging, import or apply.
 
-Note (public snapshot, 2026-11-06): the public repository does NOT ship the four
-official originals (references/upstream-SKILL.md, references/upstream-command-reference.md,
-references/plugin-authoring.md, agents/openai.yaml). They exist in a deployed skill only
-after the fetch-and-verify step documented in references/SOURCE.md (section 取件与部署): download
-the official package, check the zip sha256, extract Surge.app/Contents/Resources/Skills/surge/,
-compare each raw_sha256 against references/upstream-manifest.json, then install into the end.
-Point --source at that extracted directory; the gate below is unchanged.
-
---source DIRECTORY is gated by a STRUCTURAL check plus a command-reference hash
-check. It is NOT a source/authenticity check of the five files:
-
-* structural check: the directory must contain the five official file paths
-
-    SKILL.md
-    references/command-reference.md
-    references/plugin-authoring.md
-    agents/openai.yaml
-    assets/logo.png
-
-  Only their existence is verified. The origin, content and authenticity of the
-  other four files (SKILL.md, references/plugin-authoring.md, agents/openai.yaml,
-  assets/logo.png) are NOT verified: compare them by hand after prepare.
-* command-reference hash check: references/command-reference.md is imported only
-  when its sha256 is in the adapter's REVIEWED_SHA256 set (reviewed official raw
-  text). An already-adapted product (ADAPTED_SHA256) or an unknown hash is
-  rejected fail-closed before anything is staged, so the active tree and the
-  staged tree both stay unchanged.
-
-A directory name or a version label never proves "official"; do not describe this
-gate as source or authenticity certification. The adapter only recognizes raw
-and historical adapted hashes; it never generates or normalizes references.
-The active command-reference.md is a manually maintained overlay, never applied.
-
-Restore semantics: a backup/rollback restores content *and* the original mode of
-each touched file (recorded per file in transaction.json as `mode`; files that did
-not exist before are created 0644). `apply` refuses a transaction whose target
-files drifted in content or in mode since prepare, before it creates backup/.
+The caller must authenticate the official app bundle and authorize source access.
+Hashes and a user-provided version label do not authenticate that source.
 """
-import argparse, datetime, difflib, hashlib, importlib.util, json, shutil, subprocess
+import argparse
+import hashlib
+import json
+import os
+import stat
+import sys
 from pathlib import Path
+
 ROOT = Path(__file__).resolve().parent.parent
-# /var/minis/workspace does not survive across shell processes; staged batches live here.
-TRANSACTION_ROOT = Path('/var/minis/shared/surge-updates')
-ADAPTER = ROOT/'scripts/adapt_upstream_reference.py'
-# agents/openai.yaml carries local wording and is compared by hand, never applied.
-DOWNLOAD = {'SKILL.md':'references/upstream-SKILL.md', 'references/command-reference.md':'references/upstream-command-reference.md', 'references/plugin-authoring.md':'references/plugin-authoring.md', 'agents/openai.yaml':'agents/openai.yaml', 'assets/logo.png':'assets/logo.png'}
-MANUAL = {'agents/openai.yaml'}
-# The icon stays in DOWNLOAD for the gate and manifest but is never written back.
-NO_APPLY = {'assets/logo.png'}
-UNWRITTEN = MANUAL | NO_APPLY
-APPLY = {src: dst for src, dst in DOWNLOAD.items() if dst not in UNWRITTEN}
-GENERATED = {'references/upstream-manifest.json'}
-NEW_FILE_MODE = 0o644
-def sha(data): return hashlib.sha256(data).hexdigest()
-def current(p):
-    p = Path(p)
-    return sha(p.read_bytes()) if p.exists() else None
-def mode_of(p):
-    p = Path(p)
-    return (p.stat().st_mode & 0o777) if p.exists() else None
-def put(p, data, mode=None):
-    """Write atomically, applying `mode` (default 0644, the mode for new files)."""
-    p = Path(p); p.parent.mkdir(parents=True, exist_ok=True)
-    t = p.with_name(p.name+'.update-tmp'); t.write_bytes(data); t.chmod(NEW_FILE_MODE if mode is None else mode); t.replace(p)
-def run(args): return subprocess.check_output(args,stderr=subprocess.PIPE)
-def adapter_module():
-    spec = importlib.util.spec_from_file_location('surge_adapt_upstream_reference', ADAPTER)
-    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
-def check_source_dir(source):
-    """Refuse a --source that fails the structural gate (five official file paths)."""
-    src = Path(source).expanduser().resolve()
-    if not src.is_dir(): raise SystemExit('--source must be a directory containing the five official raw file paths: '+str(src))
-    if src == ROOT.resolve() or ROOT.resolve() in src.parents:
-        raise SystemExit('Refusing --source: '+str(src)+' is this skill/candidate tree, not an unadapted snapshot')
-    missing = sorted(rel for rel in DOWNLOAD if not (src/rel).is_file())
-    if missing: raise SystemExit('Refusing --source: structural check failed, missing official raw file path(s): '+', '.join(missing)+' (existence only; the other four files are not otherwise verified)')
-    return src
-def check_reference_is_raw(path):
-    """Fail closed unless the imported command reference is reviewed official raw text."""
-    digest = current(path)
-    kind = adapter_module().classify(digest)
-    if kind == 'adapted':
-        raise SystemExit(
-            'Refusing transaction import: '+str(path)+' sha256='+digest+' is an already-adapted product\n'
-            '(listed in ADAPTED_SHA256), NOT official raw text. Do not feed an adapted command\n'
-            'reference (e.g. 5331f03b..., 334747c7..., 515303de..., d3163362...) to the transaction as\n'
-            '--source, do not\n'
-            'stage it as references/upstream-command-reference.md, and do not record it as raw_sha256 in\n'
-            'upstream-manifest.json. The adapter only classifies historical products; it never rewrites them.')
-    if kind != 'raw':
-        raise SystemExit(
-            'Refusing transaction import: unreviewed command reference sha256='+digest+'\n'
-            '(neither REVIEWED_SHA256 official raw text nor a known ADAPTED_SHA256 product). Review the raw\n'
-            'diff, update the adapter baseline, then prepare again. Nothing was staged.')
-    return digest
-def prepare(args):
-    source = check_source_dir(args.source) if args.source else None
-    if source is not None:
-        check_reference_is_raw(source/'references/command-reference.md')
-    if source is None and not args.host:
-        raise SystemExit(
-            'Explicit --host required when --source is not given: pass the Mac target the user '
-            'designated for this run. No default host is built into this skill, and nothing was '
-            'created or downloaded.')
-    folder=TRANSACTION_ROOT/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
-    folder.mkdir(parents=True); raw=folder/'raw'; staged=folder/'staged'
-    version=args.version
-    for src,dst in DOWNLOAD.items():
-        p=raw/src; p.parent.mkdir(parents=True,exist_ok=True)
-        if source:
-            p.write_bytes((source/src).read_bytes())
-        else:
-            run(['scp','-q','-oBatchMode=yes','-oConnectTimeout=10',args.host+':/Applications/Surge.app/Contents/Resources/Skills/surge/'+src,str(p)])
-    if not source:
-        # Gate the downloaded reference before staging; raw evidence survives.
-        try:
-            check_reference_is_raw(raw/'references/command-reference.md')
-        except SystemExit as exc:
-            shutil.rmtree(staged,ignore_errors=True)
-            (folder/'rejected.txt').write_text(str(exc)+'\n')
-            raise
-    for src,dst in DOWNLOAD.items():
-        put(staged/dst, (raw/src).read_bytes())
-    if not args.source:
-        version=run(['ssh','-oBatchMode=yes','-oConnectTimeout=10',args.host,'/Applications/Surge.app/Contents/Applications/surge-cli version']).decode().strip()
-    if not version: raise SystemExit('Explicit --version required for local source')
-    diff=[]
-    for src,dst in DOWNLOAD.items():
-        old=ROOT/dst; new=raw/src
-        if new.suffix in ('.md','.yaml'):
-            diff.extend(difflib.unified_diff(old.read_text().splitlines(True) if old.exists() else [],new.read_text().splitlines(True),fromfile=dst,tofile='raw/'+src))
-    (folder/'review.diff').write_text(''.join(diff))
-    print('Review directory:',folder,flush=True)
-    provenance={'source':args.source or args.host,'version_report':version,'retrieved_at':datetime.datetime.now().isoformat(),'raw_sha256':{s:current(raw/s) for s in DOWNLOAD},'runtime_validation':'not performed'}
-    put(staged/'references/upstream-manifest.json',json.dumps(provenance,indent=2).encode())
-    # Only auto-applied files enter the transaction; mode None = file did not exist.
-    files={str(p.relative_to(staged)):{'before':current(ROOT/p.relative_to(staged)),'after':current(p),'mode':mode_of(ROOT/p.relative_to(staged))} for p in staged.rglob('*') if p.is_file() and str(p.relative_to(staged)) not in UNWRITTEN}
-    (folder/'transaction.json').write_text(json.dumps({'files':files,'adapter':current(ADAPTER),'manual':sorted(MANUAL)},indent=2))
-    print('Prepared; active skill unchanged. Inspect review.diff, raw/, staged/ before apply.')
-    print('Manual comparison required after review: '+', '.join(sorted(MANUAL)))
-    print('Not written back by apply (gate/provenance only): '+', '.join(sorted(NO_APPLY))+' - the official icon is not retained locally.')
-    print('Gate scope: --source was checked structurally (five official file paths) and by the '
-          'command-reference hash only; the other four files (SKILL.md, references/plugin-authoring.md, '
-          'agents/openai.yaml, assets/logo.png) are NOT verified by it - compare them by hand.')
-def apply(args):
-    folder=Path(args.directory).resolve(); tx=json.loads((folder/'transaction.json').read_text()); files=tx['files']
-    if 'references/command-reference.md' in files:
-        raise SystemExit(
-            'Refusing apply: references/command-reference.md is a manually maintained overlay; '
-            'prepare again. Nothing was written and no backup/ was created.')
-    allowed=set(APPLY.values())|GENERATED
-    if set(files)!=allowed: raise SystemExit('Invalid transaction file list')
-    if tx['adapter']!=current(ADAPTER): raise SystemExit('Adapter changed; prepare again')
-    for name,h in files.items():
-        if current(ROOT/name)!=h['before'] or current(folder/'staged'/name)!=h['after']: raise SystemExit('Changed since prepare: '+name)
-    # Mode drift is refused before backup/ exists.
-    for name,h in files.items():
-        now=mode_of(ROOT/name)
-        if now!=h['mode']:
-            raise SystemExit(
-                'Mode changed since prepare: '+name+' (recorded '
-                +('absent' if h['mode'] is None else oct(h['mode']))+', now '
-                +('absent' if now is None else oct(now))+'). Re-run prepare before applying:\n'
-                'nothing was written, the active tree is unchanged and no backup/ was created.')
-    backup=folder/'backup'; backup.mkdir() # refuse reapplication
-    for name,h in files.items():
-        if h['before'] is not None: put(backup/name,(ROOT/name).read_bytes(),h['mode'])
-    (folder/'state').write_text('applying')
-    touched=[]
+FILES = ('SKILL.md', 'references/command-reference.md',
+         'references/plugin-authoring.md', 'agents/openai.yaml', 'assets/logo.png')
+RETIRED = 'E_IMPORT_RETIRED: prepare/apply removed; use inspect for provenance only.'
+
+
+def directory(path):
+    # Retain directory fds, refuse symlinks and ambiguous path components.
+    parts = str(path).split('/')
+    if parts[0] or any(x in ('', '.', '..') for x in parts[1:]):
+        raise ValueError('source path')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for name in files:
-            touched.append(name); put(ROOT/name,(folder/'staged'/name).read_bytes(),files[name]['mode'])
+        for part in parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd
     except BaseException:
-        for name in reversed(touched):
-            if files[name]['before'] is None: (ROOT/name).unlink(missing_ok=True)
-            else: put(ROOT/name,(backup/name).read_bytes(),files[name]['mode'])
-        (folder/'state').write_text('rolled-back'); raise
-    (folder/'state').write_text('applied')
-    print('Applied. Backup:',backup,'; runtime not tested. Review local capability notes separately.')
-    print('Modes: each file was written with its recorded original mode (transaction.json files.<name>.mode); new files 0644.')
-    print('Not a filesystem-wide atomic transaction and not kill-proof: if this run was killed with state=applying, restore the touched files from backup/ with their recorded mode (content + mode) before retrying.')
-p=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter,epilog='--source gate = structural check (the directory must contain the five official file paths SKILL.md, references/command-reference.md, references/plugin-authoring.md, agents/openai.yaml, assets/logo.png; existence only) + command-reference hash check (sha256 must be in the adapter REVIEWED_SHA256 set of reviewed official raw text). The other four files require manual comparison after prepare: this gate is not a source or authenticity certification, and a directory name or version label never proves "official". Never pass this skill/candidate tree or an already-adapted upstream copy: an adapted references/command-reference.md is rejected fail-closed.')
-sub=p.add_subparsers(dest='action',required=True)
-s=sub.add_parser('prepare',description='Stage the five official files for review; never changes the active skill.')
-s.add_argument('--host',help='scp/ssh target the user designated for this run; required unless --source is given (no default host is cached).')
-s.add_argument('--source',help='Snapshot directory gated by: structural check (must contain the five official file paths SKILL.md, references/command-reference.md, references/plugin-authoring.md, agents/openai.yaml, assets/logo.png; existence only) + command-reference hash check (must be in the reviewed official raw set). The other four files need manual comparison; this is not a source/authenticity certification. Not this skill/candidate tree, not an already-adapted upstream copy.')
-s.add_argument('--version',help='Version label for a local --source (required when --source is used).')
-s=sub.add_parser('apply',description='Apply a prepared transaction directory (content + recorded modes); refuses content or mode drift since prepare before creating backup/.')
-s.add_argument('directory')
-a=p.parse_args()
-if a.action=='prepare': prepare(a)
-else: apply(a)
+        os.close(fd)
+        raise
+
+
+def digest(root_fd, name):
+    fd = os.dup(root_fd)
+    try:
+        parts = name.split('/')
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        with os.fdopen(file_fd, 'rb') as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError('not regular')
+            value = hashlib.sha256()
+            for block in iter(lambda: source.read(65536), b''):
+                value.update(block)
+            return value.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='action', required=True)
+    inspect = commands.add_parser('inspect', help='hash an authorized external snapshot; no writes')
+    inspect.add_argument('--source', required=True, help='absolute, non-symlink directory')
+    inspect.add_argument('--version', required=True, help='non-secret app version/build label; not identity proof')
+    # Refuse historical verbs before parsing flags or touching source/transaction paths.
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ('prepare', 'apply'):
+        parser.exit(2, RETIRED + '\n')
+    args = parser.parse_args(argv)
+    source = Path(args.source)
+    if source == ROOT or ROOT in source.parents or not args.version.strip() or len(args.version) > 120:
+        parser.exit(2, 'E_SOURCE_INPUT\n')
+    fd = None
+    try:
+        fd = directory(args.source)
+        raw = {name: digest(fd, name) for name in FILES}
+        baseline = json.loads((ROOT / 'references/upstream-manifest.json').read_text())['raw_sha256']
+        if not isinstance(baseline, dict):
+            raise ValueError('manifest')
+    except (OSError, ValueError, KeyError, TypeError):
+        parser.exit(1, 'E_SOURCE_READ\n')
+    finally:
+        if fd is not None:
+            os.close(fd)
+    print(json.dumps({'version_report': args.version, 'source_authentication': 'not performed',
+                      'raw_sha256': raw, 'changed_from_baseline': sorted(
+                          name for name in FILES if raw[name] != baseline.get(name)),
+                      'runtime_validation': 'not performed', 'imported': False}, indent=2))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

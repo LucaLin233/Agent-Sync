@@ -2,8 +2,8 @@
 """luno-surge 脚本离线回归：只连 127.0.0.1 夹具、用哑凭据，经真实子进程入口执行 scripts/*。
 
 覆盖：输出脱敏（_privacy 语料＋各入口全部输出路径）、3xx 不外泄 X-Key、出网门禁、安全分节
-写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、上游 prepare/apply 门禁、
-专用打包器、安装与验收档、官方原件取件状态。依赖官方原件的用例在公开仓库 skip，取件后重跑。
+写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、只读来源检查及旧导入入口拒绝、
+专用打包器（拒绝完整官方文件）、安装与验收档、自编资源清单。来源检查不需要官方原件。
 """
 import contextlib
 import errno
@@ -53,15 +53,6 @@ PRIVACY = load_module('surge_privacy_under_test', SCRIPTS / '_privacy.py')
 ADAPTER = load_module('surge_adapter_under_test', ADAPTER_PATH)
 R = PRIVACY.REDACTED
 B, T = PRIVACY.redact_boundary, PRIVACY.redact_text
-
-# 仓库落点 → manifest raw_sha256 键；公开仓库不含这三件，部署取件后才在位。
-ORIGINALS = {'references/upstream-SKILL.md': 'SKILL.md',
-             'references/upstream-command-reference.md': 'references/command-reference.md',
-             'references/plugin-authoring.md': 'references/plugin-authoring.md'}
-OFFICIAL_PRESENT = (SKILL / 'references/upstream-command-reference.md').is_file()
-requires_official = unittest.skipUnless(
-    OFFICIAL_PRESENT, '公开仓库不含官方原件；按 SOURCE.md〈取件与部署〉装入后重跑')
-
 
 def offline_env(base=None, api_key=API_KEY):
     """哑凭据＋本地 base，剥掉代理与放行变量。"""
@@ -623,55 +614,6 @@ class SurgeCliTest(unittest.TestCase):
 
 
 # ── 上游适配器、prepare 与 apply ─────────────────────────────────────────────
-GATE = ('Explicit --host required when --source is not given: pass the Mac target the user '
-        'designated for this run. No default host is built into this skill, and nothing was '
-        'created or downloaded.\n')
-UNREVIEWED = 'Refusing transaction import: unreviewed command reference sha256='
-
-# prepare 驱动：拦截 subprocess 与 mkdir（gate 模式禁止任何 mkdir），把固定事务根改到临时目录，
-# 适配器换成桩。用 PosixPath 子类替换 pathlib.Path，兼容 3.9 与 3.12+。
-PREPARE_DRIVER = r'''
-import importlib.util, json, pathlib, runpy, subprocess, sys
-script, mode, cfg = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
-def note(entry):
-    with open(cfg['log'], 'a', encoding='utf-8') as fh:
-        fh.write(entry + '\n')
-real_mkdir = pathlib.Path.mkdir
-def mkdir(self, *args, **kwargs):
-    note('mkdir:' + str(self))
-    if mode == 'gate':
-        raise SystemExit(90)
-    return real_mkdir(self, *args, **kwargs)
-pathlib.Path.mkdir = mkdir
-def blocked(name):
-    def stub(argv, *args, **kwargs):
-        note(name + ':' + ' '.join(map(str, argv if isinstance(argv, (list, tuple)) else [argv])))
-        raise SystemExit(91)
-    return stub
-for name in ('call', 'Popen', 'check_output', 'run'):
-    setattr(subprocess, name, blocked(name))
-if mode == 'host':
-    def fake_scp(argv, *args, **kwargs):
-        note('check_output:' + ' '.join(map(str, argv)))
-        pathlib.PosixPath(argv[-1]).write_bytes(cfg['payload'].encode())
-        return b''
-    subprocess.check_output = fake_scp
-real_spec = importlib.util.spec_from_file_location
-def spec(name, path, *args, **kwargs):
-    if str(path).endswith('/adapt_upstream_reference.py'):
-        path = cfg['adapter']
-    return real_spec(name, path, *args, **kwargs)
-importlib.util.spec_from_file_location = spec
-class Redirected(pathlib.PosixPath):
-    def __new__(cls, *args):
-        path = pathlib.PosixPath(*args)
-        return pathlib.PosixPath(cfg['tx_root']) if str(path) == '/var/minis/shared/surge-updates' else path
-pathlib.Path = Redirected
-sys.argv = [script] + cfg['argv']
-runpy.run_path(script, run_name='__main__')
-'''
-
-
 class UpstreamAdapterTest(unittest.TestCase):
     ERROR = ('Unreviewed reference: neither reviewed official raw text nor a known '
              'historical adapted product; nothing was written.\n')
@@ -698,239 +640,117 @@ class UpstreamAdapterTest(unittest.TestCase):
                 ADAPTER.main([str(path)])
             self.assertEqual('adapted sha256=%s\n' % hashlib.sha256(overlay).hexdigest(), out.getvalue())
 
-    @requires_official
-    def test_fetched_official_copy_is_reviewed_raw(self):
-        path = SKILL / 'references/upstream-command-reference.md'
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        self.assertIn(digest, ADAPTER.REVIEWED_SHA256)
-        self.assertEqual(digest, json.loads(MANIFEST.read_text())['raw_sha256']['references/command-reference.md'])
-        r = subprocess.run([sys.executable, str(ADAPTER_PATH), str(path)], env=offline_env(),
-                           capture_output=True, text=True)
-        self.assertEqual((0, 'raw sha256=%s\n' % digest, ''), (r.returncode, r.stdout, r.stderr))
 
 
-class UpstreamPrepareTest(unittest.TestCase):
-    PAYLOAD = '# synthetic official raw command reference\n'
+class ProvenanceInspectTest(unittest.TestCase):
+    """Existing source maintenance moves from import/apply to read-only evidence."""
+    AUDIT_DRIVER = r'''import os, runpy, sys
+restricted = sys.argv[2]
+del sys.argv[2]
+real_open, fd_paths = os.open, {}
+def checked_open(path, flags, mode=0o777, *, dir_fd=None):
+    text = os.fsdecode(path)
+    absolute = os.path.normpath(text if os.path.isabs(text) else os.path.join(fd_paths.get(dir_fd, os.getcwd()), text))
+    if restricted and (absolute == restricted or absolute.startswith(restricted + os.sep)):
+        raise AssertionError('restricted path read attempted')
+    fd = real_open(path, flags, mode, dir_fd=dir_fd)
+    fd_paths[fd] = absolute
+    return fd
+os.open = checked_open
 
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='upstream-gate-'))
-        self.addCleanup(shutil.rmtree, str(self.tmp), True)
-        self.log = self.tmp / 'calls.log'
-        self.tx = self.tmp / 'tx'
-        self.tx.mkdir()
-
-    def adapter(self, reviewed=(), kind='raw'):
-        stub = self.tmp / ('adapter_%s.py' % kind)
-        stub.write_text('REVIEWED_SHA256 = set(%r)\nADAPTED_SHA256 = set()\n'
-                        'def classify(digest):\n'
-                        '    return %r if %r != "raw" or digest in REVIEWED_SHA256 else "unknown"\n'
-                        % (tuple(reviewed), kind, kind), encoding='utf-8')
-        return stub
-
-    def source_dir(self):
-        src = self.tmp / 'official-snapshot'
-        for rel in ('SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
-                    'agents/openai.yaml', 'assets/logo.png'):
-            (src / rel).parent.mkdir(parents=True, exist_ok=True)
-            (src / rel).write_bytes(self.PAYLOAD.encode() if rel.endswith('.md') else b'x')
-        return src
-
-    def prepare(self, mode, argv, adapter):
-        cfg = {'log': str(self.log), 'argv': argv, 'payload': self.PAYLOAD,
-               'adapter': str(adapter), 'tx_root': str(self.tx)}
-        return subprocess.run([sys.executable, '-B', '-c', PREPARE_DRIVER, str(UPDATE), mode,
-                               json.dumps(cfg)], env=offline_env(), capture_output=True, text=True,
-                              timeout=60)
-
-    def calls(self):
-        return self.log.read_text(encoding='utf-8').splitlines() if self.log.exists() else []
-
-    def test_missing_host_fails_before_any_side_effect(self):
-        r = self.prepare('gate', ['prepare'], self.adapter())
-        self.assertEqual((1, '', GATE), (r.returncode, r.stdout, r.stderr))
-        self.assertEqual([], self.calls())
-
-    def test_source_prepares_without_network(self):
-        src = self.source_dir()
-        reference = (src / 'references/command-reference.md').read_bytes()
-        r = self.prepare('source', ['prepare', '--source', str(src), '--version', '0.0.0-test'],
-                         self.adapter([hashlib.sha256(reference).hexdigest()]))
-        self.assertEqual(0, r.returncode, r.stderr)
-        folder = Path(r.stdout.splitlines()[0][len('Review directory: '):])
-        self.assertEqual(self.tx, folder.parent)
-        self.assertTrue((folder / 'review.diff').is_file())
-        self.assertEqual([], [c for c in self.calls() if not c.startswith('mkdir:' + str(self.tx))])
-        tx = json.loads((folder / 'transaction.json').read_text())
-        self.assertEqual({'references/upstream-SKILL.md', 'references/plugin-authoring.md',
-                          'references/upstream-command-reference.md', 'references/upstream-manifest.json'},
-                         set(tx['files']))
-        self.assertEqual(reference, (folder / 'raw/references/command-reference.md').read_bytes())
-        self.assertEqual(reference, (folder / 'staged/references/upstream-command-reference.md').read_bytes())
-        manifest = json.loads((folder / 'staged/references/upstream-manifest.json').read_text())
-        self.assertEqual({str(p.relative_to(src)): hashlib.sha256(p.read_bytes()).hexdigest()
-                          for p in src.rglob('*') if p.is_file()}, manifest['raw_sha256'])
-
-    def test_host_uses_only_scp_and_gates_download_before_staging(self):
-        host = 'mac-target.invalid'
-        r = self.prepare('host', ['prepare', '--host', host, '--version', '0.0.0-test'], self.adapter())
-        scp = [c for c in self.calls() if c.startswith('check_output:')]
-        self.assertEqual(5, len(scp), self.calls())
-        for call in scp:
-            self.assertEqual(['check_output:scp', host], [call.split()[0], call.split()[4].split(':')[0]])
-        self.assertEqual([], [c for c in self.calls() if c.startswith(('run:', 'Popen:', 'call:'))])
-        self.assertEqual(1, r.returncode)
-        self.assertEqual(UNREVIEWED + hashlib.sha256(self.PAYLOAD.encode()).hexdigest(),
-                         r.stderr.splitlines()[0])
-        (folder,) = list(self.tx.iterdir())
-        self.assertTrue((folder / 'rejected.txt').is_file())
-        self.assertFalse((folder / 'staged').exists())
-
-    def test_source_gate_rejects_non_raw_before_creating_anything(self):
-        src = self.source_dir()
-        digest = hashlib.sha256(self.PAYLOAD.encode()).hexdigest()
-        active = COMMAND_REFERENCE.read_bytes()
-        for kind, expected in (('adapted', ' is an already-adapted product'), ('raw', UNREVIEWED + digest)):
-            with self.subTest(kind=kind):
-                r = self.prepare('source', ['prepare', '--source', str(src), '--version', '0.0.0-test'],
-                                 self.adapter(kind=kind))
-                self.assertEqual((1, ''), (r.returncode, r.stdout))
-                self.assertIn(expected, r.stderr)
-                self.assertEqual([], list(self.tx.iterdir()))
-                self.assertEqual(active, COMMAND_REFERENCE.read_bytes())
-
-
-class UpstreamApplyTest(unittest.TestCase):
-    """真实 apply 入口，只操作隔离夹具。"""
-    GUARD = ('Refusing apply: references/command-reference.md is a manually maintained overlay; '
-             'prepare again. Nothing was written and no backup/ was created.\n')
-    FILES = ('references/upstream-SKILL.md', 'references/plugin-authoring.md',
-             'references/upstream-command-reference.md', 'references/upstream-manifest.json')
-    FAIL_DRIVER = '''import pathlib, runpy, sys
-root, count, script, folder = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
-old, seen = pathlib.Path.replace, [0]
-def fail_once(self, target):
-    if str(target).startswith(root + "/references/"):
-        seen[0] += 1
-        if seen[0] == count:
-            raise OSError("controlled failure")
-    return old(self, target)
-pathlib.Path.replace = fail_once
-sys.argv = [script, "apply", folder]
-runpy.run_path(script, run_name="__main__")
+def deny(event, args):
+    if event in ('open', 'os.listdir', 'os.scandir') and restricted:
+        target = args[0]
+        if isinstance(target, (str, bytes, os.PathLike)):
+            path = os.fsdecode(target)
+            if os.path.isabs(path) and (path == restricted or path.startswith(restricted + os.sep)):
+                raise AssertionError('restricted path read attempted')
+    if event == "open" and args[2] & 0o3103:
+        raise AssertionError("write attempted")
+    if event in ("os.mkdir", "os.remove", "os.rename", "os.rmdir", "os.chmod",
+                 "subprocess.Popen", "socket.__new__", "socket.connect"):
+        raise AssertionError("side effect attempted")
+sys.addaudithook(deny)
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
 '''
 
-    def setUp(self, absent=None):
-        temp = tempfile.TemporaryDirectory(prefix='surge-apply-')
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name) / 'skill'
-        self.folder = Path(temp.name) / 'transaction'
-        (self.root / 'scripts').mkdir(parents=True)
-        for name in ('update_upstream.py', 'adapt_upstream_reference.py'):
-            shutil.copy2(str(SCRIPTS / name), str(self.root / 'scripts' / name))
-        overlay = self.root / 'references/command-reference.md'
-        overlay.parent.mkdir()
-        overlay.write_bytes(COMMAND_REFERENCE.read_bytes())
-        overlay.chmod(0o640)
-        files = {}
-        for i, name in enumerate(self.FILES):
-            active, staged = self.root / name, self.folder / 'staged' / name
-            staged.parent.mkdir(parents=True, exist_ok=True)
-            if name != absent:
-                active.write_bytes(('before-' + name).encode())
-                active.chmod(0o600 if i % 2 else 0o640)
-            staged.write_bytes(('after-' + name).encode())
-            files[name] = {'before': self.digest(active) if active.exists() else None,
-                           'after': self.digest(staged),
-                           'mode': active.stat().st_mode & 0o777 if active.exists() else None}
-        self.tx = {'files': files, 'adapter': self.digest(self.root / 'scripts/adapt_upstream_reference.py'),
-                   'manual': ['agents/openai.yaml']}
-        self.save()
+    def invoke(self, args, restricted=""):
+        return subprocess.run([sys.executable, '-B', '-c', self.AUDIT_DRIVER,
+                               str(UPDATE), restricted, *args], env=offline_env(),
+                              capture_output=True, text=True, timeout=20)
 
-    @staticmethod
-    def digest(path):
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+    def source(self, tmp):
+        source = Path(tmp) / 'source'
+        payloads = {name: ('synthetic-source-' + name).encode() for name in (
+            'SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
+            'agents/openai.yaml', 'assets/logo.png')}
+        for name, data in payloads.items():
+            target = source / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        return source, payloads
 
-    def save(self):
-        (self.folder / 'transaction.json').write_text(json.dumps(self.tx), encoding='utf-8')
+    def test_inspect_is_read_only_and_never_admits_unknown_hashes(self):
+        with tempfile.TemporaryDirectory(prefix='surge-provenance-') as tmp:
+            source, payloads = self.source(tmp)
+            result = self.invoke(['inspect', '--source', str(source), '--version', 'test-build'])
+            self.assertEqual((0, ''), (result.returncode, result.stderr))
+            report = json.loads(result.stdout)
+            self.assertEqual({n: hashlib.sha256(b).hexdigest() for n, b in payloads.items()},
+                             report['raw_sha256'])
+            self.assertEqual(sorted(payloads), report['changed_from_baseline'])
+            self.assertEqual('not performed', report['source_authentication'])
+            self.assertEqual('not performed', report['runtime_validation'])
+            self.assertIs(False, report['imported'])
+            self.assertEqual(payloads, {n: (source / n).read_bytes() for n in payloads})
+            self.assertEqual(['source'], sorted(p.name for p in Path(tmp).iterdir()))
 
-    def snapshot(self):
-        return {name: ((self.root / name).read_bytes(), (self.root / name).stat().st_mode & 0o777)
-                if (self.root / name).exists() else None
-                for name in self.FILES + ('references/command-reference.md',)}
+    def test_retired_commands_refuse_before_read_or_network(self):
+        with tempfile.TemporaryDirectory(prefix='surge-retired-read-') as tmp:
+            source, payloads = self.source(tmp)
+            transaction = Path(tmp) / 'transaction'
+            transaction.mkdir()
+            sentinel = transaction / 'transaction.json'
+            sentinel.write_bytes(b'SYNTHETIC-TRANSACTION-DO-NOT-READ')
+            cases = (['prepare'], ['prepare', '--host', 'unused.invalid'],
+                     ['prepare', '--source', str(source), '--version', 'test-build'],
+                     ['apply', str(transaction)])
+            for args in cases:
+                with self.subTest(args=args):
+                    result = self.invoke(args, restricted=tmp)
+                    self.assertEqual((2, '', 'E_IMPORT_RETIRED: prepare/apply removed; use inspect for provenance only.\n'),
+                                     (result.returncode, result.stdout, result.stderr))
+                    self.assertEqual(payloads, {n: (source / n).read_bytes() for n in payloads})
+                    self.assertEqual(b'SYNTHETIC-TRANSACTION-DO-NOT-READ', sentinel.read_bytes())
+            # Audit positive control: a real inspect must reach and be denied at the restricted read.
+            result = self.invoke(['inspect', '--source', str(source), '--version', 'test-build'], restricted=tmp)
+            self.assertEqual(1, result.returncode)
+            self.assertEqual('', result.stdout)
+            self.assertIn('AssertionError: restricted path read attempted', result.stderr)
 
-    def apply(self, fail_at=None):
-        script = str(self.root / 'scripts/update_upstream.py')
-        argv = ([script, 'apply', str(self.folder)] if fail_at is None else
-                ['-c', self.FAIL_DRIVER, str(self.root), str(fail_at), script, str(self.folder)])
-        return subprocess.run([sys.executable, '-B', *argv], env=offline_env(),
-                              capture_output=True, text=True, timeout=60)
-
-    def assert_refused_before_backup(self, expected):
-        before, tx_bytes = self.snapshot(), (self.folder / 'transaction.json').read_bytes()
-        r = self.apply()
-        self.assertEqual((1, '', expected), (r.returncode, r.stdout, r.stderr))
-        self.assertFalse((self.folder / 'backup').exists())
-        self.assertEqual(before, self.snapshot())
-        self.assertEqual(tx_bytes, (self.folder / 'transaction.json').read_bytes())
-
-    def test_overlay_in_transaction_is_refused_before_backup(self):
-        for entry, adapter in (({'before': None, 'after': None, 'mode': None}, None),
-                               ({'before': 'old', 'after': 'old'}, 'old-adapter-hash')):
-            with self.subTest(adapter=adapter):
-                self.setUp()
-                self.tx['files']['references/command-reference.md'] = entry
-                if adapter:
-                    self.tx['adapter'] = adapter
-                self.save()
-                self.assert_refused_before_backup(self.GUARD)
-
-    def test_drift_is_refused_before_backup(self):
-        name = self.FILES[0]
-        for kind, expected in (
-                ('active', 'Changed since prepare: ' + name),
-                ('staged', 'Changed since prepare: ' + name),
-                ('adapter', 'Adapter changed; prepare again'),
-                ('list', 'Invalid transaction file list'),
-                ('mode', 'Mode changed since prepare: ' + name + ' (recorded 0o640, now 0o777). Re-run '
-                         'prepare before applying:\nnothing was written, the active tree is unchanged '
-                         'and no backup/ was created.')):
-            with self.subTest(kind=kind):
-                self.setUp()
-                if kind == 'active':
-                    (self.root / name).write_bytes(b'changed')
-                elif kind == 'staged':
-                    (self.folder / 'staged' / name).write_bytes(b'changed')
-                elif kind == 'mode':
-                    (self.root / name).chmod(0o777)
-                elif kind == 'adapter':
-                    self.tx['adapter'] = 'different'
-                else:
-                    self.tx['files']['other'] = {}
-                self.save()
-                self.assert_refused_before_backup(expected + '\n')
-
-    def test_apply_writes_staged_bytes_with_recorded_modes_and_backup(self):
-        before = self.snapshot()
-        r = self.apply()
-        self.assertEqual(0, r.returncode, r.stderr)
-        self.assertEqual('applied', (self.folder / 'state').read_text())
-        after = self.snapshot()
-        self.assertEqual(before['references/command-reference.md'], after['references/command-reference.md'])
-        for name in self.FILES:
-            backup = self.folder / 'backup' / name
-            self.assertEqual(((self.folder / 'staged' / name).read_bytes(), before[name][1]), after[name])
-            self.assertEqual(before[name], (backup.read_bytes(), backup.stat().st_mode & 0o777))
-
-    def test_failure_mid_apply_rolls_back_every_touched_file(self):
-        for at in range(1, len(self.FILES) + 1):
-            with self.subTest(at=at):
-                self.setUp(absent=self.FILES[0])
-                before = self.snapshot()
-                r = self.apply(at)
-                self.assertEqual(1, r.returncode)
-                self.assertIn('OSError: controlled failure', r.stderr)
-                self.assertEqual('rolled-back', (self.folder / 'state').read_text())
-                self.assertEqual(before, self.snapshot())
+    def test_missing_source_and_symlinks_fail_without_content_output(self):
+        with tempfile.TemporaryDirectory(prefix='surge-source-refusal-') as tmp:
+            source, payloads = self.source(tmp)
+            target = source / 'SKILL.md'
+            target.unlink()
+            args = ['inspect', '--source', str(source), '--version', 'test-build']
+            result = self.invoke(args)
+            self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                             (result.returncode, result.stdout, result.stderr))
+            elsewhere = Path(tmp) / 'other.md'
+            elsewhere.write_bytes(payloads['SKILL.md'])
+            target.symlink_to(elsewhere)
+            result = self.invoke(args)
+            self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                             (result.returncode, result.stdout, result.stderr))
+            target.unlink()
+            target.write_bytes(payloads['SKILL.md'])
+            alias = Path(tmp) / 'alias'
+            alias.symlink_to(source, target_is_directory=True)
+            result = self.invoke(['inspect', '--source', str(alias), '--version', 'test-build'])
+            self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                             (result.returncode, result.stdout, result.stderr))
 
 
 # ── 专用打包器 ───────────────────────────────────────────────────────────────
@@ -946,7 +766,18 @@ class PackerTest(unittest.TestCase):
         (skill / 'SKILL.md').write_text('---\nname: surge\n---\n\n夹具正文\n')
         (skill / 'references/one.md').write_text('one\n')
         (skill / 'references/two.md').write_text('two\n')
+        self.write_manifest(skill)
         return skill, script, load_module('surge_release_under_test', script)
+
+    def write_manifest(self, skill):
+        # Independent synthetic provenance, not values exported by the packer.
+        payloads = {key: ('synthetic raw ' + key).encode() for key in (
+            'SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
+            'agents/openai.yaml', 'assets/logo.png')}
+        manifest = skill / 'references/upstream-manifest.json'
+        manifest.write_text(json.dumps({'raw_sha256': {
+            key: hashlib.sha256(value).hexdigest() for key, value in payloads.items()}}))
+        return manifest, payloads
 
     def pack(self, script, out, driver=None):
         argv = [str(script), str(out)] if driver is None else ['-c', driver, str(script), str(out)]
@@ -962,7 +793,7 @@ class PackerTest(unittest.TestCase):
                 (skill / rel).parent.mkdir(parents=True, exist_ok=True)
                 (skill / rel).write_text('excluded\n')
             self.assertEqual(['SKILL.md', 'references/one.md', 'references/two.md',
-                              'scripts/package_release.py'], [rel for rel, _ in module.collect(skill)])
+                              'references/upstream-manifest.json', 'scripts/package_release.py'], [rel for rel, _ in module.collect(skill)])
             for make, message in (
                     (lambda p: p.symlink_to('references/one.md'), 'Symlinks are not allowed in release packages: bad'),
                     (lambda p: os.mkfifo(str(p)), 'Non-regular entries are not allowed in release packages: bad')):
@@ -1050,21 +881,97 @@ class PackerTest(unittest.TestCase):
             self.assertEqual((1, 'Output ZIP must be outside the Skill directory\n'), (r.returncode, r.stderr))
             self.assertFalse(inside.exists())
 
-    def test_real_skill_package_follows_fetch_state(self):
-        """覆盖层、manifest、自有 agents/openai.yaml 逐字节进包；官方原件取件后才进包。"""
-        fetched = all((SKILL / rel).exists() for rel in ORIGINALS)
+    def test_real_skill_package_is_self_contained(self):
         with tempfile.TemporaryDirectory(prefix='surge-zip-') as tmp:
             out = Path(tmp) / 'release.zip'
-            r = self.pack(PACKER, out)
-            self.assertEqual(0, r.returncode, r.stderr)
+            result = self.pack(PACKER, out)
+            self.assertEqual(0, result.returncode, result.stderr)
+            registry = json.loads((ROOT / 'tools/sync-targets.json').read_text())
+            (obj,) = [o for o in registry['objects'] if o['id'] == 'luno-surge']
+            expected = sorted(['SKILL.md'] + [str(Path(r).relative_to('skills/luno-surge'))
+                                            for r in obj['resources']])
             with zipfile.ZipFile(out) as archive:
-                names = archive.namelist()
-                for rel in ('references/command-reference.md', 'references/upstream-manifest.json',
-                            'agents/openai.yaml') + (tuple(ORIGINALS) if fetched else ()):
-                    self.assertEqual((SKILL / rel).read_bytes(), archive.read(rel))
-                if not fetched:
-                    self.assertEqual([], [rel for rel in ORIGINALS if rel in names])
-                self.assertFalse(any(n.endswith(('.pyc', '.log', '.pem')) for n in names))
+                self.assertEqual(expected, archive.namelist())
+                for name in expected:
+                    self.assertEqual((SKILL / name).read_bytes(), archive.read(name))
+
+    def test_whole_official_files_and_logo_are_rejected(self):
+        for name in ('references/upstream-SKILL.md', 'references/upstream-command-reference.md', 'assets/logo.png'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='surge-no-official-') as tmp:
+                skill, script, module = self.isolated(tmp)
+                target = skill / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b'synthetic-whole-official-file')
+                out = Path(tmp) / 'release.zip'
+                out.write_bytes(b'EXISTING-ZIP-SENTINEL')
+                out.chmod(0o640)
+                before = (out.read_bytes(), out.stat().st_mode & 0o777)
+                result = self.pack(script, out)
+                self.assertEqual((1, '', 'Official resource is not distributable: ' + name + '\n'),
+                                 (result.returncode, result.stdout, result.stderr))
+                self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
+                self.assertFalse(Path(str(out) + '.tmp').exists())
+                target.unlink()
+                self.assertTrue(module.build(module.collect(skill)))
+
+    def test_known_raw_content_is_denied_at_renamed_and_authored_paths(self):
+        keys = ('SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
+                'agents/openai.yaml', 'assets/logo.png')
+        for key in keys:
+            paths = ('references/renamed.md', 'references/plugin-authoring.md') if key == 'references/plugin-authoring.md' else ('references/renamed.md',)
+            for name in paths:
+                with self.subTest(key=key, name=name), tempfile.TemporaryDirectory(prefix='surge-known-raw-') as tmp:
+                    skill, script, module = self.isolated(tmp)
+                    _manifest, payloads = self.write_manifest(skill)
+                    target = skill / name
+                    target.write_bytes(payloads[key])
+                    out = Path(tmp) / 'release.zip'
+                    out.write_bytes(b'EXISTING-ZIP-SENTINEL')
+                    out.chmod(0o640)
+                    before = (out.read_bytes(), out.stat().st_mode & 0o777)
+                    result = self.pack(script, out)
+                    self.assertEqual((1, '', 'Known whole official file is not distributable: ' + name + '\n'),
+                                     (result.returncode, result.stdout, result.stderr))
+                    self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
+                    self.assertFalse(Path(str(out) + '.tmp').exists())
+                    target.write_bytes(b'own distinct guide')
+                    self.assertTrue(module.build(module.collect(skill)), 'Removing the injection must restore the positive control')
+
+    def test_provenance_manifest_fails_closed_and_preserves_existing_zip(self):
+        keys = ('SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
+                'agents/openai.yaml', 'assets/logo.png')
+        cases = [('absent-file', None), ('invalid-json', '{bad'),
+                 ('root-null', 'null'), ('root-list', '[]'), ('missing-table', '{}'),
+                 ('empty-table', '{"raw_sha256":{}}'),
+                 ('table-list', '{"raw_sha256":[]}'), ('table-string', '{"raw_sha256":"bad"}')]
+        for key in keys:
+            for fault in ('missing', 'null', 'empty', 'number', 'list', 'bad-char', 'short', 'uppercase'):
+                raw = {k: hashlib.sha256(('synthetic raw ' + k).encode()).hexdigest() for k in keys}
+                if fault == 'missing':
+                    del raw[key]
+                else:
+                    raw[key] = {'null': None, 'empty': '', 'number': 7, 'list': [],
+                                'bad-char': 'z' * 64, 'short': 'a' * 63, 'uppercase': 'A' * 64}[fault]
+                cases.append((key + ':' + fault, json.dumps({'raw_sha256': raw})))
+        for label, content in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory(prefix='surge-bad-manifest-') as tmp:
+                skill, script, module = self.isolated(tmp)
+                manifest = skill / 'references/upstream-manifest.json'
+                if content is None:
+                    manifest.unlink()
+                else:
+                    manifest.write_text(content)
+                out = Path(tmp) / 'release.zip'
+                out.write_bytes(b'EXISTING-ZIP-SENTINEL')
+                out.chmod(0o640)
+                before = (out.read_bytes(), out.stat().st_mode & 0o777)
+                result = self.pack(script, out)
+                self.assertEqual((1, '', 'Invalid provenance manifest\n'),
+                                 (result.returncode, result.stdout, result.stderr))
+                self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
+                self.assertFalse(Path(str(out) + '.tmp').exists())
+                self.write_manifest(skill)
+                self.assertTrue(module.build(module.collect(skill)), 'Removing the fault must pass')
 
 
 # ── 安装与验收档 ─────────────────────────────────────────────────────────────
@@ -1639,33 +1546,22 @@ class SectionWriteTest(unittest.TestCase):
 
 
 # ── 官方原件取件状态与登记 ───────────────────────────────────────────────────
-class OfficialStateTest(unittest.TestCase):
-
-    def test_originals_all_absent_or_all_fetched_with_manifest_hashes(self):
-        present = [rel for rel in ORIGINALS if (SKILL / rel).is_file()]
-        if present:
-            self.assertEqual(sorted(ORIGINALS), sorted(present), '取件须三件齐全')
-            raw = json.loads(MANIFEST.read_text())['raw_sha256']
-            for rel, key in ORIGINALS.items():
-                self.assertEqual(raw[key], hashlib.sha256((SKILL / rel).read_bytes()).hexdigest(), rel)
-
-    def test_manifest_registry_and_fetch_docs_agree(self):
+class AuthoredResourceStateTest(unittest.TestCase):
+    def test_registry_resources_are_present_without_official_exceptions(self):
+        doc = json.loads((ROOT / 'tools/sync-targets.json').read_text())
+        self.assertFalse(any('officialPackageResources' in o for o in doc['objects']))
+        (obj,) = [o for o in doc['objects'] if o['id'] == 'luno-surge']
+        self.assertIn('skills/luno-surge/references/plugin-authoring.md', obj['resources'])
+        for name in obj['resources']:
+            self.assertTrue((ROOT / name).is_file(), name)
         raw = json.loads(MANIFEST.read_text())['raw_sha256']
-        self.assertEqual({'SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
-                          'agents/openai.yaml', 'assets/logo.png'}, set(raw))
-        for digest in raw.values():
-            self.assertRegex(digest, r'^[0-9a-f]{64}$')
-        doc = json.loads((ROOT / 'tools/sync-targets.json').read_text(encoding='utf-8'))
-        (obj,) = [o for o in doc['objects'] if o.get('id') == 'luno-surge']
-        block = obj['officialPackageResources']
-        self.assertTrue(block['note'].strip())
-        self.assertEqual(sorted('skills/luno-surge/' + rel for rel in ORIGINALS), sorted(block['paths']))
-        self.assertEqual([], [p for p in block['paths'] if p in obj['resources']])
-        self.assertEqual(['luno-surge'], [o.get('id') for o in doc['objects'] if 'officialPackageResources' in o])
-        own = 'skills/luno-surge/agents/openai.yaml'                # 自有改写文件：普通资源，非官方原件
-        self.assertIn(own, obj['resources'])
-        self.assertNotEqual(raw['agents/openai.yaml'], hashlib.sha256((ROOT / own).read_bytes()).hexdigest())
-        self.assertIn('### 取件与部署', (SKILL / 'references/SOURCE.md').read_text(encoding='utf-8'))
+        for source, own in (('references/command-reference.md', COMMAND_REFERENCE),
+                            ('references/plugin-authoring.md', SKILL / 'references/plugin-authoring.md'),
+                            ('agents/openai.yaml', SKILL / 'agents/openai.yaml')):
+            self.assertNotEqual(raw[source], hashlib.sha256(own.read_bytes()).hexdigest())
+        self.assertFalse((SKILL / 'references/upstream-SKILL.md').exists())
+        self.assertFalse((SKILL / 'references/upstream-command-reference.md').exists())
+        self.assertFalse((SKILL / 'assets/logo.png').exists())
 
 
 if __name__ == '__main__':

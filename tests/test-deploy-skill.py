@@ -149,19 +149,18 @@ class Repo(object):
         return (self.out / key_of(self.name)).read_bytes()
 
 
-def surge_repo(root, fetched=True, packer=True):
-    """luno-surge：专用打包器＋manifest＋官方取件声明（原件为合成字节）。"""
+def surge_repo(root, packer=True):
+    """Self-authored resources with synthetic raw hashes only; no fetched originals."""
     repo = Repo(root, name="luno-surge", src_rel="skills/luno-surge")
     if packer:
         write(repo.repo / SURGE_PACKER, (ROOT / SURGE_PACKER).read_bytes())
-    repo.originals = dict((rel, ("synthetic %s\n" % key).encode()) for rel, key in ORIGINALS.items())
-    write(repo.src / "references/upstream-manifest.json", json.dumps({"raw_sha256": dict(
-        (key, sha(repo.originals[rel])) for rel, key in ORIGINALS.items())}))
-    repo.register(resources=[r for r in repo.live() if r not in ORIGINALS],
-                  officialPackageResources={"paths": sorted(repo.src_rel + "/" + r for r in ORIGINALS)})
-    if fetched:
-        for rel, blob in repo.originals.items():
-            write(repo.src / rel, blob)
+    repo.originals = {rel: ("synthetic raw %s\n" % key).encode() for rel, key in ORIGINALS.items()}
+    write(repo.src / "references/upstream-manifest.json", json.dumps({"raw_sha256": {
+        key: sha(("synthetic raw %s\n" % key).encode()) for key in (
+            "SKILL.md", "references/command-reference.md", "references/plugin-authoring.md",
+            "agents/openai.yaml", "assets/logo.png")}}))
+    write(repo.src / "references/plugin-authoring.md", "# Independent project guide\n")
+    repo.register()
     return repo
 
 
@@ -525,7 +524,7 @@ class LocalPackage(Case):
         self.assert_fail(pack_inproc(repo), 2, "资源完整清单",
                          "包内有、登记无［skills/%s/references/extra.md］" % NAME)
         repo.register(officialPackageResources={"paths": ["x"]})
-        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "只允许 luno-surge")
+        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "官方取件登记已退休")
         self.assertEqual(repo.artifacts(), [])
         repo.register()
         self.assertEqual(pack_inproc(repo)[0], 0)
@@ -540,27 +539,27 @@ class LocalPackage(Case):
         self.assertEqual(rc, 0, out + err)
 
 
-class OfficialOriginalsGate(Case):
-    """luno-surge：官方参考原件须在位、声明完整、哈希等于 manifest，否则拒绝构包。"""
-
-    def test_surge_requires_fetched_originals(self):
-        repo = self.surge(fetched=False)
-        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "官方参考原件缺失")
-        for rel, blob in repo.originals.items():
-            write(repo.src / rel, blob)
-        self.assertEqual(pack_inproc(repo)[0], 0)
-        write(repo.src / "references/plugin-authoring.md", b"tampered\n")
-        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "哈希不符 manifest")
-
-    def test_surge_declaration_must_be_complete_and_exclusive(self):
+class AuthoredResourcesGate(Case):
+    def test_surge_packs_without_fetched_originals(self):
         repo = self.surge()
-        paths = sorted(repo.src_rel + "/" + r for r in ORIGINALS)
-        resources = [r for r in repo.live() if r not in ORIGINALS]
-        repo.register(resources=resources, officialPackageResources={"paths": paths[:2]})
-        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "须恰好声明 3 份参考原件")
-        repo.register(resources=resources + ["references/plugin-authoring.md"],
-                      officialPackageResources={"paths": paths})
-        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "不得同时登记为普通资源")
+        self.assertEqual(pack_inproc(repo)[0], 0)
+        with zipfile.ZipFile(io.BytesIO(repo.candidate())) as archive:
+            self.assertIn('references/plugin-authoring.md', archive.namelist())
+            self.assertNotIn('references/upstream-SKILL.md', archive.namelist())
+            self.assertNotIn('references/upstream-command-reference.md', archive.namelist())
+
+    def test_legacy_fetch_declaration_cannot_bypass_inventory(self):
+        repo = self.surge()
+        repo.register(officialPackageResources={"paths": []})
+        self.assert_fail(pack_inproc(repo), 2, "资源完整清单", "官方取件登记已退休")
+        self.assertEqual([], repo.artifacts())
+
+    def test_raw_plugin_is_not_allowed_even_at_authored_path(self):
+        repo = self.surge()
+        write(repo.src / 'references/plugin-authoring.md', repo.originals['references/plugin-authoring.md'])
+        self.assert_fail(pack_inproc(repo), 2, "打包", "专用打包器拒绝该源（ReleaseError）；未产出包")
+        self.assertEqual([], repo.artifacts())
+        self.assertEqual(([], False), (repo.lh_calls(), repo.sdk_imported()))
 
 
 class DedicatedPacker(Case):

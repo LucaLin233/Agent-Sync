@@ -12,7 +12,7 @@
     名称猜源目录。打包器、正文契约、资源传输模块只从 `--repo` 加载，无回退。
   · 候选 ZIP 在内存构建并校验（源文件 0644、frontmatter name、非空正文、登记资源集＝包内文件），
     全部通过才原子写出到 `--out-dir`。`--expect-zip-sha256` 给出时实构摘要须逐位相等（两种模式都核）。
-    `skills/luno-surge` 走其专用打包器：`--deploy` 必须给摘要，且先核官方参考原件在位、哈希等于 manifest。
+    `skills/luno-surge` 走其专用打包器：`--deploy` 必须给摘要；只分发自编资源，拒绝已知完整官方文件和 logo。
   · `--deploy` 须 `LUNO_DEPLOY_AUTHORIZED=1`：防误触断言，不是授权来源；在任何写出之前检查。
   · 部署：同域前置（受批准 origin＋指定 key、个人作用域）不成立即停；`lh` 解析为绝对 argv，子进程只拿
     白名单 env 与新建空 HOME/XDG。部署前回读核 name、来源 bucket/key、zipFileHash；zipFileHash 已等于
@@ -94,15 +94,6 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9._/+-]{1,255}$")
 
 DEDICATED_PACKERS = {"skills/luno-surge": "skills/luno-surge/scripts/package_release.py"}
-# luno-surge 的官方参考原件不进公开仓库，部署 clone 取件后才在位（见其 references/SOURCE.md）
-OFFICIAL_ROOT = "skills/luno-surge"
-OFFICIAL_MANIFEST = "references/upstream-manifest.json"
-OFFICIAL_ORIGINALS = {
-    "skills/luno-surge/references/upstream-SKILL.md": "SKILL.md",
-    "skills/luno-surge/references/upstream-command-reference.md": "references/command-reference.md",
-    "skills/luno-surge/references/plugin-authoring.md": "references/plugin-authoring.md",
-}
-
 USAGE = ("用法：python3 -B tools/deploy_skill.py --repo <审定仓库> --src <显式技能目录> "
          "--name <技能名> --key <既有 R2 对象 key> --out-dir <已授权资产目录> "
          "--expect-id <登记平台 ID> [--expect-zip-sha256 <64位小写十六进制>] [--deploy]\n"
@@ -559,49 +550,18 @@ def package_problems(entries, name, members, body_contract):
     return problems
 
 
-def official_originals_problem(obj, members):
-    """luno-surge：声明恰为 3 份参考原件，且包内原件哈希等于 manifest 的 raw_sha256。"""
-    block = obj.get("officialPackageResources")
-    paths = block.get("paths") if isinstance(block, dict) else None
-    if not isinstance(paths, list) or sorted(map(str, paths)) != sorted(OFFICIAL_ORIGINALS):
-        return "officialPackageResources 须恰好声明 3 份参考原件（缺失／损坏即拒绝，不绕过）"
-    try:
-        raw = json.loads(members[OFFICIAL_MANIFEST].decode("utf-8"))["raw_sha256"]
-    except (KeyError, ValueError, TypeError, UnicodeDecodeError):
-        return "官方原件 manifest 不可读或缺 raw_sha256"
-    root = OFFICIAL_ROOT + "/"
-    for rel, key in sorted(OFFICIAL_ORIGINALS.items()):
-        expect = raw.get(key) if isinstance(raw, dict) else None
-        if not isinstance(expect, str) or not SHA256_RE.match(expect):
-            return "manifest 的 %s 哈希形态非法" % key
-        data = members.get(rel[len(root):])
-        if data is None:
-            return "官方参考原件缺失（%s）：先按 SOURCE.md〈取件与部署〉取件并核对哈希" % rel
-        if sha256(data) != expect:
-            return "官方参考原件哈希不符 manifest（%s）：不换来源" % rel
-    return None
-
-
 def check_inventory(obj, src_rel, members):
-    """登记资源（luno-surge 另加官方取件原件）须恰等于候选包内 SKILL.md 以外的文件。"""
-    official = set()
-    if src_rel == OFFICIAL_ROOT:
-        problem = official_originals_problem(obj, members)
-        if problem:
-            raise Fail(STAGE_INVENTORY, "官方取件门禁未通过：%s" % problem)
-        official = set(OFFICIAL_ORIGINALS)
-    elif obj.get("officialPackageResources"):
-        raise Fail(STAGE_INVENTORY, "登记异常：官方取件登记只允许 luno-surge")
+    """登记资源须恰等于候选包内 SKILL.md 以外的文件；不再允许官方缺件例外。"""
+    if "officialPackageResources" in obj:
+        raise Fail(STAGE_INVENTORY, "登记异常：官方取件登记已退休")
     res = obj.get("resources")
     if not isinstance(res, list) or not all(isinstance(r, str) for r in res) \
             or len(set(res)) != len(res):
         raise Fail(STAGE_INVENTORY, "登记异常：resources 须为不重复的路径数组")
     declared = set(res)
-    if declared & official:
-        raise Fail(STAGE_INVENTORY, "登记异常：官方取件原件不得同时登记为普通资源")
     live = set(src_rel + "/" + rel for rel in members if rel != SKILL_FILE)
-    ghost = sorted((declared | official) - live)
-    extra = sorted(live - declared - official)
+    ghost = sorted(declared - live)
+    extra = sorted(live - declared)
     if ghost or extra:
         raise Fail(STAGE_INVENTORY, "资源完整清单未通过：登记有、包内无［%s］；包内有、登记无［%s］"
                     % ("，".join(map(safe_path, ghost)), "，".join(map(safe_path, extra))))
