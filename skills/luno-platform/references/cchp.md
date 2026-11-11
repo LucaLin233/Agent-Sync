@@ -12,7 +12,7 @@
 
 ## 范围与资源
 
-用 `cchp` 管理用量、请求、provider/key、LLM token、成员配额、设置和 CC Hub 导入；CLI 离线发现操作，默认由它调用管理面。模型调用、宿主机与网络运维不在本资源范围。涉及运维或实际备份时加载 `luno-ops`；Minis 登记与 LobeHub 配置分别按 `luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕处理。
+用 `cchp` 管理用量、请求、provider/key、LLM token、成员配额、设置和 CC Hub 导入；CLI 离线发现操作，默认由它调用管理面。模型调用、宿主机与网络运维不在本资源范围。涉及运维或实际备份时按需加载 `luno-ops`；Minis 登记与 LobeHub 配置分别按 `luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕处理。
 
 完整读取命中的资源；跨业务取并集：
 
