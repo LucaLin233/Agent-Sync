@@ -18,7 +18,7 @@ surge-cli --raw geoip 1.1.1.1
 
 `rule match` 快速看命中的规则和最终策略；`rule explain` 给出完整的策略组决策路径，回答「为什么这样走」时优先用它。
 
-需要改变路由才能验证、并且用户授权时，优先用临时规则，不改 Profile；临时规则立即生效，优先于 Profile 规则。先列出已有的规则，记下本次新增的项：
+需要改变路由才能验证、并且用户授权时，优先用临时规则，不改 Profile。先列出已有的规则，记下本次新增的项：
 
 ```sh
 surge-cli rule temp list
@@ -27,7 +27,7 @@ surge-cli rule temp add "DOMAIN-SUFFIX,example.com,Proxy"
 surge-cli rule temp list
 ```
 
-`rule temp flush` 会清空全部临时规则，禁止当作本次测试的常规清理。只移除本次新增的规则；具体的标识和 remove 参数先核对 [命令参考](command-reference.md) 和实际返回，不能猜索引，也不能清掉用户已有的规则。
+清理按入口 §3，只移除本次新增的规则；具体的标识和 remove 参数先核对 [命令参考](command-reference.md) 和实际返回。
 
 ## 性能与隧道
 
@@ -51,9 +51,11 @@ surge-cli --raw proxy-runtime-status POLICY::…
 
 `test-policy-udp` 需要真实的 Internet 出网：对 P2P 的 Tailscale/WireGuard 策略（`Test Capability: rtt-only`）会返回 not-applicable，这类策略改用 `test-policy` 取 RTT。这个错误**不是**隧道故障的证据。
 
-## CoreDevice/RSD 同机回环
+## CoreDevice/RSD 同机回环（第三方报告，非本机验收）
 
-只在这个场景下评估 `[IP Rewrite]` 的目标地址 `reflect`，以及该地址 `/32` 的 `tun-included-routes`；先核对目标地址、现有路由、模块和配对前提，版本和平台条件按 `references/platform-compatibility.md`。
+上游 OpenMinis ios-dev（2026-10-25 本地核对）报告：Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为门槛（这里是 App 发行版本，不是 Controller 内部版本）。上游列出的验证环境是 iOS 27.0.1/27.1 和 Surge 5.23.0；流程要求 Wi-Fi、已开启开发者模式和有效的 RemotePairing 配对材料，同机只运行一个相应的 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑和前提没核对时不据此执行，也不外推到其他系统、实现或全部服务端口。这是第三方报告的 App 版本条件，不是 `references/platform-compatibility.md` 门槛表里的 Controller 协议门槛。
+
+只在这个场景下评估 `[IP Rewrite]` 的目标地址 `reflect`，以及该地址 `/32` 的 `tun-included-routes`；先核对目标地址、现有路由、模块、配对前提和上述版本条件。
 
 - 不自动改路由，不整段覆盖已有路由，也不照搬上游「无副作用」的保证。
 - TCP connect 成功不等于协议成功：任意端口都能瞬间连上却没有数据，可能是假通。要分别确认 TCP、Pair-Verify、RSD 会话和获准的只读业务返回。

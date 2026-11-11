@@ -1,6 +1,6 @@
-# Surge macOS 插件开发（自编）
+# Surge macOS 插件开发（非官方摘要）
 
-本指南为非官方、自编接口事实说明，不含官方插件指南全文或逐段译文。仅在用户明确要求 macOS 插件工作时使用；iOS 不支持此插件分支。先完整读 `references/platform-compatibility.md`；在线命令的传输、凭据和秘密边界另读 `references/controller-cli.md`。新版本或未列出的字段须核官方资料，不把本指南当未来版本保证。
+本指南是依据官方插件指南整理的中文接口事实摘要，非官方，不是译本，没有原文摘录。仅在用户明确要求 macOS 插件工作时使用；iOS 不支持此插件分支。先完整读 `references/platform-compatibility.md`；在线命令的传输、凭据和秘密边界另读 `references/controller-cli.md`。新版本或未列出的字段须核官方资料，不把本指南当未来版本保证。
 
 ## 范围和交付物
 
@@ -26,7 +26,7 @@ parameters 每项有唯一 key 和 type，可声明 label、description、requir
 
 通过 `$httpClient` 的 get/post/put/delete/head/options/patch 发请求；回调接收错误字符串或 null、含 status/headers 的响应、字符串响应体（binary-body-mode 时为 Uint8Array）。body 可为字符串或对象，对象按 JSON 发送。请求可带 URL、headers、body、timeout、auto-redirect 和 binary-body-mode；timeout 默认 30 秒、auto-redirect 默认 true、binary-body-mode 默认 false。不要默认关闭证书或主机名校验；官方示例中的 insecure 选项不构成本项目默认。没有选策略的 policy 参数，不假设 Cookie 会跨请求保存。
 
-本指南基于 Mac 6.11.0（12680）包内资料记录：manifest ≤64 KB，main.js ≤2 MB，ZIP ≤10 MB，解包 ≤30 MB 且 ≤200 文件；事件 1–60 秒、默认 15 秒；HTTP 请求/响应体各 ≤8 MB，最多 20 个并发请求；持久存储共 4 MB，键 ≤128 字符并限字母数字及 `._-`；参数 key ≤64 字符。这些是有版本的事实，不代表本端实测，也不外推到未来版本。
+本指南基于 Mac 6.11.0 包内资料（12680，12710 未变）记录：manifest ≤64 KB，main.js ≤2 MB，ZIP ≤10 MB，解包 ≤30 MB 且 ≤200 文件；事件 1–60 秒、默认 15 秒；HTTP 请求/响应体各 ≤8 MB，最多 20 个并发请求；持久存储共 4 MB，键 ≤128 字符并限字母数字及 `._-`；参数 key ≤64 字符。这些是有版本的事实，不代表本端实测，也不外推到未来版本。
 
 ## 开发、验证和分发
 
@@ -38,4 +38,4 @@ parameters 每项有唯一 key 和 type，可声明 label、description、requir
 
 验收分别记录离线格式检查、真实插件参数验证、面板数据及获准的重连结果，不能以构包成功替代设备行为。回滚前核插件身份、参数变化和持久数据；卸载会丢持久存储，须另获删除授权。
 
-来源：Surge 官方应用包的历史接口事实，版本与哈希见 `references/upstream-manifest.json`；取源与许可边界见 `references/SOURCE.md`。本指南独立组织，未加入官方叙述原文摘录。
+来源：Surge 官方应用包的历史接口事实，版本与哈希见 `references/upstream-manifest.json`；取源与许可边界见 `references/SOURCE.md`。本指南按本端任务重新组织，没有原文摘录。

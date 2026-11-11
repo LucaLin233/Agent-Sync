@@ -1,4 +1,4 @@
 interface:
   display_name: "Surge"
   short_description: "配置、审查并安全控制 Surge"
-  default_prompt: "Use this skill for Surge configuration and runtime work. Default to iOS, inspect actual artifacts or baseline state first, apply the smallest safe change, and verify afterward."
+  default_prompt: "按 luno-surge 处理这项 Surge 任务：默认 iOS；改动前先只读核对实例和现有配置，只做必要的最小修改并当场复验；重启、切换配置、断开连接等高影响操作先单独征得确认。"

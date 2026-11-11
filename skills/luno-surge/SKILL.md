@@ -5,7 +5,7 @@ description: Surge配置、模块、规则、脚本与日志诊断；CLI/Externa
 
 # Surge（iOS 优先）
 
-本项目非 Surge 官方技能。Surge 名称及官方资料归 Surge Networks；本技能采用自编工作流和接口事实说明，来源、有限摘录及第三方许可边界见 `references/SOURCE.md`。
+本项目非 Surge 官方技能。Surge 名称及官方资料归 Surge Networks；本技能的工作流是自编的，命令参考和插件指南是依据官方资料整理的中文接口事实摘要（不是译本，无原文摘录）；来源和许可边界见 `references/SOURCE.md`。
 
 默认按 iOS 处理；只有用户明确提到 Mac、给出 Mac 专属证据或需要跨平台时，才进入 macOS 或共享配置。iOS 上不套用 Mac 的文件系统和 Gateway、System Proxy、Enhanced Mode；共享 profile 用 `#!IOS-ONLY`、`#!MACOS-ONLY`、`#!TVOS-ONLY` 隔离平台差异。
 
@@ -26,7 +26,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 - 不编造节点、策略名、证书、凭据、订阅 URL 或 Controller 的返回。
 - **凭据**：Controller 密码或 HTTP API Key 只从 `SURGE_API_KEY` 或 `--password-stdin` 取，不进 argv、文件、日志或回复。客户端非交互，不读凭据文件，不在 TTY 补问；缺失时给出[设置入口](minis://settings/environments?create_key=SURGE_API_KEY&create_value=)，不要让用户在聊天里发密码。
 - **隐私数据**：`dump profile`、请求正文和日志可能含节点、订阅 URL 和隐私，只在必要时最小读取、脱敏引用，不放进支持包。启用 MITM、Rewrite、脚本、抓包或远程控制之前，先说明影响；hostname 不默认写 `*`。
-- **高影响操作再确认**：`stop`、`restart-engine`、切换或更新 profile、批量终止连接、改变模式或策略之前，**即使整批已获批准，也要再单独确认一次**（比 `luno-core` 更严）；`stop` 只在用户明确要求时执行。`reload` 通常差量应用，但必要时会自动转完整重启，不能保证保留连接、缓存和临时规则。直接或间接触发 reload 前，应核对本次变更与实例版本；无法排除完整重启时，即使整批已获批准，也必须就这些影响再次单独确认，未获准即不执行。`restart-engine` 总是完整重启，亦须再次单独确认；不能仅凭命令名或历史成功判为无损。
+- **高影响操作再确认**：`stop`、`restart-engine`、切换或更新 profile、批量终止连接（开关 HTTP capture 也算：`feature set capture` 和 `set Replica=…` 都会断开全部现有连接）、改变模式或策略之前，**即使整批已获批准，也要再单独确认一次**（比 `luno-core` 更严）；`stop` 只在用户明确要求时执行。`reload` 通常差量应用，但必要时会自动转完整重启，不能保证保留连接、缓存和临时规则。直接或间接触发 reload 前，应核对本次变更与实例版本；无法排除完整重启时，即使整批已获批准，也必须就这些影响再次单独确认，未获准即不执行。`restart-engine` 总是完整重启（关闭连接、清除缓存和临时规则），亦须再次单独确认；不能仅凭命令名或历史成功判为无损。
 - **临时规则**立即生效、优先于 Profile，引擎停止后失效。`rule temp flush` 会清空全部临时规则，**禁止当作本次的默认清理**；只删本次新增的项，不猜索引。清理和处理多帧输出之前，完整读 `references/diagnostics.md`。
 - **真实流量**：`http probe` 会发真实的 HEAD 请求，DNS、节点、带宽和加密 benchmark 也会产生真实流量或负载，都按需执行。`watch`、`diagnostics` 和 benchmark 输出 JSON Lines，要限流读到 `hasMore=false`；长期订阅由外部限时停止，首帧不是终态。
 - **`--check` 会上传**：它把文件发到官方服务校验，不是本地解析；禁止自动上传活动 Profile，先告知用户，必要时只校验脱敏副本。
@@ -38,7 +38,9 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 改动要最小并保持原有的路由意图，交付完整文件或精确定位的 patch。模块保持单一目的、可逆，说明它是覆盖、插入还是追加，以及前提条件；参数名带 `<面板名>_` 前缀，`#!arguments` 用逗号分隔、默认值里不能有逗号（多值用 `|`），占位符写 `{{{name}}}`。没有 Controller 时的验证流程：导入或应用 → 查 parser warning → 复现 → 在请求查看器核对命中的规则和策略；交付时附验证和回滚方法。
 
-分节编辑之前，完整读 `references/http-api.md` 的〈安全分节写入〉，并按 `references/platform-compatibility.md` 核对平台、版本和协议；官方支持分节编辑不代表本端已经实现。整节替换会触发校验和 reload，要按 §3 再单独确认；先合成验证不等于授权修改活动配置。
+模块只推到用户自有的 `LucaLin233/Proxy` 源：推送前完整读 `luno-ops/references/github.md`，凭据不进 argv；Git 推送只在总控及 GitHub 分支的秘密来源窄例外条件满足时执行。推送和发布分别核授权，以远端回读为准，CDN 延迟不算成功。
+
+分节编辑之前，完整读 `references/http-sections.md`，并按 `references/platform-compatibility.md` 核对平台、版本和协议；官方支持分节编辑不代表本端已经实现。整节替换会触发校验和 reload，要按 §3 再单独确认；先合成验证不等于授权修改活动配置。
 
 ## 5. CLI
 
@@ -46,7 +48,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 优先用 `--raw`，它输出的是**客户端脱敏后的 JSON，不是服务端原文**（包内其他地方说的「原始」都按这个理解）。
 
-查命令选择、语法或 key-path 时，先完整读自编的 `references/command-reference.md`，再按任务读取其中触发的专业资源。本文和自编参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
+查命令选择、语法或 key-path 时，先完整读 `references/command-reference.md`，再按任务读取其中触发的专业资源。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
 
 涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/diagnostics.md`。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
 
@@ -56,6 +58,6 @@ Controller 不可用，或需要 `/v1/*` 端点、Prometheus 指标时，先完�
 
 ## 7. 交付
 
-安装和验收、取源和追新、打包和投递、模块推送之前，完整读 `references/SOURCE.md` 的共同前置和对应分支。仓库提供自编的运行资料和桥接脚本，不要求补入官方 Skill 原件；官方应用包只作为维护取证来源，不作为普通使用或部署的必需附件。自编正文须人工维护，不整体覆盖成本地或远程官方原件。打包只用现有的专用打包器；包中不得有完整官方文件、官方 logo、凭据、profile、抓包、请求正文、数据库或运行输出。SOURCE 中的授权、漂移即停、失败恢复和发布边界均须保留。
+安装和验收、取源和追新、打包和投递之前，完整读 `references/SOURCE.md` 的共同前置和对应分支。仓库提供自有的运行资料和桥接脚本，不要求补入官方 Skill 原件；官方应用包只作为维护取证来源，不作为普通使用或部署的必需附件。运行资料须人工维护，不整体覆盖成本地或远程官方原件。打包只用现有的专用打包器；包中不得有完整官方文件、官方 logo、凭据、profile、抓包、请求正文、数据库或运行输出。SOURCE 中的授权、漂移即停、失败恢复和发布边界均须保留。
 
 交付时给出结论、实际做了的修改或操作、验证结果和回滚注意事项；分清建议和实操、规则推演和端到端成功、版本快照和当前实测。

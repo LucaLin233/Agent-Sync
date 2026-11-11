@@ -6,6 +6,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 python3 -B - "$ROOT" <<'PYEOF'
 import contextlib, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
+from unittest import mock
 ROOT=Path(sys.argv[1])
 spec=importlib.util.spec_from_file_location('guard',ROOT/'tools/check-rules.py')
 G=importlib.util.module_from_spec(spec);spec.loader.exec_module(G)
@@ -20,22 +21,33 @@ def check(label,ok,detail=''):
     if ok:PASS+=1;print('PASS  '+label)
     else:FAIL+=1;print('FAIL  '+label+(('：'+detail) if detail else ''))
 
-def fresh():
-    """每例一份守卫输入的新副本：skills/prompt/subagents 与两张登记表。"""
-    p=TMP/'case'
-    shutil.rmtree(p,ignore_errors=True)
-    for top in ('skills','prompt','subagents'):shutil.copytree(ROOT/top,p/top,symlinks=True)
-    (p/'tools').mkdir()
-    for f in ('rule-claims.tsv','sync-targets.json'):shutil.copyfile(ROOT/'tools'/f,p/'tools'/f)
-    return p
+# 守卫输入只复制一次（skills/prompt/subagents 与两张登记表）；每例记录夹具改动过的路径，
+# 跑完按仓库原件逐个还原或删除，下一例仍从原样副本开始（收尾逐字节核对副本）。
+CASE=TMP/'case'
+for top in ('skills','prompt','subagents'):shutil.copytree(ROOT/top,CASE/top,symlinks=True)
+(CASE/'tools').mkdir()
+for f in ('rule-claims.tsv','sync-targets.json'):shutil.copyfile(ROOT/'tools'/f,CASE/'tools'/f)
+MUTATORS=('write_text','write_bytes','unlink','symlink_to','mkdir')
 
-def case(label,want,category,setup=lambda p:None):
-    p=fresh()
-    setup(p)
-    out=io.StringIO();guard=G.Guard(p)
+def case(label,want,category,setup=lambda p:None,n=1):
+    touched={}
+    def tracked(real):
+        def method(path,*a,**k):
+            touched.setdefault(path,os.path.lexists(path));return real(path,*a,**k)
+        return method
+    with contextlib.ExitStack() as stack:
+        for name in MUTATORS:stack.enter_context(mock.patch.object(Path,name,tracked(getattr(Path,name))))
+        setup(CASE)
+    out=io.StringIO();guard=G.Guard(CASE)
     with contextlib.redirect_stdout(out):rc=guard.run()
+    for path,existed in sorted(touched.items(),key=lambda x:-len(x[0].parts)):
+        if path.is_dir() and not path.is_symlink():
+            if not existed:shutil.rmtree(path)
+            continue
+        if os.path.lexists(path):path.unlink()
+        if existed:shutil.copyfile(ROOT/path.relative_to(CASE),path)
     found=guard.hard+guard.incomplete+guard.soft if rc else ['无问题']
-    check(label,rc==want and category in found,'rc=%d 期望 %d/%s\n%s'%(rc,want,category,out.getvalue()))
+    check(label,rc==want and found.count(category)>=n,'rc=%d 期望 %d/%s×%d\n%s'%(rc,want,category,n,out.getvalue()))
 
 def edit(p,rel,fn):
     f=p/rel;before=f.read_text(encoding='utf-8');after=fn(before)
@@ -142,8 +154,12 @@ case('同一平台 ID 多占',1,'平台身份多占',shared_id)
 case('缺位仍带 ID',1,'缺位身份冲突',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('present',False)))
 case('平台 ID 非法形态',1,'平台身份形态',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('id','bad')))
 case('身份端缺 present',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends']['minis'].pop('present')))
-for v in ('/var/minis/skills/wrong/SKILL.md',[]):
-    case('Minis 路径误配 %r'%(v,),1,'Minis 身份路径冲突',lambda p,v=v:skill_obj(p,lambda o:o['ends']['minis'].__setitem__('path',v)))
+def minis_paths(p):
+    def fn(d):
+        sk=[o for o in d['objects'] if o['type']=='skill']
+        sk[0]['ends']['minis']['path']='/var/minis/skills/wrong/SKILL.md';sk[1]['ends']['minis']['path']=[]
+    registry(p,fn)
+case('Minis 路径误配（错路径与非字符串各一）',1,'Minis 身份路径冲突',minis_paths,n=2)
 
 # ── 义务块 ──
 OB_SRC,OB_HEAD=G.OBLIGATIONS[0]
@@ -151,16 +167,16 @@ def ob_empty(s):
     lines=s.splitlines();i=lines.index(OB_HEAD)+1;j=i
     while j<len(lines) and not lines[j].startswith('#'):j+=1
     return '\n'.join(lines[:i]+lines[j:])+'\n'
-case('义务块缺失',1,'义务块缺失或重复',lambda p:edit(p,OB_SRC,lambda s:s.replace(OB_HEAD,OB_HEAD+'-removed',1)))
 case('义务块重复',1,'义务块缺失或重复',lambda p:append(p,OB_SRC,'\n'+OB_HEAD+'\nx\n'))
 case('义务块为空',1,'义务块为空',lambda p:edit(p,OB_SRC,ob_empty))
 
 # 新入口承载的产品边界同样必须有真实负控；从守卫声明现读，不钉正文措辞。
+# 义务块缺失：逐个去掉平台入口的每个义务标题，每个都须单独报出。
 ROOT_OBS=[(src,head) for src,head in G.OBLIGATIONS if src=='skills/luno-platform/SKILL.md']
 assert ROOT_OBS, '平台入口义务负控不能空转'
-for src,head in ROOT_OBS:
-    case('平台入口义务缺失 '+head,1,'义务块缺失或重复',
-         lambda p,src=src,head=head:edit(p,src,lambda s:s.replace(head,head+'-removed',1)))
+def drop_root_obs(p):
+    for src,head in ROOT_OBS:edit(p,src,lambda s,head=head:s.replace(head,head+'-removed',1))
+case('义务块缺失（平台入口 %d 个义务逐个）'%len(ROOT_OBS),1,'义务块缺失或重复',drop_root_obs,n=len(ROOT_OBS))
 
 # ── 自编资源：缺件不再豁免，旧取件登记一律拒绝 ──
 def legacy_fetch(p):
@@ -172,13 +188,14 @@ case('旧取件登记即使为空也拒绝',1,'官方取件登记已退休',lega
 case('自编插件指南缺失不获豁免',1,'资源引用断链',
      lambda p:(p/'skills/luno-surge/references/plugin-authoring.md').unlink())
 # Independent requirement oracle: never derive forbidden fixtures from the guard.
-for rel in ('skills/luno-surge/references/upstream-SKILL.md',
-            'skills/luno-surge/references/upstream-command-reference.md',
-            'skills/luno-surge/assets/logo.png'):
-    def inject(p,rel=rel):
+RETIRED=('skills/luno-surge/references/upstream-SKILL.md',
+         'skills/luno-surge/references/upstream-command-reference.md',
+         'skills/luno-surge/assets/logo.png')
+def inject(p):
+    for rel in RETIRED:
         target=p/rel;target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(b'synthetic retired official resource')
-    case('退役官方资源进入运行树 '+rel,1,'禁止分发完整官方资源',inject)
+case('退役官方资源进入运行树（%d 个逐个报出）'%len(RETIRED),1,'禁止分发完整官方资源',inject,n=len(RETIRED))
 
 # ── frontmatter 剥离 ──
 for text,want in (('---\n---\n正文\n---\n尾部','正文\n---\n尾部'),
@@ -229,16 +246,15 @@ def rt(*a,stdin=None):
 def ran(out):return sorted(set(re.findall(r'(\w+):ran',out))|({'probe'} if 'probe:ok' in out else set()))
 for label,args,stdin,rc,want in (
         ('case',('case','probe'),None,0,['probe']),
-        ('group（子进程读 stdin 不吞后续入口）',('group','g1'),None,0,['eat','probe']),
         ('smoke',('smoke',),None,0,['lint']),
         ('full',('full',),None,0,['eat','lint','probe']),
         ('select 合并去重',('select',),'[["smoke"],["group","g1"],["case","probe"]]',0,['eat','lint','probe']),
-        ('失败传播为非零',('group','g1,g2'),None,1,['bad','eat','probe'])):
+        ('多组：子进程读 stdin 不吞后续入口，失败传播为非零',('group','g1,g2'),None,1,['bad','eat','probe'])):
     code,out=rt(*args,stdin=stdin)
     check('runner %s：rc=%d 且只跑 %s'%(label,rc,want),code==rc and ran(out)==want and out.count('probe:ok')<=1,
           'rc=%d ran=%s\n%s'%(code,ran(out),out[-400:]))
-check('runner 失败入口附错误尾段','| bad:ran' in rt('case','bad')[1])
-for label,args,stdin in (('未知 case',('case','nope'),None),('未知组',('group','nope'),None),
+check('runner 失败入口附错误尾段','| bad:ran' in out)
+for label,args,stdin in (('未知组',('group','nope'),None),
                          ('选不到入口的 selector',('select',),'[["full"],["group","nope"]]'),
                          ('非法 selector JSON',('select',),'{"full":1}'),('空 selector',('select',),'[]'),
                          ('未知模式',('nope',),None)):
@@ -247,8 +263,7 @@ for label,args,stdin in (('未知 case',('case','nope'),None),('未知组',('gro
 code,out=rt('select-paths',stdin='tests/run-tests.sh\0tools/check-rules.py\0')
 check('select-paths：full 与同批定向组并存，且不受 PYTHONPATH 影响',
       code==0 and out.strip()=='[["full"], ["group", "gate"]]',out)
-code,out=rt('select-paths',stdin='')
-check('select-paths：无命中只给 smoke',code==0 and out.strip()=='[["smoke"]]',out)
+check('select-paths：无命中只给 smoke',P.select([])==[['smoke']])
 code,out=rt('select-paths',stdin='tests/unregistered.py\0')
 check('select-paths：未登记测试路径拒绝',code==2,out)
 # 负控：去掉 env -i 后探针必须报泄漏，证明隔离断言不是空转
@@ -257,6 +272,10 @@ assert FIXED.count('env -i ')==1
 code,out=rt('case','probe')
 check('负控：撤掉 env -i 后探针报泄漏',code==1 and 'probe:leak PYTHONPATH SYNTH_SECRET SYNTH_EMPTY' in out,out[-300:])
 
+def tree(b):
+    fs=[f for t in ('skills','prompt','subagents') for f in (b/t).rglob('*')]+[b/'tools/rule-claims.tsv',b/'tools/sync-targets.json']
+    return {f.relative_to(b):os.readlink(f) if f.is_symlink() else f.read_bytes() if f.is_file() else 0 for f in fs}
+check('逐例还原后守卫副本与仓库逐字节一致',tree(CASE)==tree(ROOT))
 shutil.rmtree(TMP,ignore_errors=True)
 print('---- check-rules／runner 回归：PASS %d / FAIL %d ----'%(PASS,FAIL))
 raise SystemExit(1 if FAIL else 0)

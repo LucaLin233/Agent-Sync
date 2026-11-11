@@ -294,8 +294,6 @@
         "skills/luno-surge/references/SOURCE.md",
         "skills/luno-surge/references/http-api.md",
         "skills/luno-surge/references/http-sections.md",
-        "skills/luno-surge/references/http-descriptor.md",
-        "skills/luno-surge/references/http-metrics.md",
         "skills/luno-surge/references/controller-cli.md",
         "skills/luno-surge/references/upstream-manifest.json",
         "skills/luno-surge/references/diagnostics.md",
@@ -303,10 +301,8 @@
         "skills/luno-surge/scripts/_privacy.py",
         "skills/luno-surge/scripts/surge_cli.py",
         "skills/luno-surge/scripts/install.sh",
-        "skills/luno-surge/scripts/sync_upstream.sh",
         "skills/luno-surge/scripts/surge_ios.py",
         "skills/luno-surge/scripts/test_policy_descriptor.py",
-        "skills/luno-surge/scripts/adapt_upstream_reference.py",
         "skills/luno-surge/scripts/acceptance.sh",
         "skills/luno-surge/scripts/package_release.py",
         "skills/luno-surge/scripts/update_upstream.py",
@@ -326,9 +322,9 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_pnbC80rsnSNo",
+          "id": "skl_4XM4SEKbuGzC",
           "fields": "content,name,description",
-          "key": "surge.zip"
+          "key": "surge-ca269bdf3861.zip"
         }
       }
     }

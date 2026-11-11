@@ -8,7 +8,8 @@
 # >>> PATHS_RULES
 #   结构守卫或边登记 → gate
 #   部署、正文契约、资源、打包与对象登记 → deploy
-#   Surge 包或测试 → surge
+#   Surge 包内文件、登记或包态测试 → surge 包态
+#   Surge 脚本或脚本测试 → surge 脚本
 #   脱敏实现与读取模板 → privacy
 #   打包器与专项测试 → pack
 #   署名机械检查器、其测试与署名规则 → identity
@@ -30,6 +31,7 @@ check-rules.py|smoke|python3 -B tools/check-rules.py|1
 test-check-rules.sh|gate|sh tests/test-check-rules.sh|1
 test-redact.py|privacy|cd tests && python3 -B -m unittest -v test-redact|1
 test-pack-skill-zip.py|pack|cd tests && python3 -B -m unittest -v test-pack-skill-zip|1
+test-surge-package.py|surge|cd tests && python3 -B -m unittest -v test-surge-package|1
 test-surge-scripts.py|surge|cd tests && python3 -B -m unittest -v test-surge-scripts|1
 test-deploy-skill.py|deploy|cd tests && python3 -B -m unittest -v test-deploy-skill|1
 test-commit-identities.py|identity|cd tests && python3 -B -m unittest -v test-commit-identities|0

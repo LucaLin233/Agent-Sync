@@ -34,6 +34,6 @@ External Controller 是以 CRLF 分隔的命令和结果流：
 
 ## 兼容性
 
-多数命令透明转发。status、version、mode、features、策略组、rule match/explain、DNS lookup/trace、modules、GeoIP、performance 和 macOS VMNET 等常用命令有可读的格式化输出，其余打印美化的 JSON；脚本和需要精确 Controller 数据时用 `--raw`。VMNET、`restart-engine` 的平台和协议门槛按 `references/platform-compatibility.md`；`reload` 优先差量，但必要时会自动完整重启，不能保证保留连接、缓存或临时规则；直接及间接 reload 无法排除这些影响时，按入口再次单独确认，未获准不执行。
+多数命令透明转发。status、version、mode、features、策略组、rule match/explain、DNS lookup/trace、modules、GeoIP、performance 和 macOS VMNET 等常用命令有可读的格式化输出，其余打印美化的 JSON；脚本和需要精确 Controller 数据时用 `--raw`。VMNET、`restart-engine` 的平台和协议门槛按 `references/platform-compatibility.md`；`reload`、`restart-engine` 的影响和再确认按入口 §3。
 
-`--check <path>`（`-c <path>`）使用 Surge 官方 beta HTTPS 校验服务（`https://services.nssurge.com/v1/config/validate`），因为 iSH 没有 macOS 的本地解析器。它只读显式指定的 UTF-8 文件，以 JSON 的 `profile` 字段 POST 上去，按官方 CLI 的格式打印 `OK` 或 `Failed: ...`，退出码 0 或 1。**这是上传**：绝不隐式替换或上传活动 profile；profile 可能含服务器地址、订阅 URL、用户名、密码、PSK 等秘密，先告知用户，必要时脱敏。
+`--check <path>`（`-c <path>`）使用 Surge 官方 beta HTTPS 校验服务（`https://services.nssurge.com/v1/config/validate`），因为 iSH 没有 macOS 的本地解析器。它只读显式指定的 UTF-8 文件，以 JSON 的 `profile` 字段 POST 上去，按官方 CLI 的格式打印 `OK` 或 `Failed: ...`，退出码 0 或 1。**这是上传**，限制按入口 §3。
