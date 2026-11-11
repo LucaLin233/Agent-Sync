@@ -644,7 +644,7 @@ class UpstreamAdapterTest(unittest.TestCase):
 
 class ProvenanceInspectTest(unittest.TestCase):
     """Existing source maintenance moves from import/apply to read-only evidence."""
-    AUDIT_DRIVER = r'''import os, runpy, sys
+    AUDIT_DRIVER = r'''import os, pathlib, runpy, sys  # pathlib 须先于替换 os.open 导入：3.9 的访问器导入时绑定 os.open
 restricted = sys.argv[2]
 del sys.argv[2]
 real_open, fd_paths = os.open, {}
