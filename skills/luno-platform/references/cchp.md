@@ -23,6 +23,7 @@
 - 用量、成员配额、请求审计、LLM token、导入：`references/cchp-workflow-org.md`。导入预览创建 job，不是只读。
 - provider/endpoint/key、倍率、测活或跨系统配置比较：`references/cchp-workflow-providers.md`。
 - 覆写规则的读取、解释、建议、草稿验证或变更：`references/cchp-coverage-rules.md`；写入与跨业务比较另加载对应共同前置。
+- 配置继承与恢复的解释，以及转发相关变更的验收或切换：完整读取 `references/cchp.md`〔分支 cchp-workflow-writes〕。配置回读不等于链路验证，本资源不因此获得网关调用权。
 - 来源、许可或上游更新：`luno-platform/references/cchp-source.md`，普通调用不读来源档案。
 
 ## 入口、认证与版本
@@ -89,7 +90,7 @@ unauthorized/permission_denied 报安全的错误类型及缺权限；人工/浏
 以下是用户为本组织定的约定，不是 CCHP 平台的约束；用户当次的明确要求优先。所有写入都适用。
 
 - **key 名称与优先级**：名称用 `厂家-服务商`，不带数字；优先级 = 用户确定的名次 × 10 + 厂家位（DeepSeek=1、OpenAI=2、Claude=3，名次从 1 开始）。增减服务商导致名次变化时，在授权内按新名次整体重排。这条只约束名称和优先级字段，不据此推断调度行为。
-- **新建 provider 的倍率**：`cost_multiplier_ppm` 设为 1000000（1.0）；人工的倍率调整只在 key 层做，不回改已有的 provider。这只定新建的初值，不改变自动探测和自动写入策略；要固定某个 key 的手设倍率，按 `references/cchp-workflow-providers.md`〈key 的创建、更新与倍率〉的排除名单规则。
+- **新建 provider 的倍率**：`cost_multiplier_ppm` 设为 1000000（1.0）；人工的倍率调整只在 key 层做，不回改已有的 provider。这只定新建的初值，不改变自动探测和自动写入策略；要固定某个 key 的手设倍率，按 `references/cchp-workflow-providers.md`〈倍率、探测与必要场景〉的排除名单规则。
 - **会话复用**：只有名次第 1 的 key 开会话复用；其他 key 没有本地覆盖、继承组织设置，并核实为关闭。
 - **测活任务**：provider 下有已启用的 key 后，先查这个 provider 的测活任务，没有才建一条，已有就维护，不另建第二条。任务每小时一次（cron `0 * * * *`）、enabled、不通知；目标只含它下面已启用、且满足接口状态要求的 key（实测 disabled/revoked 会被拒），模型用平台为该 key 派生的测活默认模型（`getProviderKeyLivenessContexts`），不自行指定模型或 endpoint；当次 schema 或派生结果给不出模型时，停止这一项并报告。占位 key 换成真实密钥并启用后才加入。key 增减、启停或撤销时同步更新目标，改完回读任务、targets 和调度。
 - **撤销或删除后的清理**：只清理本次对象的引用：key ID 从 `upstream_probe.ratio.key_denylist` 移除，provider ID 从 `upstream_probe.ratio.provider_denylist` 和 `upstream_probe.balance.provider_denylist` 移除；按〈配置继承与恢复〉的数组规则写入并回读全数组，不顺带清理历史上失效的引用。
