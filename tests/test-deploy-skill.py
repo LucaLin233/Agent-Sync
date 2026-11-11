@@ -155,10 +155,10 @@ def surge_repo(root, packer=True):
     if packer:
         write(repo.repo / SURGE_PACKER, (ROOT / SURGE_PACKER).read_bytes())
     repo.originals = {rel: ("synthetic raw %s\n" % key).encode() for rel, key in ORIGINALS.items()}
-    write(repo.src / "references/upstream-manifest.json", json.dumps({"raw_sha256": {
+    write(repo.src / "references/upstream-manifest.json", json.dumps({"builds": [{"raw_sha256": {
         key: sha(("synthetic raw %s\n" % key).encode()) for key in (
             "SKILL.md", "references/command-reference.md", "references/plugin-authoring.md",
-            "agents/openai.yaml", "assets/logo.png")}}))
+            "agents/openai.yaml", "assets/logo.png")}}]}))
     write(repo.src / "references/plugin-authoring.md", "# Independent project guide\n")
     repo.register()
     return repo

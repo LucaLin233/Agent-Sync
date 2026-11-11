@@ -26,7 +26,7 @@ parameters 每项有唯一 key 和 type，可声明 label、description、requir
 
 通过 `$httpClient` 的 get/post/put/delete/head/options/patch 发请求；回调接收错误字符串或 null、含 status/headers 的响应、字符串响应体（binary-body-mode 时为 Uint8Array）。body 可为字符串或对象，对象按 JSON 发送。请求可带 URL、headers、body、timeout、auto-redirect 和 binary-body-mode；timeout 默认 30 秒、auto-redirect 默认 true、binary-body-mode 默认 false。不要默认关闭证书或主机名校验；官方示例中的 insecure 选项不构成本项目默认。没有选策略的 policy 参数，不假设 Cookie 会跨请求保存。
 
-本指南基于 Mac 6.11.0（12680）包内资料记录：manifest ≤64 KB，main.js ≤2 MB，ZIP ≤10 MB，解包 ≤30 MB 且 ≤200 文件；事件 1–60 秒、默认 15 秒；HTTP 请求/响应体各 ≤8 MB，最多 20 个并发请求；持久存储共 4 MB，键 ≤128 字符并限字母数字及 `._-`；参数 key ≤64 字符。这些是有版本的事实，不代表本端实测，也不外推到未来版本。
+本指南基于 Mac 6.11.0 包内资料（12680，12710 未变）记录：manifest ≤64 KB，main.js ≤2 MB，ZIP ≤10 MB，解包 ≤30 MB 且 ≤200 文件；事件 1–60 秒、默认 15 秒；HTTP 请求/响应体各 ≤8 MB，最多 20 个并发请求；持久存储共 4 MB，键 ≤128 字符并限字母数字及 `._-`；参数 key ≤64 字符。这些是有版本的事实，不代表本端实测，也不外推到未来版本。
 
 ## 开发、验证和分发
 

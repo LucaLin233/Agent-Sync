@@ -81,10 +81,10 @@ def main(argv=None):
     try:
         fd = directory(args.source)
         raw = {name: digest(fd, name) for name in FILES}
-        baseline = json.loads((ROOT / 'references/upstream-manifest.json').read_text())['raw_sha256']
+        baseline = json.loads((ROOT / 'references/upstream-manifest.json').read_text())['builds'][-1]['raw_sha256']
         if not isinstance(baseline, dict):
             raise ValueError('manifest')
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
         parser.exit(1, 'E_SOURCE_READ\n')
     finally:
         if fd is not None:

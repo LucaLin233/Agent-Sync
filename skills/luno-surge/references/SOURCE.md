@@ -26,15 +26,15 @@
 
 官方 Agent Skill 随 Surge Mac 应用包分发，不以同名第三方 GitHub 仓库代替。官方手册 `https://manual.nssurge.com/tools/cli.html` 说明应用包 Skills 目录；Mac 官方 beta appcast `https://nssurge.com/mac/latest/appcast-signed-beta.xml` 可发现版本，它不是 iOS 能力证据。
 
-历史来源基线为 2026-11-03 取回的 Surge Mac 6.11.0（12680）。官方直链：`https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`；包 sha256 为 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。逐文件来源哈希保留在 `references/upstream-manifest.json`，只是取证快照，不要求把对应原文装入运行包，也不是当前实测状态。raw_sha256 只记真正官方原件，不把自编正文、覆盖层或适配结果登记成官方原文；包身份、逐文件证据及运行验证状态不得互相冒充。
+当前来源基线是 Surge Mac 6.11.0（12710）：2026-11-11 从本机已安装的应用包只读取得逐文件哈希，Info.plist 的 bundle id、版本和 build 已核，没有对应的下载包哈希。上一基线 12680 于 2026-11-03 取自官方直链 `https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`，包 sha256 为 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。逐文件来源哈希按 build 记在 `references/upstream-manifest.json` 的 builds 里：只追加、不删旧条目，末项是当前基线。它只是取证记录，不要求把对应原文装入运行包，也不是当前实测状态。raw_sha256 只记真正官方原件，不把自编正文、覆盖层或适配结果登记成官方原文；包身份、逐文件证据及运行验证状态不得互相冒充。
 
 取源须另获下载及独占证据根写权；无授权就不下载。核 Info.plist 的 bundle id `com.nssurge.surge-mac`、版本和 build，再核文件哈希、差分及发布说明；存在签名目录不等于验签成功。官方包只在获准的私人维护证据范围查阅，原件和 logo 不进入候选发布目录、公开 Git、patch 或托管包。Mac 原生直接从用户自己的已安装应用包使用官方 Skill，与本项目的再分发方案分开。
 
-维护者只人工更新受影响的自编事实与流程，保留本端 iOS、安全及实现差异。更新不自动安装、部署、重启或清空临时规则。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项，不能自动批准新哈希。使用 `python3 -B scripts/update_upstream.py inspect --source <已授权的绝对目录> --version <已核版本及build>` 可只读计算五份来源文件哈希，并与历史 manifest 比较。脚本不联网、不暂存、不导入、不输出原文；source 必须是无符号链接的绝对路径，缺文件就停。source 的授权和官方包身份由调用方事前核实，脚本明确报告未认证来源、未验证运行。新的未知哈希只作为待审差异，不能批准准入。历史分类器 `scripts/adapt_upstream_reference.py <已授权参考文件>` 仍可只读识别已知 raw/adapted 哈希；unknown 非零退出，分类结果不授予导入或分发权，也不生成或归一正文。`scripts/sync_upstream.sh` 仅转发该只读入口，不再有默认 prepare；旧 prepare/apply 一律在读文件或建事务前失败。
+维护者只人工更新受影响的自编事实与流程，保留本端 iOS、安全及实现差异。更新不自动安装、部署、重启或清空临时规则。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项，不能自动批准新哈希。使用 `python3 -B scripts/update_upstream.py inspect --source <已授权的绝对目录> --version <已核版本及build>` 可只读计算五份来源文件哈希，并与 manifest 末项基线比较。脚本不联网、不暂存、不导入、不输出原文；source 必须是无符号链接的绝对路径，缺文件就停。source 的授权和官方包身份由调用方事前核实，脚本明确报告未认证来源、未验证运行。新的未知哈希只作为待审差异，不能批准准入。历史分类器 `scripts/adapt_upstream_reference.py <已授权参考文件>` 仍可只读识别已知 raw/adapted 哈希；unknown 非零退出，分类结果不授予导入或分发权，也不生成或归一正文。`scripts/sync_upstream.sh` 仅转发该只读入口，不再有默认 prepare；旧 prepare/apply 一律在读文件或建事务前失败。
 
 ## 打包、投递及恢复
 
-只用 `scripts/package_release.py`，由 `tools/deploy_skill.py` 复用其收集和构包逻辑；ZIP 根不带顶层目录。保留符号链接/非常规条目拒绝、秘密扫描、候选摘要、源端漂移检测和资源完整清单门禁。禁止官方原件和 logo 进入包，不能只靠文件缺失宣称许可审查完成。
+只用 `scripts/package_release.py`，由 `tools/deploy_skill.py` 复用其收集和构包逻辑；ZIP 根不带顶层目录。保留符号链接/非常规条目拒绝、秘密扫描、候选摘要、源端漂移检测和资源完整清单门禁。禁止官方原件和 logo 进入包：打包器按 manifest 全部 build 的哈希并集拒绝已知官方整文件，所以换基线时只追加新 build。它只认整文件哈希，不能只靠文件缺失或拦截通过宣称许可审查完成。
 
 部署只使用已合并且已独立验收的版本，按 `tools/sync-targets.json` 核目标实际身份和生效前态；投递仍走获准的私有 R2 / `lh skill install` 流程，预签名 URL 和临时凭据不得进入 argv、工具 JSON、回复、日志或文件，只经已核实的安全通道在授权源与目标之间传递；缺通道即停，不改成公开对象。变更后逐字节回读本次资源及变更元数据；安装成功、HTTP 200、CI 绿色不等于一致。
 
