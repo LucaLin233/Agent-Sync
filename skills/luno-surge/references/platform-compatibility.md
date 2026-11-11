@@ -1,6 +1,6 @@
 # 平台与协议差异
 
-协议门槛、平台限制和历史验证结论只以本文件为准。其他文件（入口、`controller-cli.md`、自编命令和插件参考等）里的协议号或版本说法与本文件冲突时，按本文件执行；来源快照中的描述不自动成为当前设备能力。
+协议门槛、平台限制和历史验证结论只以本文件为准。其他文件（入口、`controller-cli.md`、命令参考和插件指南等）里的协议号或版本说法与本文件冲突时，按本文件执行；来源快照中的描述不自动成为当前设备能力。
 
 下面是有日期的版本快照，不代表当前运行的版本。能力异常时先跑 `surge-cli --raw version`，核对 Surge、Core、平台和 Controller Protocol；不要把 App 发行版本和 Controller 内部版本混为一谈。
 
@@ -27,13 +27,13 @@
 
 27 及以上各行只是官方给出的能力条件，不代表本端设备已验收；不要从历史上的 Protocol 25 推断它们可用，也不要把 HTTP 版本条件当成 Controller 门槛。
 
-`plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；开发契约见仓库自编的 `references/plugin-authoring.md`；未覆盖的当前格式按官方资料核实，缺依据就停止该项。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
+`plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；开发契约见 `references/plugin-authoring.md`；未覆盖的当前格式按官方资料核实，缺依据就停止该项。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
 
 ## Surge 6：分节编辑与内置 MCP
 
 - HTTP 分节编辑和内置 MCP 的最低版本是 iOS 6.0.0 / Mac 6.11.0，仍要核对所选实例实际的平台、营销版本和 build。2026-11-03 时 iOS 6 的发布页是 TestFlight，不是 App Store 稳定版。
 - iOS 6 的 MCP 另需订阅已解锁或有效试用的权益；装了这个版本或有 TestFlight 资格，都不能证明有这项权益。
-- 自编资料取材的官方版本和原文哈希，以当前的 `upstream-manifest.json` 为来源证据；拿到安装包或有来源记录，不表示官方原件随包分发，也不表示新能力已经设备实测。
+- 命令参考和插件指南取材的官方版本和原文哈希，以当前的 `upstream-manifest.json` 为来源证据；拿到安装包或有来源记录，不表示官方原件随包分发，也不表示新能力已经设备实测。
 - Minis 自建桥不实现 `profile section set` 的本地文件和 stdin 转换，但保留 `list`/`get` 的只读路径，不因为 `set` 的风险一律禁用。官方 `get` 可能返回含密码的真实正文，本端 `--raw` 仍是客户端脱敏的 JSON，两者都不会自动成为获准的回写原稿。读取和安全写入按 `references/http-api.md` 执行；这些新能力没有设备实测，历史的只读和重启验收不扩大到它们。
 
 ## 历史验证
