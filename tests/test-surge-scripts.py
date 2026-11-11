@@ -680,8 +680,8 @@ runpy.run_path(sys.argv[0], run_name="__main__")
                                str(UPDATE), restricted, *args], env=offline_env(),
                               capture_output=True, text=True, timeout=20)
 
-    def source(self, tmp):
-        source = Path(tmp) / 'source'
+    def source(self, tmp, name='source'):
+        source = Path(tmp) / name
         payloads = {name: ('synthetic-source-' + name).encode() for name in (
             'SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
             'agents/openai.yaml', 'assets/logo.png')}
@@ -751,6 +751,149 @@ runpy.run_path(sys.argv[0], run_name="__main__")
             result = self.invoke(['inspect', '--source', str(alias), '--version', 'test-build'])
             self.assertEqual((1, '', 'E_SOURCE_READ\n'),
                              (result.returncode, result.stdout, result.stderr))
+
+    def test_absolute_source_with_spaces_and_unicode_hashes_read_only(self):
+        with tempfile.TemporaryDirectory(prefix='surge-source-abs-') as tmp:
+            name = '外部 source ünï 目录'
+            source, payloads = self.source(tmp, name=name)
+            self.assertIn(' ', name)
+            result = self.invoke(['inspect', '--source', str(source), '--version', 'test-build'])
+            self.assertEqual((0, ''), (result.returncode, result.stderr))
+            report = json.loads(result.stdout)
+            self.assertEqual({n: hashlib.sha256(b).hexdigest() for n, b in payloads.items()},
+                             report['raw_sha256'])
+            self.assertEqual(sorted(payloads), report['changed_from_baseline'])
+            self.assertEqual(payloads, {n: (source / n).read_bytes() for n in payloads})
+            self.assertEqual([name], sorted(p.name for p in Path(tmp).iterdir()))
+
+    def test_relative_doubled_trailing_and_dot_sources_are_refused_unopened(self):
+        module = load_module('surge_update_path_shapes', UPDATE)
+        opened, real_open = [], os.open
+
+        def recording_open(path, flags, mode=0o777, *, dir_fd=None):
+            opened.append(os.fsdecode(path))
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        shapes = ('source', 'source/inner', '/tmp//doubled', '/tmp/trailing/',
+                  '/tmp/./dot', '/tmp/../parent')
+        with mock.patch.object(os, 'open', recording_open):
+            for shape in shapes:
+                with self.subTest(shape=shape):
+                    with self.assertRaises(ValueError) as caught:
+                        module.directory(shape)
+                    self.assertEqual('source path', str(caught.exception))
+        # 调用记录为空：拒绝发生在任何目录打开之前，不产生需清理的 fd。
+        self.assertEqual([], opened)
+
+    def test_intermediate_final_and_leaf_symlinks_are_refused(self):
+        with tempfile.TemporaryDirectory(prefix='surge-source-symlink-') as tmp:
+            source, payloads = self.source(tmp)
+            elsewhere = Path(tmp) / 'elsewhere'
+            (elsewhere / 'references').mkdir(parents=True)
+            # 诱饵内容与原件不同：跟随软链的实现会给出不同哈希或 0 退出。
+            (elsewhere / 'references/command-reference.md').write_bytes(b'DECOY-INTERMEDIATE')
+            (elsewhere / 'command-reference.md').write_bytes(b'DECOY-LEAF')
+            args = ['inspect', '--source', str(source), '--version', 'test-build']
+            held = Path(tmp) / 'held-references'
+            os.rename(source / 'references', held)
+            (source / 'references').symlink_to(elsewhere / 'references', target_is_directory=True)
+            with self.subTest(link='intermediate'):
+                result = self.invoke(args)
+                self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                                 (result.returncode, result.stdout, result.stderr))
+            (source / 'references').unlink()
+            os.rename(held, source / 'references')
+            leaf = source / 'references/command-reference.md'
+            leaf.unlink()
+            leaf.symlink_to(elsewhere / 'command-reference.md')
+            with self.subTest(link='leaf'):
+                result = self.invoke(args)
+                self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                                 (result.returncode, result.stdout, result.stderr))
+            leaf.unlink()
+            leaf.write_bytes(payloads['references/command-reference.md'])
+            with self.subTest(link='final-directory'):
+                alias = Path(tmp) / 'final-alias'
+                alias.symlink_to(source, target_is_directory=True)
+                result = self.invoke(['inspect', '--source', str(alias), '--version', 'test-build'])
+                self.assertEqual((1, '', 'E_SOURCE_READ\n'),
+                                 (result.returncode, result.stdout, result.stderr))
+
+    def test_opened_fd_outlives_rename_and_decoy_symlink(self):
+        module = load_module('surge_update_fd_pin', UPDATE)
+        with tempfile.TemporaryDirectory(prefix='surge-source-rename-') as tmp:
+            source, payloads = self.source(tmp)
+            fd = module.directory(str(source))
+            try:
+                before = {name: module.digest(fd, name) for name in module.FILES}
+                moved = Path(tmp) / 'moved-source'
+                os.rename(source, moved)
+                decoy = Path(tmp) / 'decoy'
+                decoy.mkdir()
+                for name in module.FILES:
+                    target = decoy / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(b'DECOY-' + name.encode())
+                source.symlink_to(decoy, target_is_directory=True)
+                self.assertEqual(payloads, {n: (moved / n).read_bytes() for n in payloads})
+                after = {name: module.digest(fd, name) for name in module.FILES}
+            finally:
+                os.close(fd)
+            expected = {n: hashlib.sha256(b).hexdigest() for n, b in payloads.items()}
+            self.assertEqual(expected, before)
+            self.assertEqual(before, after)
+
+    def test_directory_fd_ownership_on_success_and_each_open_failure(self):
+        module = load_module('surge_update_fd_owner', UPDATE)
+        real_open, real_close = os.open, os.close
+        records = {'opened': [], 'closed': []}
+
+        def recording_open(path, flags, mode=0o777, *, dir_fd=None):
+            fd = real_open(path, flags, mode, dir_fd=dir_fd)
+            records['opened'].append(fd)
+            return fd
+
+        def recording_close(fd):
+            records['closed'].append(fd)
+            return real_close(fd)
+
+        def reset():
+            del records['opened'][:]
+            del records['closed'][:]
+
+        with tempfile.TemporaryDirectory(prefix='surge-source-fds-') as tmp:
+            source, payloads = self.source(tmp)
+            chain = Path(tmp) / 'chain'
+            (chain / 'a/b').mkdir(parents=True)
+            for name in payloads:
+                target = chain / 'a/b' / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payloads[name])
+            (chain / 'notadir').write_bytes(b'FILE')
+            (chain / 'a/link').symlink_to(chain / 'a/b', target_is_directory=True)
+            failures = ((str(chain / 'absent1/a/b'), 'absent1'), (str(chain / 'a/absent2/b'), 'absent2'),
+                        (str(chain / 'a/b/absent3'), 'absent3'), (str(chain / 'notadir/b'), 'notadir'),
+                        (str(chain / 'a/link/b'), 'link'))
+            with mock.patch.object(os, 'open', recording_open), \
+                    mock.patch.object(os, 'close', recording_close):
+                reset()
+                fd = module.directory(str(source))
+                try:
+                    self.assertEqual(len(Path(source).parts), len(records['opened']))
+                    self.assertEqual(records['opened'][-1], fd)
+                    self.assertEqual(records['opened'][:-1], records['closed'])
+                finally:
+                    os.close(fd)
+                # 成功返回 fd 归还后，打开与关闭记录逐项相等：没有遗留 fd。
+                self.assertEqual(records['opened'], records['closed'])
+                for target, marker in failures:
+                    with self.subTest(target=target):
+                        reset()
+                        with self.assertRaises(OSError):
+                            module.directory(target)
+                        # 打开次数＝失败组件之前的成功层数（含根）；逐项核销后无遗留 fd。
+                        self.assertEqual(Path(target).parts.index(marker), len(records['opened']))
+                        self.assertEqual(records['opened'], records['closed'])
 
 
 # ── 专用打包器 ───────────────────────────────────────────────────────────────

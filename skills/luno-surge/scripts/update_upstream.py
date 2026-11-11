@@ -24,11 +24,19 @@ def directory(path):
     if parts[0] or any(x in ('', '.', '..') for x in parts[1:]):
         raise ValueError('source path')
     fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    parent = '/'
     try:
         for part in parts[1:]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            full = os.path.normpath(os.path.join(parent, part))
+            if not full.startswith(parent.rstrip('/') + '/'):
+                raise ValueError('source path')
+            name = os.path.relpath(full, parent)
+            if name != part:
+                raise ValueError('source path')
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             os.close(fd)
             fd = child
+            parent = full
         return fd
     except BaseException:
         os.close(fd)
