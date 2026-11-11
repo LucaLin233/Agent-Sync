@@ -8,13 +8,22 @@ CCHP（Claude Code Hub Plus）控制面：用量与耗材、请求日志、provi
 
 ## 资源与触发
 
-路径相对技能根。先完整读取命中的资源入口，再完整读取入口指定的业务分支和共同前置；跨业务取并集，不摘段或用摘要代替：
+路径相对技能根。完整读取命中的资源及其指定的共同前置；跨业务取并集，不摘段或用摘要代替：
 
 - 任何实际CLI或API调用，以及认证、结果、错误、分页、重试、流式和下载的解释：`references/cchp-interfaces.md`。
-- 业务操作、解释、建议或结论，以及任何写入、恢复、覆盖或转发变更：完整读取 `references/cchp-workflows.md`，再读其中指定的完整业务分支。涉及写入的解释、方案、审查或执行还必须读其写入共同规则，组织约定、改前快照、配置继承与恢复仍适用于所有写入。纯接口认证或分页咨询不触发业务资源。
-- 请求/响应覆盖规则（request-overrides，旧称“请求过滤器”）的读取、解释、建议、结论、草稿验证和任何写操作：`references/cchp-coverage-rules.md`；实际调用或涉及接口契约时另读 `references/cchp-interfaces.md`，写入或跨业务比较另完整读 `references/cchp-workflows.md`。
+- 业务操作、解释、建议或结论，以及任何写入、恢复、覆盖或转发变更：按〈业务分支〉完整读取命中的业务资源。涉及写入的解释、方案、审查或执行还必须读写入共同规则，组织约定、改前快照、配置继承与恢复仍适用于所有写入。纯接口认证或分页咨询不触发业务资源。
+- 请求/响应覆盖规则（request-overrides，旧称“请求过滤器”）的读取、解释、建议、结论、草稿验证和任何写操作：`references/cchp-coverage-rules.md`；实际调用或涉及接口契约时另读 `references/cchp-interfaces.md`，写入或跨业务比较另按〈业务分支〉完整读取写入共同规则和命中的业务资源。
 - 实际需要备份（如导入覆盖）或命中宿主机、容器、反代、DNS、TLS等运维时，按需加载 `luno-ops` 并读取命中的完整资源；需要备份的变更须完成改前备份与改后回读。普通对象操作仍须核授权、留改前快照、改后回读并具备恢复办法，不因免读ops而免除这些义务。
 - 来源、许可、改写边界或上游更新核对：完整读取 `luno-platform/references/cchp-source.md` 的维护规则及其仓库登记；普通调用不加载来源档案。
+
+## 业务分支
+
+不执行未请求的业务，不为示例访问实例或用生产凭据测试。先用 `cchp commands --search` 找 operationId，再查 `cchp commands show <operationId> --json` 和 `cchp schema <operationId> --json` 的当前契约；实例数字以当次实测为准。执行或展示结果前，完整读 `references/cchp-interfaces.md`，逐操作确认非秘密字段白名单；前提不满足就停止相关调用并报告缺口。
+
+- **写入共同前置**：涉及写入、恢复、覆盖或转发变更的解释、建议、方案、审查或执行，先完整读 `references/cchp-workflow-writes.md`。本组织约定、改前快照、配置继承与恢复适用于所有写入；纯只读用量或请求定位不加载写入规则。
+- 用量、耗材、计费、成员或配额，失败请求定位或审计追溯，LLM token 创建、轮换或撤销，CC Hub 迁移、导入或预览：`references/cchp-workflow-org.md`。导入另读写入共同规则；预览会在服务端创建 job，不是只读。
+- provider/endpoint/key 的状态、启停、撤销、删除、创建、更新、倍率、探测、model_redirects 或跨系统配置比较：`references/cchp-workflow-providers.md`。
+- 配置继承与恢复的解释，转发相关变更的验收或切换：`references/cchp-workflow-writes.md`。配置回读不等于链路验证，本技能不因此获得网关调用权。
 
 ## 执行位置与版本门槛
 

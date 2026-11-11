@@ -18,5 +18,5 @@
 
 ### 处理规则
 
-不自动跟版；先列 `luno-platform/references/cchp.md`、`references/cchp-interfaces.md`、`references/cchp-workflows.md` 及其列明的完整业务分支资源、`references/cchp-coverage-rules.md` 的受影响小节、旧→新差异及实例兼容性，再按 `luno-core/references/sync-workflow.md` 与当次授权处理。核对不授权实施／部署；未采纳只记录核对状态，不改基线。包变化后重算部署哈希，以部署回读值为准。上游仅新增命令且本端无授权场景时不补步骤；需要时依既有流程处理。
+不自动跟版；先列 `luno-platform/references/cchp.md` 及其〈业务分支〉列明的完整业务资源、`references/cchp-interfaces.md`、`references/cchp-coverage-rules.md` 的受影响小节、旧→新差异及实例兼容性，再按 `luno-core/references/sync-workflow.md` 与当次授权处理。核对不授权实施／部署；未采纳只记录核对状态，不改基线。包变化后重算部署哈希，以部署回读值为准。上游仅新增命令且本端无授权场景时不补步骤；需要时依既有流程处理。
 

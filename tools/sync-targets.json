@@ -249,13 +249,9 @@
         "skills/luno-platform/references/cchp-coverage-rules.md",
         "skills/luno-platform/references/cchp-interfaces.md",
         "skills/luno-platform/references/cchp-source.md",
-        "skills/luno-platform/references/cchp-workflow-import.md",
+        "skills/luno-platform/references/cchp-workflow-org.md",
         "skills/luno-platform/references/cchp-workflow-providers.md",
-        "skills/luno-platform/references/cchp-workflow-requests.md",
-        "skills/luno-platform/references/cchp-workflow-tokens.md",
-        "skills/luno-platform/references/cchp-workflow-usage.md",
         "skills/luno-platform/references/cchp-workflow-writes.md",
-        "skills/luno-platform/references/cchp-workflows.md",
         "skills/luno-platform/references/cchp.md",
         "skills/luno-platform/references/lobehub-access.md",
         "skills/luno-platform/references/lobehub-agents.md",
@@ -268,7 +264,6 @@
         "skills/luno-platform/references/minis-runtime-context.md",
         "skills/luno-platform/references/minis-runtime-device.md",
         "skills/luno-platform/references/minis-runtime.md",
-        "skills/luno-platform/references/minis-session-groups.md",
         "skills/luno-platform/references/minis.md"
       ],
       "ends": {
