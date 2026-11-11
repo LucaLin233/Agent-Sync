@@ -1,6 +1,6 @@
 ---
 name: luno-platform
-description: CCHP控制面、Minis/iSH与已部署LobeHub 2.x CE；入口承载产品硬边界，完整产品分支保留专业能力。
+description: CCHP控制面（用量、请求、provider/key、覆写规则、LLM token、成员配额与导入）；Minis/iSH配置与运行时（技能元数据、子代理模型、SOUL、变量挂载、上下文、会话调度、记忆注入）；已部署LobeHub 2.x CE（Agent/模型、权限渠道、Skill/MCP、知识库记忆、实例运维）。
 ---
 # LUNO｜平台配置与运行时
 

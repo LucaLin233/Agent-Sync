@@ -1,6 +1,6 @@
 ---
 name: luno-authoring
-description: 代码实施与回归；翻译写作、i18n、文章SEO和WordPress编辑发布，按产物读取完整专业分支。
+description: 代码编写、修复、重构与回归；翻译润色、地区语气适配、软件i18n、文章/SEO及WordPress/Gutenberg编辑发布。
 ---
 # LUNO｜代码与文字制作
 
