@@ -36,7 +36,7 @@
 失败时 `error` 含 `kind`、`message`、`hint`、`code`、`detail`、`required_permission`、`challenge_action`、`fields`、`retryable`、`problem`（服务端 problem+json，已脱敏）。完整的码表以 `cchp guide errors` 为准，决定处置的几个：
 
 - **3 `unauthorized`**（401）：可能是 URL 和 token 类型不匹配（见上节的数据面反例），或 token 过期、撤销、写错。停止并报告，核对已授权的 URL/token 配对；不能只凭 401 就要求换 token。
-- **9 `rate_limited`**：CLI/Management API 的 429；确认是可重试的管理面限流后按 `hint` 等待，只有只读可以重试。它不能用来归因网关的业务请求，业务拒绝按 `references/cchp-workflow-requests.md`〈失败请求定位〉核查。
+- **9 `rate_limited`**：CLI/Management API 的 429；确认是可重试的管理面限流后按 `hint` 等待，只有只读可以重试。它不能用来归因网关的业务请求，业务拒绝按 `references/cchp-workflow-org.md`〈失败请求定位〉核查。
 - **11 `not_sent`**：请求没离开本机，修因后按〈超时与重试〉接续。
 - **12 `unknown_outcome`**：可能已到达服务端，停止变更，先查状态。
 - 其余：4 权限不足报 `required_permission`；6 冲突（409/412）先重读现状；7 输入校验失败按 `fields` 修；8 只能由用户在控制台完成；10 服务端 5xx，读可以稍后重试，变更先查状态；13 安全策略拒绝，核授权，不叠加旗标；14 没有凭据，报告缺口，按认证边界处理；1、2、5 分别是未预期失败、用法错误、对象不存在，按 `hint` 处理。

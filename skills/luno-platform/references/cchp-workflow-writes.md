@@ -1,6 +1,6 @@
 # CCHP 写入共同规则
 
-先完整读 `references/cchp-workflows.md`，按其触发与共同前置使用本资源；实际调用或展示结果先完整读 `references/cchp-interfaces.md`。
+先完整读 `references/cchp.md`，按其〈业务分支〉的触发与共同前置使用本资源；实际调用或展示结果先完整读 `references/cchp-interfaces.md`。
 
 ## 本组织约定
 
