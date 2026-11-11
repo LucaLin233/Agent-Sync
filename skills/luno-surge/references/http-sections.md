@@ -4,7 +4,7 @@
 
 ## 安全分节写入
 
-依据 <https://manual.nssurge.com/tools/http-api.md> 的 Profile Sections/MCP 和 <https://manual.nssurge.com/tools/cli.md> 的 Editing Profile Sections（2026-11-03 读）；版本、协议和权益条件见 `references/platform-compatibility.md`。
+依据 <https://manual.nssurge.com/tools/http-api.html> 的 Profile Sections/MCP 和 <https://manual.nssurge.com/tools/cli.html> 的 Editing Profile Sections（2026-11-11 读取）；两个入口的条件分别按其契约判断，不推定完全相同。版本、协议和权益条件见 `references/platform-compatibility.md`。
 
 **官方接口**：GET `/v1/profiles/section?name=…` 返回不带 header 的 content 和 revision；POST `/v1/profiles/section` 提交 JSON 的 name、content、revision。服务端先校验完整的 profile，再写承载文件并 reload；托管或企业的、来自 URL 或托管来源的、多文件拼接的，以及自身行与 include 混合的 section，服务端会拒绝编辑。官方允许创建，但本端的最小安全入口不开放创建、删除和清空。本端写入必带 revision，不丢弃，也不自动更新后重发。不依赖 sections 列表或 POST 成功体里未确定的 schema；写完用 GET 读同一节核对 content 和 revision，不以 HTTP 200 作验收。
 
@@ -29,7 +29,7 @@
 
 **回归范围**：测试用本机合成数据和本机随机端口的夹具（真实子进程入口，含可信 CA 正向和 hostname 错配两组 TLS 用例），不等于设备实测；修改活动配置仍要有当次授权。
 
-**同步注意**：iOS 上的改动会立即上传 iCloud，Dropbox 在下次打开 App 时同步。Surge 的 iCloud Drive 文件夹超过 200 个文件和文件夹时后台同步不可用，只影响该目录的 profile 在 App 关闭期间的修改，不泛化为所有 profile 或前台编辑的上限。
+**同步注意**：官方 CLI 手册在 profile section 编辑说明中指出，Surge iOS 会立即把变更文件上传 iCloud Drive，Dropbox 在主 App 下次打开时上传；Surge 的 iCloud Drive 文件夹超过 200 个文件和文件夹时后台同步不可用，主 App 关闭期间，不能用该 CLI 分节编辑方式修改存放在该目录的 profile。这不证明 HTTP API 在所有 App 状态下都采用相同的拒绝条件，也不泛化到其他目录的 profile。本端 HTTP 入口的实际限制仍须按对应接口和实例证据核实；遇到 `E_REJECTED` 不重试、不换入口绕过，入口不输出错误体，需要时请用户在 App 中查看报错、App 状态和该目录的文件数。文件回滚不能撤销已经发生的云同步。
 
 **内置 MCP**：默认关闭，端点是 POST `/v1/mcp`，用 `http-api-mcp=true` 启用；stateless Streamable HTTP，和 HTTP API 共用 key，可以用 `X-Key` 或新版的 Bearer。`get_profile_section`/`replace_profile_section` 通过回传 revision 编辑；工具注解不代替授权，iOS 6 的 MCP 另需核对订阅权益。新建或启用 MCP 须另获授权，不自动执行。官方 CLI `profile section set <name> <file|-> [revision]` 的本地文件和 stdin 转换不能照搬到 Controller 桥上。
 

@@ -194,14 +194,13 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## luno-surge
 
-自编范围：`SKILL.md`、`references/command-reference.md` 及 `references/plugin-authoring.md` 承载本端工作流、接口事实与安全差异，不是完整官方文件的译本；本次未加入官方叙述原文摘录。以后确需短摘录，须记录来源、版本、位置、长度、用途及改编范围，核累计取用和可披露的许可证据，不假定统一额度。Surge 材料不因根 MIT 或 OpenMinis 通知而获无界分发权。
+范围：`SKILL.md` 等运行资料承载自编的本端工作流和安全差异；`references/command-reference.md` 和 `references/plugin-authoring.md` 是依据官方命令参考和插件指南整理的中文接口事实摘要（派生摘要，不是译本，没有原文摘录）；`agents/openai.yaml` 自写。以后确需短摘录，须记录来源、版本、位置、长度、用途及改编范围，核累计取用和可披露的许可证据，不假定统一额度。Surge 材料不因根 MIT 或 OpenMinis 通知而获无界分发权。
 
-**官方来源例外**：官方上游是 Surge for macOS 应用包，不是 GitHub 技能仓库。取源方式、包身份校验、逐文件哈希和许可边界写在 `skills/luno-surge/references/SOURCE.md`，机器记录是 `skills/luno-surge/references/upstream-manifest.json`。运行资料由本项目独立组织，不再要求补入官方原件，官方原件和 logo 不进入公开仓库或运行包；来源哈希只保留历史证据，不作为分发许可；这个例外只对该对象有效（见 `luno-sync/SKILL.md`〈真源与落点〉）。
+**官方来源例外**：官方上游是 Surge for macOS 应用包，不是 GitHub 技能仓库。取源方式、包身份校验、逐文件哈希和许可边界写在 `skills/luno-surge/references/SOURCE.md`，机器记录是 `skills/luno-surge/references/upstream-manifest.json`。运行资料由本项目编写和整理，不再要求补入官方原件，官方原件和 logo 不进入公开仓库或运行包；来源哈希只保留历史证据，不作为分发许可；这个例外只对该对象有效（见 `luno-core/references/sync.md`〈真源与落点〉）。
 
-**OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**：精选改写的同机回环内容，不是 Surge.app 的官方更新，没有替换官方快照或其哈希；在线可取性和当前设备行为都未复核。
+**OpenMinis/MinisSkills@`164395f193a56e3507ca98415383c7c16780da00`**：精选改写的同机回环内容，不是 Surge.app 的官方更新，与官方来源哈希无关；在线可取性和当前设备行为都未复核。
 
-- `ios-dev/SKILL.md`、`ios-dev/references/loopback.md` → `references/platform-compatibility.md`〈CoreDevice/RSD 同机回环（第三方报告，非本机验收）〉。许可依据 `ios-dev/LICENSE`（MIT）。
-- `coredevice-toolkit/references/SURGE_LOOPBACK.md`、`ios-dev/references/loopback.md` → `references/diagnostics.md`〈CoreDevice/RSD 同机回环〉。许可依据根 `LICENSE` 和 `ios-dev/LICENSE`（均为 MIT）。
+- `ios-dev/SKILL.md`、`ios-dev/references/loopback.md`、`coredevice-toolkit/references/SURGE_LOOPBACK.md` → `references/diagnostics.md`〈CoreDevice/RSD 同机回环（第三方报告，非本机验收）〉。许可依据根 `LICENSE` 和 `ios-dev/LICENSE`（均为 MIT）。
 - 许可附件为 `LICENSE.openminis.txt` 和 `LICENSE.openminis-ios-dev.txt`，README 与 LICENSE 的不一致及其裁定见〈OpenMinis/MinisSkills〉。`references/SOURCE.md`〈第三方精选改写〉只保留指向本文件的简短说明。
 
 ## 已移除与退役的来源
@@ -292,7 +291,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 |`skills/luno-review/LICENSE.openminis.txt`|`skills/luno-core/LICENSE.openminis.txt`|
 |`skills/luno-review/SKILL.md`|`skills/luno-core/references/review.md`|
 |`skills/luno-review/references/code-review.md`|`skills/luno-core/references/code-review.md`|
-|`skills/luno-surge/references/http-api.md`|`skills/luno-surge/references/http-api.md`、`skills/luno-surge/references/http-sections.md`、`skills/luno-surge/references/http-descriptor.md`、`skills/luno-surge/references/http-metrics.md`|
+|`skills/luno-surge/references/http-api.md`|`skills/luno-surge/references/http-api.md`、`skills/luno-surge/references/http-sections.md`|
 |`skills/luno-sync/LICENSE.matt-pocock.txt`|`skills/luno-core/LICENSE.matt-pocock.txt`|
 |`skills/luno-sync/LICENSE.skill-authoring.txt`|`skills/luno-core/LICENSE.skill-authoring.txt`|
 |`skills/luno-sync/SKILL.md`|`skills/luno-core/references/sync.md`|

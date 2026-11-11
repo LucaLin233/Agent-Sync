@@ -1,12 +1,12 @@
-# Surge 命令知识与操作参考（自编，非官方）
+# Surge 命令知识与操作参考（非官方摘要）
 
-这是面向本端任务的离线接口事实表，不是 Surge 官方技能或原件译本。历史依据为 Surge Mac 6.11.0（12680）官方命令目录及对应说明节，取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
+这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核），并结合官方公开手册整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
 
 ## 调用与证据
 
-基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。2026-11-10 已在清空凭据环境、禁止写入/网络的审计下核过当前安装桥帮助；该证据只对 SOURCE 所述桥版本有效，升级须重核。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
+基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。帮助证据的版本和范围见 `references/SOURCE.md`〈本地帮助证据〉。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
 
-本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识；reload 帮助未揭示自动完整重启风险，必须读本参考和入口。plugin、capture-filter 帮助在已核桥上回落主帮助，没有该族的实际契约。
+本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识。plugin、capture-filter 帮助在已核桥上回落主帮助，capture-session 在桥里没有帮助条目，都没有该族的实际契约。
 
 本端 default 同机不授予远程连接权；IPv6 地址使用方括号加端口，参数含 CR/LF 会在本地拒绝。凭据只用入口允许的变量或 stdin，不采纳官方客户端的密码文件、其他凭据变量和交互提示。
 
@@ -28,8 +28,8 @@
 |配置与模块|语法查 help profile；本桥 diff 会取原始与有效配置并在本地比较，可能含秘密。profile 的 list/check 仅 Mac；check 不合格是命令错误。模块/特性语法查 help module/feature。|
 |外部资源|`external-resource list` 含 ready，远程资源可含 updatedAt。|
 |单代理/隧道|`show-policy <policy-name>` 查看策略详情；`proxy-runtime-status <policy-name|line-hash>` 观察流量/速率、UDP relay、测试能力、近期连接错误。WireGuard 还看有效底层策略、活动 TCP/UDP 数与 peer 握手；Tailscale 看会话错误、本地地址、Exit Node、DERP、peer path 和 MagicDNS 等实际提供的信息。先此项，后定向日志。|
-|设备/网关|device list/show <identifier|mac> 仅 Mac；VMNET 语法及各表用途查 help vmnet。status 在未运行时仍报告 running=false；其他表未运行会报错。status 看接口/MAC/IPv4/IPv6、前缀/路由器/MTU 和表大小；arp/ndp 记录 ip、mac、age-seconds；ra 看客户端 MAC/link-local、最近发送时间、有效路由器寿命和黑名单。|
-|数据通道|`retrieve-data <record-id> <request|response> [replica-dir]` 读取抓取正文；`get-resource device-icon <id...>` 返回 Base64 图标；两者不是普通状态查询，正文/资源须单独授权和限制，不进入支持包。`provider-message <base64-data>` 发 Packet Tunnel Provider 消息，不支持 Mac，不能当只读探测。|
+|设备/网关|仅 Mac：`device list|show <identifier|mac>` 和 VMNET 各表；语法查 help vmnet，字段按〈调用与证据〉取官方 Mac 资料。status 在 VMNET 未运行时仍返回 running=false，其他表会报错。|
+|数据通道|抓包正文用〈抓包会话〉的 `capture-session`；旧的 `retrieve-data <record-id> <request|response> [replica-dir]` 走原始数据通道，本桥不渲染，已被前者取代。`get-resource device-icon <id...>` 返回 Base64 图标；两者不是普通状态查询，正文/资源须单独授权和限制，不进入支持包。`provider-message <base64-data>` 发 Packet Tunnel Provider 消息，不支持 Mac，不能当只读探测。|
 
 ## 路由、DNS 和主动测量
 
@@ -56,10 +56,14 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |---|---|
 |请求/地址|active、recent、request、dns；dns-lookup-times 为最近 24 次实际发往服务器的查询耗时（ms，旧到新，协议≥28）；virtual-ip-db 是全库，优先 `virtual-ip <ip|domain-substring>`：IPv4 精确匹配、域名不区分大小写子串匹配。|
 |策略/配置|policy、auto-test-group-result、policy-group-sub-policies、smart-group-info、rule、map-remote、map-local、temp-rule、profile、event；`dump profile original|effective` 分别看原始与有效配置，可能含秘密，不默认读取。|
-|流量/使用度|traffic（testBytes 是策略测试产生的字节，协议≥35）；traffic-stat 可加 prefix；traffic-stat-host；traffic-stat-hourly 是本地今日逐小时 total/DIRECT（协议≥28），其中 policy 映射是今日有流量的策略分小时数据（协议≥29）；policy-usage 按 line-hash 给近期使用分数，最后使用十分钟后衰减为零（协议≥29）。|
+|流量/使用度|traffic（testBytes 是策略测试产生的字节，协议≥35）；traffic-stat 可加 prefix；traffic-stat-host；traffic-stat-hourly 是本地今日逐小时 total/DIRECT（协议≥28），其中 policy 映射是今日有流量的策略分小时数据（协议≥29）；policy-usage 按 line-hash 给近期使用分数，最后使用十分钟后衰减为零（协议≥29）；`traffic-stat-breakdown <主> <次>` 按 host、policy、interface、process、device 中两个不同维度交叉汇总今日、本月和上月，process/device 区分本机进程路径与其他设备 MAC；`traffic-stat-records <today|this-month|last-month>` 给该期按 host、policy、interface 合并的记录，只有它带 requestCount；这两项的版本及当前实例支持条件见平台表，不使用未核实的 Controller Protocol 数字作门槛。|
 |概览/性能|summary；performance 含 memory-bytes、运行时长、活动请求/DNS cache/virtual IP/临时规则/封禁数量；rule-usage 是两次 App 收集间的命中计数，App 会定期取走（历史 iOS 每六小时），dump 本身不清空，不应误称自启动累计。|
 
 日志基本调用查 help log；省略为 file/100，单给数量沿用 file，范围 1–10000，旧到新。memory 保留近期各级，file 受运行日志级别限制。log 的 watch 只订阅新日志，不重放旧内容，可能一直无事件；外部限时。保留日志的字段为 source、requested-line-count、line-count、log，事件字段为 level、module、log。语法查 help set-log-level；它改运行级别，不写 Profile，level 允许值未在本历史资料穷举，需当前证据；不能猜。用法查 help logbook；它返回 records 与 truncated，新到旧；协议≥27 的响应大小上限历史约 iOS 3 MB/Mac 15 MB，会跳过放不下的记录，truncated=true 不是所有记录已取到。`script-log <log-name> <session-id>` 定位单次脚本记录。
+
+**抓包会话**（版本及当前实例支持条件见平台表）：`dump recent` 只留近期记录；HTTP capture 把会话内每个请求连同头和正文存盘，`capture-session` 读取这些会话（iOS 经 Controller 同样可读）。流程：需要时先 `capture-filter set on-disk …` 收窄范围 → 同一条 `set` 先写 `ReplicaSessionParameters.*` 限额、最后写 `Replica=1` 开始（默认 180 秒、100 个请求、50 MB，0 为不限）→ `feature set capture off` 或到达限额结束 → 读取。开始前告知用户并按入口 §3 确认：开关抓包会断开全部现有连接；抓包期间 MITM override 名单内的主机（默认除 Apple、iCloud 等少数外几乎全部）即使 MITM 关闭也会被解密，需要设备信任 profile 里的 CA，`ReplicaSessionParameters.mitmOverride=0` 把解密限回 `[MITM]` 主机名；会话中途改 `ReplicaSessionParameters.*` 会结束当前会话（endReason=replaced）并另起一个，所以限额要先设；限额存在环境里，用户没要求保留就事后恢复原值。
+
+读取：`capture-session list [include-size]` 新到旧，active 表示正在写入，include-size 会读遍文件，非必要不加；`dump <会话> [offset=N] [limit=N] [filter=TEXT]` 按存盘顺序返回记录及其 key，limit 默认 100、上限 500，filter 对 URL、主机、地址、策略、规则、进程、设备、状态和方法做不区分大小写的子串匹配，翻页到 offset+returned 达到 total（有 filter 时为 matched）；`data <会话> <key> <request|response> [offset=N] [length=N]` 每次最多 1 MiB（默认 512 KiB），`--raw` 下正文为 base64，truncated=true 时按已取字节推进 offset 续读。会话用 name、请求用 key 定位，不用请求 id（引擎重启后会重复），两者含空格要加引号。正文按传输原样存，有 Content-Encoding 时先解码；取正文报错表示没存下正文（没有发送或 HTTPS 未解密）。会话内容和正文按入口 §3 的隐私数据处理。
 
 订阅的已知基本形式查 help watch，但该帮助未列全事件；支持多个 event 参数；无参数表示取消订阅，本桥 `watch speed` 转 real-time-speed。离线事件名全集按用途为：速度/策略 real-time-speed、auto-test-group、policy-benchmark；流量 request、request-update、traffic、dns；状态 summary、environment、reload、shutdown、network-changed；设备 device-name-map、device-info；诊断 diagnostics、dns-flush、log。network-changed 在新网络稳定后发送，无 payload，协议≥29；log 推荐走 log watch。未在原资料定义的事件字段不在此臆造。诊断用法查 help diagnostics；它启动诊断流，配合 `stop-diagnostics` 停止；长期流按外部限时及真实终态处理。
 
@@ -70,13 +74,13 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |目标|语法与变化契约|
 |---|---|
 |模式/策略|语法分别查 help mode/global-policy/policy-group；auto 清自动组 override。任务型命令优先于内部 set；返回变化后的状态，仍要同对象回读。|
-|特性|共享名及基本用法查 help feature；Mac 才有 system-proxy/enhanced-mode，后两者等待实际切换，未完成报错。启 MITM/Rewrite/脚本/抓包先说明隐私影响。|
+|特性|共享名及基本用法查 help feature；Mac 才有 system-proxy/enhanced-mode，后两者等待实际切换，未完成报错。启 MITM/Rewrite/脚本/抓包先说明隐私影响；开关抓包会断开全部现有连接，按入口 §3 再确认。|
 |捕获范围|协议≥36：`capture-filter list`、`get <in-memory|on-disk>`、`set <scope> <option=value>...`；in-memory 管未开 HTTP capture 时的近期记录，on-disk 管 capture 会话。选项顺序应用，任一无效则不修改。http-only/hide-crash-reporter/hide-apple/hide-udp 为 on/off，crash reporter 默认隐藏；type=off/with-keywords/without-keywords/pattern；keywords=a,b,... 替换（空清除），add-keyword/remove-keyword 单项增删，enable-keyword/disable-keyword 保留但切换。含逗号单项用 add-keyword。pattern 的 *、? 与前缀 - 排除主机语义需保留。list 返回 active 和 filters，get/set 返回 scope、active 布尔与 filter；filter 字段为 httpOnly、hideCrashReporterRequests、hideAppleRequests、hideUDP、type、keywords、disabledKeywords。隐藏项、http-only 和关键词过滤共同决定记录范围，不改变网络是否通。|
 |模块/资源|语法查 help module；改变模块状态会安排 profile reload；`external-resource update <key|all>` 会更新资源，all 不作为默认；Mac 的 `managed-profile update` 强制检查活动托管配置，等待下载/校验/替换，变化才安排 reload，返回 updated/unchanged。|
-|配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先应用变化，但必要时会自动完整重启；无法保证保留连接、缓存和临时规则。若本次直接或间接 reload 无法排除完整重启，即使整批获准仍须再次单独确认这些影响，未准不执行。`restart-engine` 总是完整重启并清连接、缓存、临时规则；`stop` 仅用户明确要求时执行。|
-|临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。规则立即生效、先于 Profile、引擎停止后丢失。先列已有项，只按实际规则标识删除本次新增项，不猜索引；flush 不是常规清理。|
-|连接与封禁|语法查 help kill；它断连接；批量断开再确认。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
-|Mac 设备/升级|`set-dhcp-device <mac> <type> [value]`：takeover 与 disable-udp-fast-path 接 0/1；address 接 IPv4 或空；name/icon 接名字或空。`remove-device-record <identifier...>` 删除记录；`reconnect-device <mac>` 重连 AP 客户端；`unattended-upgrade` 升级；均不套到 iOS，升级/断网/删除不因在目录出现而获准。|
+|配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先差量应用；它与 `restart-engine`、`stop` 的影响和再确认按入口 §3。|
+|临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。生效范围和清理限制按入口 §3；先列已有项，按实际规则标识删除。|
+|连接与封禁|语法查 help kill；它断连接，批量断开按入口 §3。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
+|Mac 设备/升级|`set-dhcp-device`、`remove-device-record`、`reconnect-device`、`unattended-upgrade` 仅 Mac，参数按官方 Mac 资料；它们改设备记录、断开客户端或升级，不套到 iOS，也不因在目录出现而获准。|
 
 分节读取/编辑/恢复先完整读 `references/http-api.md` 和 `references/http-sections.md`。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
 
@@ -84,9 +88,9 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 
 基础语法查 help script；run 可执行已启用或已禁用的配置 cron，返回输出与结果/异常，并非只读。桥的 `script evaluate <file> [mock-type] [timeout] [engine] [argument]` 读取显式 JS 文件，转 Base64 并转换 mock 名：http-request/http-response/cron/event/rule/dns/generic；engine=auto/jsc/webview。Controller 接口本身为 evaluate <base64-js> 等后续位置参数；不能把 Controller 编码与本地文件入口混用。先审脚本/读取授权，评估可有真实网络或修改行为，mock 不保证隔离。
 
-Mac 插件在线命令（协议≥24）：`plugin list`、`info <id>`、`parameters <id>`、`load-unpacked <directory>`、`configure <id> <key=value>...`、`enable|disable <id>`、`select <type> <id|none>`、`uninstall <id>`。list 的 plugins/单对象可含 id/name/version/type/state/source/parameters/values；state=unconfigured/enabled/disabled/error，source=builtin/url/unpacked，values 可能含秘密，先限制读取。configure 成功后启用，支持时运行 system.validate；enable 也选择为该类型活动项；builtin 只能 disable。load-unpacked 重读 manifest，schema 不兼容可能清配置；uninstall 可丢持久数据。`plugin install <manifest-url>` 在历史版本尚未开放，不靠透明转发假定可用。完整自编开发/事件/限制先读 `references/plugin-authoring.md`。
+Mac 插件在线命令的子命令和门槛见平台表，输出字段按官方 Mac 资料；list/info 的 values 可能含秘密，先限制读取。configure、load-unpacked、uninstall 的影响和开发流程先读 `references/plugin-authoring.md`。
 
-`plugin validate <directory>`、`plugin pack <directory> [asset-url]` 和 `lsp [--stdio]` 是官方 Mac 本地能力，本桥不实现，不能发 Controller。pack 的 ZIP 不含 manifest，另产带 asset.sha256 的托管 manifest；构建不自动授权上传/发布。官方 LSP 是编辑器长驻服务而非一次校验，历史支持 surge/surge-module/surge-ruleset、全量文本同步与诊断，配套 VS Code 扩展需 Mac 6.10.0+；本端不提供该编辑器离线能力。`--check <file>` 在本桥是向官方 HTTPS 服务上传，不是 Mac 本地解析；先告知，禁止默认上传活动 Profile，只按授权用无秘密副本。
+`plugin validate`、`plugin pack` 和 `lsp` 是官方 Mac 本地能力（pack 产物见插件指南，lsp 是编辑器长驻服务），本桥不实现，不能发 Controller。`--check` 的上传风险按入口 §3。
 
 ## 环境 key-path：类型、合并与回读
 
@@ -103,7 +107,7 @@ Mac 插件在线命令（协议≥24）：`plugin list`、`info <id>`、`paramet
 |SGEnvironmentCellularModeEnabledKey|bool，蜂窝模式；优先 feature。|
 |SGEnvironmentCellularModeProcessPathsKey|array<string>，蜂窝模式允许进程路径；复杂结构不拼接未经核实的 shell 值。|
 
-捕获会话字典 `ReplicaSessionParameters`：sizeLimit:int 默认 52428800 字节，requestCountLimit:int 默认 100，timeLimit:int 默认 180 秒，mitmOverride:bool 默认 1，mitmOverrideHostnames:array<string> 为内建名单，mitmOverrideHostnamesDisabled:array<string> 默认空。扩大捕获和 MITM 范围先说明影响；数组的当前内容与安全入口要另核。
+捕获会话字典 `ReplicaSessionParameters`：sizeLimit:int 默认 52428800 字节，requestCountLimit:int 默认 100，timeLimit:int 默认 180 秒，mitmOverride:bool 默认 1，mitmOverrideHostnames:array<string> 为内建名单，mitmOverrideHostnamesDisabled:array<string> 默认空。扩大捕获和 MITM 范围先说明影响；数组的当前内容与安全入口要另核。iOS 6.0.0 / Mac 6.11.0 之前，App 没保存过一次捕获设置时，这类嵌套 key-path（如 `ReplicaSessionParameters.timeLimit`）会被静默丢弃，set 返回成功也要回读；会话中途修改的后果见〈抓包会话〉。
 
 内存/磁盘过滤字典 `InMemoryCaptureFilter`、`OnDiskCaptureFilter`：httpOnly、hideCrashReporterRequest、hideAppleRequest、hideUDP 为 bool（crash reporter 默认 1）；filterType:int 的 0/1/2/3 分别为无/白名单/黑名单/pattern；keywordFilter、disabledKeywordFilter 是 array<string>。注意内部 key 的 Request 单数与 capture-filter 结果字段 Requests 复数不同，不能互相代换。协议≥36 优先任务型 capture-filter set，而非原始复杂 key-path。
 
@@ -111,8 +115,8 @@ Mac 插件在线命令（协议≥24）：`plugin list`、`info <id>`、`paramet
 
 ## 覆盖与停止边界
 
-本参考与已核本地帮助共同覆盖历史官方 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型自编，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
+本参考与已核本地帮助共同覆盖官方 12710 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型重新组织，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
 
 离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
 
-来源与许可：Surge 历史接口事实的自编工作流说明，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。
+来源与许可：依据官方命令参考整理的接口事实摘要，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。

@@ -85,25 +85,29 @@ def build(entries):
     manifest_entries=[path for rel,path in entries if rel==manifest_name]
     if len(manifest_entries)!=1:
         raise ReleaseError("Invalid provenance manifest")
+    # Cumulative: manifest builds are append-only, so originals of every recorded build stay
+    # denied after the baseline moves. Whole-file hashes only; not a copyright classifier.
     try:
         manifest_data=Path(manifest_entries[0]).read_bytes()
-        manifest=json.loads(manifest_data.decode("utf-8"))
-        raw=manifest["raw_sha256"]
-        if (not isinstance(raw,dict) or set(raw)!=OFFICIAL_SOURCE_KEYS or not all(
-                isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value)
-                for value in raw.values())):
-            raise ValueError("hash table")
-        raw_hashes=set(raw.values())
+        known=set()
+        for item in json.loads(manifest_data.decode("utf-8"))["builds"]:
+            raw=item["raw_sha256"]
+            if (not isinstance(raw,dict) or set(raw)!=OFFICIAL_SOURCE_KEYS or not all(
+                    isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value)
+                    for value in raw.values())):
+                raise ValueError("hash table")
+            known|=set(raw.values())
+        if not known:
+            raise ValueError("no builds")
     except (OSError,ValueError,KeyError,TypeError,UnicodeError):
         raise ReleaseError("Invalid provenance manifest") from None
-    # Known whole-file detection is not a general copyright/license classifier.
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
         for rel,path in entries:
             if rel in FORBIDDEN_RESOURCES:
                 raise ReleaseError(f"Official resource is not distributable: {rel}")
             data=manifest_data if rel==manifest_name else Path(path).read_bytes()
-            if digest(data) in raw_hashes:
+            if digest(data) in known:
                 raise ReleaseError(f"Known whole official file is not distributable: {rel}")
             for pattern in SECRET_PATTERNS:
                 if pattern.search(data):
