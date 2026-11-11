@@ -2,10 +2,10 @@
 
 ## 坐标与基线
 
-- **本部署坐标**（应用和数据库 2026-10-04、网关 2026-09-22 的记录，现版本未核）：Compose 在 `/root/lobehub/compose.yaml`（同目录 `.env`）；`lobe` 用 host 网络监听 `:3210`，`lobe-postgres`（ParadeDB PG17）`:3211`，`lobe-gateway` `:8787/:8788`。公网入口 `LOBEHUB_SERVER` 的取值和缺失处置见 `luno-platform/references/lobehub.md`〔分支 lobehub〕〈平台层〉；宿主按当次的连接参数确定，正文不缓存地址。
+- **本部署坐标**（应用和数据库 2026-10-04、网关 2026-09-22 的记录，现版本未核）：Compose 在 `/root/lobehub/compose.yaml`（同目录 `.env`）；`lobe` 用 host 网络监听 `:3210`，`lobe-postgres`（ParadeDB PG17）`:3211`，`lobe-gateway` `:8787/:8788`。公网入口 `LOBEHUB_SERVER` 的取值和缺失处置见本技能入口的〈LobeHub入口〉；宿主按当次的连接参数确定，正文不缓存地址。
 - **宿主初查**：`docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'`、`curl -fsS http://localhost:3210/`；host 网络的监听看 `ss -lntp`，不要只看 `Ports` 或凭上游默认端口（3000）推断。
 - **基线核对**：应用和网关分别核对实际的镜像版本或 digest、Compose 标签和各自的自动更新策略；不拿应用版本推网关版本，也不把浮动标签当实际版本。检查项：PostgreSQL（推荐 17+ 和 `pg_search`）、Redis、S3、`INTERNAL_APP_URL`、`AUTH_SECRET`、`JWKS_KEY`；通信和网关相关的项（如 `INTERNAL_APP_URL`）按文档 `self-hosting/platform/docker-compose.mdx`〈Necessary Configuration〉核对。应用版本以容器内的 `/app/package.json` 为准，OCI 标签可能和代码不符。现场取值按当次授权取证，不凭历史值推断，部署变更后重验。
-- **设备连接器**：装了新版不等于连接器已换版，要分别核对 installed 和 running，任务结束后按实际的管理器重启。`lh connect service` 的启停和重启只管用户级服务，`status` 能查用户级和系统级；重启会断开设备连接和远程终端；不拿本机的 `lh --version` 推远端版本（CLI 0.0.72，2026-10-30 依连接器状态源码和 `--help`）。
+- **设备连接器**：装了新版不等于连接器已换版，要分别核对 installed 和 running，任务结束后按实际的管理器重启；重启会断开设备连接和远程终端。不拿本机 CLI 版本推远端运行版本；服务管理范围按执行设备当前帮助核对。
 
 ## 升级、迁移与恢复
 
@@ -23,10 +23,10 @@
 
 ## 检索、暴露面与负载
 
-- **全文检索**：`FTS_SEARCH_PROVIDER` 显式切换、不会静默回退；换成 Elasticsearch 后不能直接切回 `pg_search`，它的端口不能发布，进度卷禁止删除（取值、回填、切回和清理见文档 `self-hosting/advanced/full-text-search.mdx`）。
+- **全文检索**：`FTS_SEARCH_PROVIDER` 显式选择后端，不会静默回退；切回 `pg_search` 前须满足对应版本所需的扩展和 BM25 索引前提。Elasticsearch 的端口不能发布，进度卷禁止删除；迁移、回填和清理按对应版本文档 `self-hosting/advanced/full-text-search.mdx` 及既有备份和生产变更授权执行（v2.3.2 文档，未实测切换）。
 - **`pg_search` 扩展**：镜像更新后，先核对已安装的扩展版本和镜像提供的版本；确认要更新时，按当前版本的升级说明、备份和生产变更授权执行 `ALTER EXTENSION pg_search UPDATE`，再验证检索。验收是检索回验，不以 SQL 返回成功代替；是否另有周期性对齐、最近结果如何、是否仍需手工更新，按当前部署现查。
 - **暴露面与卷**：公网只开 HTTPS，不暴露数据库、Redis 和对象存储的管理端口；默认不删卷，例外只限官方排障步骤，并且已备份、已确认。
-- **执行位置**：执行面**默认是云沙箱**；配好设备网关后可以在会话里选设备，选定后工具在该设备上运行。实例操作经设备连接器在目标主机执行，云沙箱只用于一次性的数据处理，不承载实例凭据，也不代替设备执行实例操作。`connect` 可以用设备上的 `agent-browser` 提供 browser 工具（默认从 PATH 发现，也可用 `--agent-browser` 指定）；新增这个能力要重核授权，不能按只读浏览器对待。网关地址的解析顺序是显式 `--gateway`、当前服务器保存的地址、服务端公布的地址；自建实例不能因为发现失败就回退到别处的网关（CLI 0.0.72 依 `connect --help` 和差分）。
+- **执行位置**：执行面**默认是云沙箱**；配好设备网关后可以在会话里选设备，选定后工具在该设备上运行。实例操作经设备连接器在目标主机执行，云沙箱只用于一次性的数据处理，不承载实例凭据，也不代替设备执行实例操作。新增设备浏览器能力要重核授权，不能按只读浏览器对待；自建实例不能因为发现失败就回退到别处的网关。
 - **负载**：生产只做低负载取证；重测试（压测、批量重建索引、全量扫日志等）放到已授权的独立测试 VM，资源和权限都隔离，并限定 CPU、内存和并发，不和生产争用，做不到就停。生产业务必需的索引维护另按生产变更判断，不以测试的名义绕过。OOM 之后暂停新增的重负载，先查来源，不清 Redis、不淘汰数据、不盲目重启。
 
 ## 异步任务失败
