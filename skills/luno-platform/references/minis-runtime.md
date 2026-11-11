@@ -12,16 +12,4 @@
 
 - **工具异常**：工具结果出现固定替换或错配就停止依赖，用可靠的独立通道回读对象来判断写入；状态不明不重试，不采信被污染的输出。`minis-model-use run` 按当前的 `--help`、版本和请求链路核验，报错不单独定因。`minis-mcp-cli` 改了配置或环境变量后要先 `shutdown` 再 `ping`，否则守护进程沿用旧配置，表现为 401（原版本和日期未记录，Minis 1.16 (21) 未核）；OAuth 类 MCP 回 App 的 MCP Integrations → Authorize 授权，配完 `ping` 通过才算好。
 
-## 上下文行为
-
-上下文卸载、压缩、offloads、会话结果截断、会话原文回读，以及记忆注入、截断或容量相关判断前，完整读 `references/minis-runtime-context.md`；其中需要记忆规则时继续按该资源加载，不凭旧阈值推断。
-
-## 目录与挂载
-
-跨会话目录、挂载、用户文件定位或跨话题交接前，完整读 `references/minis-runtime-context.md`。
-
-## 本机特性
-
-本机能力、独立 Shell 进程、原生命令、分页覆盖、后台服务与调度、Bonjour、debug、文件或进程异常、Codex/iSH TLS 的操作、建议或判断前，完整读 `references/minis-runtime-device.md`。编辑与隐私掩码规则和上面的工具异常规则仍适用；不因分支化省略安全、授权或写后回读。
-
 来源与许可：OpenMinis/MinisSkills，MIT 精选改写；Copyright (c) 2026 OpenMinis；2026-10-25 本地决定按 MIT 处理，README 的 Apache-2.0 标注冲突保留，不作法律适用结论或扩大分发授权。完整许可随包见 ../LICENSE.openminis.txt；固定提交、取材路径与日期见仓库 skills-sources.md。

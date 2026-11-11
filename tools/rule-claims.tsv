@@ -72,7 +72,6 @@ skills/luno-ops/SKILL.md	references/ssh.md	资源条件	精简提案新增分支
 skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
 skills/luno-core/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
 skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
-skills/luno-platform/references/minis.md	references/minis-session-groups.md	资源条件	资源加载边
 skills/luno-platform/references/lobehub-agents.md	references/lobehub-access.md	资源条件	资源加载边
 skills/luno-platform/references/lobehub-instance.md	references/lobehub-skills.md	资源条件	资源加载边
 skills/luno-surge/references/platform-compatibility.md	references/diagnostics.md	资源条件	资源加载边
@@ -154,8 +153,8 @@ skills/luno-platform/references/minis-runtime-context.md	references/minis-memory
 skills/luno-platform/references/minis-runtime-context.md	references/minis-runtime.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/minis-runtime-device.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/minis-runtime-device.md	references/minis-runtime.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime.md	references/minis-runtime-context.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime.md	references/minis-runtime-device.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/minis.md	references/minis-runtime-context.md	资源条件	资源加载边（minis 入口·运行时上下文分支）
+skills/luno-platform/references/minis.md	references/minis-runtime-device.md	资源条件	资源加载边（minis 入口·运行时本机分支）
 skills/luno-platform/references/minis.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-authoring/SKILL.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-authoring/SKILL.md	references/coding.md	资源条件	命中正文触发完整读取；范围以该分支为准
