@@ -1,6 +1,6 @@
 # Surge 命令知识与操作参考（非官方摘要）
 
-这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核）整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
+这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核），并结合官方公开手册整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
 
 ## 调用与证据
 
@@ -56,12 +56,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |---|---|
 |请求/地址|active、recent、request、dns；dns-lookup-times 为最近 24 次实际发往服务器的查询耗时（ms，旧到新，协议≥28）；virtual-ip-db 是全库，优先 `virtual-ip <ip|domain-substring>`：IPv4 精确匹配、域名不区分大小写子串匹配。|
 |策略/配置|policy、auto-test-group-result、policy-group-sub-policies、smart-group-info、rule、map-remote、map-local、temp-rule、profile、event；`dump profile original|effective` 分别看原始与有效配置，可能含秘密，不默认读取。|
-|流量/使用度|traffic（testBytes 是策略测试产生的字节，协议≥35）；traffic-stat 可加 prefix；traffic-stat-host；traffic-stat-hourly 是本地今日逐小时 total/DIRECT（协议≥28），其中 policy 映射是今日有流量的策略分小时数据（协议≥29）；policy-usage 按 line-hash 给近期使用分数，最后使用十分钟后衰减为零（协议≥29）；`traffic-stat-breakdown <主> <次>` 按 host、policy、interface、process、device 中两个不同维度交叉汇总今日、本月和上月，process/device 区分本机进程路径与其他设备 MAC（协议≥38）；`traffic-stat-records <today|this-month|last-month>` 给该期按 host、policy、interface 合并的记录，只有它带 requestCount（协议≥39）。|
+|流量/使用度|traffic（testBytes 是策略测试产生的字节，协议≥35）；traffic-stat 可加 prefix；traffic-stat-host；traffic-stat-hourly 是本地今日逐小时 total/DIRECT（协议≥28），其中 policy 映射是今日有流量的策略分小时数据（协议≥29）；policy-usage 按 line-hash 给近期使用分数，最后使用十分钟后衰减为零（协议≥29）；`traffic-stat-breakdown <主> <次>` 按 host、policy、interface、process、device 中两个不同维度交叉汇总今日、本月和上月，process/device 区分本机进程路径与其他设备 MAC；`traffic-stat-records <today|this-month|last-month>` 给该期按 host、policy、interface 合并的记录，只有它带 requestCount；这两项的版本及当前实例支持条件见平台表，不使用未核实的 Controller Protocol 数字作门槛。|
 |概览/性能|summary；performance 含 memory-bytes、运行时长、活动请求/DNS cache/virtual IP/临时规则/封禁数量；rule-usage 是两次 App 收集间的命中计数，App 会定期取走（历史 iOS 每六小时），dump 本身不清空，不应误称自启动累计。|
 
 日志基本调用查 help log；省略为 file/100，单给数量沿用 file，范围 1–10000，旧到新。memory 保留近期各级，file 受运行日志级别限制。log 的 watch 只订阅新日志，不重放旧内容，可能一直无事件；外部限时。保留日志的字段为 source、requested-line-count、line-count、log，事件字段为 level、module、log。语法查 help set-log-level；它改运行级别，不写 Profile，level 允许值未在本历史资料穷举，需当前证据；不能猜。用法查 help logbook；它返回 records 与 truncated，新到旧；协议≥27 的响应大小上限历史约 iOS 3 MB/Mac 15 MB，会跳过放不下的记录，truncated=true 不是所有记录已取到。`script-log <log-name> <session-id>` 定位单次脚本记录。
 
-**抓包会话**（协议≥37）：`dump recent` 只留近期记录；HTTP capture 把会话内每个请求连同头和正文存盘，`capture-session` 读取这些会话（iOS 经 Controller 同样可读）。流程：需要时先 `capture-filter set on-disk …` 收窄范围 → 同一条 `set` 先写 `ReplicaSessionParameters.*` 限额、最后写 `Replica=1` 开始（默认 180 秒、100 个请求、50 MB，0 为不限）→ `feature set capture off` 或到达限额结束 → 读取。开始前告知用户并按入口 §3 确认：开关抓包会断开全部现有连接；抓包期间 MITM override 名单内的主机（默认除 Apple、iCloud 等少数外几乎全部）即使 MITM 关闭也会被解密，需要设备信任 profile 里的 CA，`ReplicaSessionParameters.mitmOverride=0` 把解密限回 `[MITM]` 主机名；会话中途改 `ReplicaSessionParameters.*` 会结束当前会话（endReason=replaced）并另起一个，所以限额要先设；限额存在环境里，用户没要求保留就事后恢复原值。
+**抓包会话**（版本及当前实例支持条件见平台表）：`dump recent` 只留近期记录；HTTP capture 把会话内每个请求连同头和正文存盘，`capture-session` 读取这些会话（iOS 经 Controller 同样可读）。流程：需要时先 `capture-filter set on-disk …` 收窄范围 → 同一条 `set` 先写 `ReplicaSessionParameters.*` 限额、最后写 `Replica=1` 开始（默认 180 秒、100 个请求、50 MB，0 为不限）→ `feature set capture off` 或到达限额结束 → 读取。开始前告知用户并按入口 §3 确认：开关抓包会断开全部现有连接；抓包期间 MITM override 名单内的主机（默认除 Apple、iCloud 等少数外几乎全部）即使 MITM 关闭也会被解密，需要设备信任 profile 里的 CA，`ReplicaSessionParameters.mitmOverride=0` 把解密限回 `[MITM]` 主机名；会话中途改 `ReplicaSessionParameters.*` 会结束当前会话（endReason=replaced）并另起一个，所以限额要先设；限额存在环境里，用户没要求保留就事后恢复原值。
 
 读取：`capture-session list [include-size]` 新到旧，active 表示正在写入，include-size 会读遍文件，非必要不加；`dump <会话> [offset=N] [limit=N] [filter=TEXT]` 按存盘顺序返回记录及其 key，limit 默认 100、上限 500，filter 对 URL、主机、地址、策略、规则、进程、设备、状态和方法做不区分大小写的子串匹配，翻页到 offset+returned 达到 total（有 filter 时为 matched）；`data <会话> <key> <request|response> [offset=N] [length=N]` 每次最多 1 MiB（默认 512 KiB），`--raw` 下正文为 base64，truncated=true 时按已取字节推进 offset 续读。会话用 name、请求用 key 定位，不用请求 id（引擎重启后会重复），两者含空格要加引号。正文按传输原样存，有 Content-Encoding 时先解码；取正文报错表示没存下正文（没有发送或 HTTPS 未解密）。会话内容和正文按入口 §3 的隐私数据处理。
 

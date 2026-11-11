@@ -13,7 +13,7 @@
 | `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
 | `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
 | `restart-engine` | 24 | 共享 | 影响和再确认按入口 §3 |
-| logbook 的大小截断语义 | 27 | 共享 | 下面各行依据官方 Mac 6.11.0 命令参考（12680；37 起为 12710） |
+| logbook 的大小截断语义 | 27 | 共享 | 本行至 capture-filter 行的协议数字沿用官方 Mac 6.11.0 命令参考（12680）的来源记录 |
 | `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
 | `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |
 | `summary.network` 的 ipv4/ipv6 | 30 | 共享 | |
@@ -21,11 +21,11 @@
 | `summary.network` 的 encrypted-dns | 33 | 共享 | |
 | `traffic.testBytes` | 35 | 共享 | |
 | `capture-filter` | 36 | 共享 | 改捕获过滤会影响记录范围，按既有授权和数据最小化执行 |
-| `capture-session list`/`dump`/`data` | 37 | 共享 | 读取已存盘的 HTTP 抓包会话，取代 `retrieve-data` |
-| `dump traffic-stat-breakdown` | 38 | 共享 | |
-| `dump traffic-stat-records` | 39 | 共享 | |
+| `capture-session list`/`dump`/`data` | 未核实，见下文 | iOS / macOS | 读取已存盘的 HTTP 抓包会话，取代 `retrieve-data` |
+| `dump traffic-stat-breakdown` | 未核实，见下文 | iOS / macOS | 按两个维度汇总流量 |
+| `dump traffic-stat-records` | 未核实，见下文 | iOS / macOS | 读取指定期间的流量及请求计数记录 |
 
-27 及以上各行只是官方给出的能力条件，不代表本端设备已验收；不要从历史上的 Protocol 25 推断它们可用，也不要把 HTTP 版本条件当成 Controller 门槛。
+上述已列数字只是有来源版本的能力条件，不代表本端设备已验收。官方 CLI 手册为 capture-session、dump traffic-stat-breakdown 和 dump traffic-stat-records 标注 iOS 6.0.0+ / Mac 6.11.0+，但这三项的最低 Controller Protocol 数字尚未核实，不以未核实的数字判定支持或拒绝，也不从发行版本反推协议号。执行前仍须按入口核对当前实例的平台、发行版本和 build，并取得当前实例支持目标命令的证据；必要条件未知或不满足时停止该项，不能只凭命令列在手册或历史 Protocol 25 推断可用。依据：https://manual.nssurge.com/tools/cli.html（2026-11-11 读取）。
 
 `plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；开发契约见 `references/plugin-authoring.md`；未覆盖的当前格式按官方资料核实，缺依据就停止该项。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
 
