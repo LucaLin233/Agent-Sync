@@ -41,7 +41,7 @@
 
 ## 版本与恢复
 
-版本是每个 phase 的快照号。`listRequestOverrideRevisions --phase <phase> --scope <scope>` 给出 `{version, createdAt, actor, reason, ruleCount}`（没有 `pagination` 描述符，完整性按 `references/cchp-interfaces.md`〈分页〉判定）；`getRequestOverrideRevision --version <n>` 另给 `document` 和 `lock_all`。
+版本是每个 phase 的快照号。`listRequestOverrideRevisions --phase <phase> --scope <scope>` 给出 `{version, createdAt, actor, reason, ruleCount}`（没有 `pagination` 描述符，完整性按 `references/cchp.md`〔分支 cchp-interfaces〕〈分页〉判定）；`getRequestOverrideRevision --version <n>` 另给 `document` 和 `lock_all`。
 
 `restoreRequestOverrideRevision` 把历史版本的内容写成**新的当前版本**，不是退回指针，也不回滚其他 phase 或这个 scope 的其他配置。它是 destructive 写，要单独授权，不随常规变更触发，也不当作「撤销刚才的改动」的自动步骤。
 

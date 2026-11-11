@@ -121,17 +121,12 @@
         "skills/luno-core/LICENSE.skill-authoring.txt",
         "skills/luno-core/references/agent-document-writing.md",
         "skills/luno-core/references/code-review.md",
-        "skills/luno-core/references/delegation.md",
+        "skills/luno-core/references/review.md",
         "skills/luno-core/references/execution.md",
         "skills/luno-core/references/handoff.md",
         "skills/luno-core/references/retrieval.md",
-        "skills/luno-core/references/review.md",
-        "skills/luno-core/references/safety.md",
-        "skills/luno-core/references/skill-authoring.md",
-        "skills/luno-core/references/sync-workflow.md",
         "skills/luno-core/references/sync.md",
         "skills/luno-core/references/test-authoring.md",
-        "skills/luno-core/references/writing-safety.md",
         "skills/luno-core/scripts/quick_validate.py"
       ],
       "ends": {
@@ -160,11 +155,7 @@
         "skills/luno-ops/references/cfst.md",
         "skills/luno-ops/references/execution-environment.md",
         "skills/luno-ops/references/github.md",
-        "skills/luno-ops/references/onlyboxes-baseline.md",
-        "skills/luno-ops/references/onlyboxes.md",
-        "skills/luno-ops/references/remote-files-backup.md",
-        "skills/luno-ops/references/service-runtime.md",
-        "skills/luno-ops/references/ssh.md"
+        "skills/luno-ops/references/service-runtime.md"
       ],
       "ends": {
         "repo": {
@@ -192,9 +183,7 @@
         "skills/luno-authoring/LICENSE.matt-pocock.txt",
         "skills/luno-authoring/LICENSE.obra-superpowers.txt",
         "skills/luno-authoring/references/coding.md",
-        "skills/luno-authoring/references/i18n.md",
-        "skills/luno-authoring/references/prose.md",
-        "skills/luno-authoring/references/wordpress.md"
+        "skills/luno-authoring/references/prose.md"
       ],
       "ends": {
         "repo": {
@@ -219,7 +208,6 @@
       "source": "skills/luno-memory/SKILL.md",
       "resources": [
         "skills/luno-memory/references/maintenance.md",
-        "skills/luno-memory/references/correction.md",
         "skills/luno-memory/LICENSE.matt-pocock.txt"
       ],
       "ends": {
@@ -247,23 +235,13 @@
         "skills/luno-platform/LICENSE.openminis.txt",
         "skills/luno-platform/LICENSE.upstream.txt",
         "skills/luno-platform/references/cchp-coverage-rules.md",
-        "skills/luno-platform/references/cchp-interfaces.md",
+        "skills/luno-platform/references/cchp.md",
         "skills/luno-platform/references/cchp-source.md",
         "skills/luno-platform/references/cchp-workflow-org.md",
         "skills/luno-platform/references/cchp-workflow-providers.md",
-        "skills/luno-platform/references/cchp-workflow-writes.md",
-        "skills/luno-platform/references/cchp.md",
-        "skills/luno-platform/references/lobehub-access.md",
-        "skills/luno-platform/references/lobehub-agents.md",
+        "skills/luno-platform/references/lobehub.md",
         "skills/luno-platform/references/lobehub-instance.md",
         "skills/luno-platform/references/lobehub-knowledge.md",
-        "skills/luno-platform/references/lobehub-skills.md",
-        "skills/luno-platform/references/lobehub.md",
-        "skills/luno-platform/references/minis-configuration.md",
-        "skills/luno-platform/references/minis-memory.md",
-        "skills/luno-platform/references/minis-runtime-context.md",
-        "skills/luno-platform/references/minis-runtime-device.md",
-        "skills/luno-platform/references/minis-runtime.md",
         "skills/luno-platform/references/minis.md"
       ],
       "ends": {
@@ -293,11 +271,7 @@
         "skills/luno-surge/references/official-sources.md",
         "skills/luno-surge/references/SOURCE.md",
         "skills/luno-surge/references/http-api.md",
-        "skills/luno-surge/references/http-sections.md",
-        "skills/luno-surge/references/controller-cli.md",
         "skills/luno-surge/references/upstream-manifest.json",
-        "skills/luno-surge/references/diagnostics.md",
-        "skills/luno-surge/references/platform-compatibility.md",
         "skills/luno-surge/scripts/_privacy.py",
         "skills/luno-surge/scripts/surge_cli.py",
         "skills/luno-surge/scripts/install.sh",

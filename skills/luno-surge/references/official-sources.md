@@ -21,5 +21,5 @@
 ## 本地校验
 
 - 装有 Mac 时可以用官方本地解析器：`/Applications/Surge.app/Contents/Applications/surge-cli --check /path/to/profile.conf`。
-- Minis/iSH 没有本地解析器：`surge-cli --check <path>` 会把显式指定的文件上传到官方 beta HTTPS 校验服务；上传和脱敏要求见入口 §3 和 [controller-cli.md](controller-cli.md)。
+- Minis/iSH 没有本地解析器：`surge-cli --check <path>` 会把显式指定的文件上传到官方 beta HTTPS 校验服务；上传和脱敏要求见入口 §3 和 [controller-cli.md](command-reference.md#branch-controller-cli)。
 - 校验副本不能把真实的密码、PSK、订阅 URL、API Key 或其他凭据复制到不受控的位置，优先用占位值验证结构。

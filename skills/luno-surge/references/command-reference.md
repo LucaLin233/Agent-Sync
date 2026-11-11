@@ -1,6 +1,16 @@
+# 共读资源（按原分支合并）
+
+指针中的“分支”以 branch 锚点及 BEGIN/END 注释定界。沿用各分支原有触发和共同前置：完整读取命中的分支；原规则指定分节时，读取指定完整分节及共同前置，不加载未命中分支。同一文件的命中并集优先一次取齐，返回受限时分块补齐，不以截断内容作已加载。
+
+分支内的“本文件”“本文”“本资源”均只指该分支，不把其他分支的接口事实、版本、能力或权限并入；“本技能”仍指原技能。主体、条件、例外、停止、恢复和许可边界保持原文，不因合并授予额外权限。跨技能先读目标技能入口及产品/业务入口；候选不改变现役规则。
+
+分支：command-reference、controller-cli、platform-compatibility、diagnostics。
+
+<a id="branch-command-reference"></a>
+<!-- BEGIN command-reference -->
 # Surge 命令知识与操作参考（非官方摘要）
 
-这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核），并结合官方公开手册整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/platform-compatibility.md` 为执行门槛；连接、认证和编码先完整读 `references/controller-cli.md`；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
+这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核），并结合官方公开手册整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/command-reference.md`〔分支 platform-compatibility〕 为执行门槛；连接、认证和编码先完整读 `references/command-reference.md`〔分支 controller-cli〕；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
 
 ## 调用与证据
 
@@ -33,7 +43,7 @@
 
 ## 路由、DNS 和主动测量
 
-路由/DNS/临时规则/性能/Tailscale/WireGuard 工作先完整读 `references/diagnostics.md`。
+路由/DNS/临时规则/性能/Tailscale/WireGuard 工作先完整读 `references/command-reference.md`〔分支 diagnostics〕。
 
 rule 的基本形式查 help rule；匹配只评价当前规则，不创建业务连接；match 看命中规则与最终策略，explain 另给组解析链、决策理由、smart 选择、底层代理链及评价说明。裸 hostname 默认 TCP/443，HTTP(S) URL 提供 URL、Host、SNI、协议与端口。可覆盖 hostname、dest-port（别名 port）、process-path、user-agent、url、sni、http-host、source-address、source-port、is-local（别名 local）、client-mac、listen-port、protocol、device-name；空值用于清除可选字段，不按返回内容猜新键。
 
@@ -82,7 +92,7 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |连接与封禁|语法查 help kill；它断连接，批量断开按入口 §3。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
 |Mac 设备/升级|`set-dhcp-device`、`remove-device-record`、`reconnect-device`、`unattended-upgrade` 仅 Mac，参数按官方 Mac 资料；它们改设备记录、断开客户端或升级，不套到 iOS，也不因在目录出现而获准。|
 
-分节读取/编辑/恢复先完整读 `references/http-api.md` 和 `references/http-sections.md`。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
+分节读取/编辑/恢复先完整读 `references/http-api.md`〔分支 http-api〕 和 `references/http-api.md`〔分支 http-sections〕。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
 
 ## 脚本、Mac 插件与本地能力
 
@@ -120,3 +130,169 @@ Mac 插件在线命令的子命令和门槛见平台表，输出字段按官方 
 离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
 
 来源与许可：依据官方命令参考整理的接口事实摘要，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。
+<!-- END command-reference -->
+
+<a id="branch-controller-cli"></a>
+<!-- BEGIN controller-cli -->
+# Minis Surge CLI
+
+`surge-cli --remote` 的传输和命令行面的 Python 重实现，面向 iOS 上的 iSH/Minis。
+
+## 传输协议
+
+External Controller 是以 CRLF 分隔的命令和结果流：
+
+1. 客户端发送密码 + CRLF；
+2. 服务端回 welcome JSON + CRLF；
+3. 客户端发送一行文本命令 + CRLF：动词裸写，后面的每个参数用双引号包裹，如 `rule "match" "example.com"`；
+4. 服务端回一个结果 JSON 对象，或一串 JSON 事件对象。
+
+含 CR/LF 的参数在本地就拒绝；普通引号和反斜杠在引号字段里原样发送，和官方客户端一致。编码对齐的版本依据见 `references/command-reference.md`〔分支 platform-compatibility〕。
+
+客户端不做 HTTP API 转换。多数命令参数由 Controller 自己解析，所以普通命令的行为随所连的 Surge 版本；客户端只复现官方 CLI 已知的本地转换：`summary`、`profile diff`、`rule temp`、`watch speed`、`script evaluate <file>`（含 mock-type 名到数字 ID 的转换）。macOS 上的在线 `plugin` 操作是普通 Controller 命令；官方 CLI 的离线 `plugin validate`/`pack` 依赖本地 macOS 工具，在 iSH 里**有意不可用**。`--raw` 返回经客户端脱敏的 Controller JSON（紧凑序列化），不保证和服务端原文逐字节一致。
+
+## 安装与凭据
+
+`/usr/local/bin/surge-cli` 是指向 `scripts/surge_cli.py` 的符号链接；默认 Controller 是 `127.0.0.1:6170`，可以用 `SURGE_CLI_REMOTE` 或 `--remote` 覆盖。
+
+凭据按这个优先级取：先 `--password-stdin`，再 `SURGE_API_KEY`（Minis 推荐，存在「设置 → 环境变量」）。客户端非交互：不建也不读密码文件，不在 TTY 提示输入。`SURGE_API_KEY` 缺失时给出 Minis 环境变量的设置入口，不要让用户把密码发到聊天里。调用安全、危险操作再确认和数据最小化按入口 §3。
+
+## 远程管理
+
+依据官方指南 [Surge Remote Management](https://kb.nssurge.com/surge-knowledge-base/guidelines/remote-management)（2026-09-26 读；加 `.md` 取 Markdown 源）。它描述的是官方控制器，不代表每个特性本实现都有。
+
+- **Ponte 与远端 loopback**：有用户授权的 Ponte 通路时，`--remote <name>.sgponte:6170` 可以到达远端 Mac 的 loopback，它的 External Controller 可以继续只绑 `127.0.0.1`，不必为此放宽监听。Surge UI 原生的 Ponte 免密发现和这个 CLI 的 host/port/password 连接是两回事，凭据处理不变。
+- **iOS 可达性**：Surge iOS 不能当 Ponte 服务端；蜂窝网络下远程 External Controller 连接会被拒，Wi-Fi 下要开启 Allow Access From Wi-Fi。这些是入站限制，不能证明同机 Minis 的 loopback 可用，要看实际路径。
+- **USB**：官方 Mac Dashboard 能管理 USB 连接的 iPhone/iPad（包括走蜂窝时），本 CLI 不实现；不要从通用能力表推断支持 USB。
+- **认证封禁**：30 秒内 10 次密码错误会临时封禁来源 IP 或本地进程。先停止反复认证，判断「服务死了」之前先考虑是否被封禁。`security ban` 的查看和清除语法见命令参考；清除封禁不是自动的测试恢复步骤。
+- **Ponte 与 HTTP API**：官方对比表把 HTTP API 和 Web Dashboard 标为不支持 Ponte。这说的是原生远程管理集成，不否定「经已有的 `.sgponte` 隧道访问 HTTP 端口」；以实际端点为准。
+- **官方与 Minis CLI 的差异**：Mac CLI 不带命令时进交互模式，Minis 打印帮助。指南里的 Mac 专属能力（Gateway 设备、插件、无人值守升级）不是命令规范，也不授权升级或重启。远程功能缺失可能是版本不匹配或 Mac 专属，不一定是传输故障；官方建议两端版本对齐（必要时都用 beta），先诊断，不自动升级。
+
+## 兼容性
+
+多数命令透明转发。status、version、mode、features、策略组、rule match/explain、DNS lookup/trace、modules、GeoIP、performance 和 macOS VMNET 等常用命令有可读的格式化输出，其余打印美化的 JSON；脚本和需要精确 Controller 数据时用 `--raw`。VMNET、`restart-engine` 的平台和协议门槛按 `references/command-reference.md`〔分支 platform-compatibility〕；`reload`、`restart-engine` 的影响和再确认按入口 §3。
+
+`--check <path>`（`-c <path>`）使用 Surge 官方 beta HTTPS 校验服务（`https://services.nssurge.com/v1/config/validate`），因为 iSH 没有 macOS 的本地解析器。它只读显式指定的 UTF-8 文件，以 JSON 的 `profile` 字段 POST 上去，按官方 CLI 的格式打印 `OK` 或 `Failed: ...`，退出码 0 或 1。**这是上传**，限制按入口 §3。
+<!-- END controller-cli -->
+
+<a id="branch-platform-compatibility"></a>
+<!-- BEGIN platform-compatibility -->
+# 平台与协议差异
+
+协议门槛、平台限制和历史验证结论只以本文件为准。其他文件（入口、`references/command-reference.md`〔分支 controller-cli〕、命令参考和插件指南等）里的协议号或版本说法与本文件冲突时，按本文件执行；来源快照中的描述不自动成为当前设备能力。
+
+下面是有日期的版本快照，不代表当前运行的版本。能力异常时先跑 `surge-cli --raw version`，核对 Surge、Core、平台和 Controller Protocol；不要把 App 发行版本和 Controller 内部版本混为一谈。
+
+## 命令门槛
+
+| 能力 | 最低 Controller Protocol | 平台 | 说明 |
+|---|---|---|---|
+| `rule`、`dns`、`http probe`、`security ban` | 20 | 共享 | |
+| `geoip`、性能/规则使用/虚拟 IP 的 dump、`benchmark rule-matching` | 22 | 共享 | |
+| `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
+| `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
+| `restart-engine` | 24 | 共享 | 影响和再确认按入口 §3 |
+| logbook 的大小截断语义 | 27 | 共享 | 本行至 capture-filter 行的协议数字沿用官方 Mac 6.11.0 命令参考（12680）的来源记录 |
+| `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
+| `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |
+| `summary.network` 的 ipv4/ipv6 | 30 | 共享 | |
+| `profile section list`/`get`/`set` | 31 | 共享 | 本端桥不实现 `set`，见下文 |
+| `summary.network` 的 encrypted-dns | 33 | 共享 | |
+| `traffic.testBytes` | 35 | 共享 | |
+| `capture-filter` | 36 | 共享 | 改捕获过滤会影响记录范围，按既有授权和数据最小化执行 |
+| `capture-session list`/`dump`/`data` | 未核实，见下文 | iOS / macOS | 读取已存盘的 HTTP 抓包会话，取代 `retrieve-data` |
+| `dump traffic-stat-breakdown` | 未核实，见下文 | iOS / macOS | 按两个维度汇总流量 |
+| `dump traffic-stat-records` | 未核实，见下文 | iOS / macOS | 读取指定期间的流量及请求计数记录 |
+
+上述已列数字只是有来源版本的能力条件，不代表本端设备已验收。官方 CLI 手册为 capture-session、dump traffic-stat-breakdown 和 dump traffic-stat-records 标注 iOS 6.0.0+ / Mac 6.11.0+，但这三项的最低 Controller Protocol 数字尚未核实，不以未核实的数字判定支持或拒绝，也不从发行版本反推协议号。执行前仍须按入口核对当前实例的平台、发行版本和 build，并取得当前实例支持目标命令的证据；必要条件未知或不满足时停止该项，不能只凭命令列在手册或历史 Protocol 25 推断可用。依据：https://manual.nssurge.com/tools/cli.html（2026-11-11 读取）。
+
+`plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；开发契约见 `references/plugin-authoring.md`；未覆盖的当前格式按官方资料核实，缺依据就停止该项。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
+
+## Surge 6：分节编辑与内置 MCP
+
+- HTTP 分节编辑和内置 MCP 的最低版本是 iOS 6.0.0 / Mac 6.11.0，仍要核对所选实例实际的平台、营销版本和 build。2026-11-03 时 iOS 6 的发布页是 TestFlight，不是 App Store 稳定版。
+- iOS 6 的 MCP 另需订阅已解锁或有效试用的权益；装了这个版本或有 TestFlight 资格，都不能证明有这项权益。
+- 命令参考和插件指南取材的官方版本和原文哈希，以当前的 `upstream-manifest.json` 为来源证据；拿到安装包或有来源记录，不表示官方原件随包分发，也不表示新能力已经设备实测。
+- Minis 自建桥不实现 `profile section set` 的本地文件和 stdin 转换，但保留 `list`/`get` 的只读路径，不因为 `set` 的风险一律禁用。官方 `get` 可能返回含密码的真实正文，本端 `--raw` 仍是客户端脱敏的 JSON，两者都不会自动成为获准的回写原稿。读取和安全写入按 `references/http-api.md`〔分支 http-api〕 执行；这些新能力没有设备实测，历史的只读和重启验收不扩大到它们。
+
+## 历史验证
+
+| Controller build | 日期 | 平台与版本 | 覆盖范围 |
+|---|---|---|---|
+| 3822 | — | — | 首次验证 `reload` 和 `restart-engine` 的差异（关闭连接、清除缓存和临时规则） |
+| 3830 | 2026-09-02 | 正式版 Surge iOS 5.22.0（Controller 内部版本 5.102.0），Protocol 25 | 认证、CRLF 文本命令、JSON Lines 响应和 `restart-engine` 的逐项结论 |
+| 3842 | 2026-09-15 | 同上 5.22.0 / Protocol 25 | 复测认证和只读命令；`restart-engine` 未复测 |
+| 3852 | 2026-09-27 | Controller 内部版本 5.102.0 | `scripts/acceptance.sh --controller` 和 `--network` 两档只读验收全部通过（握手与能力、`status`、`summary`、`dump performance`、`rule match`、`rule temp list`、`feature list`、`module list`、`watch speed` 首帧、Prometheus metrics、官方校验服务上传合成的无秘密 profile、`dns lookup`），全程没改 Surge 设置；变更类操作（`restart-engine`、切换 profile）未复测，仍按 3830/3822 |
+
+Protocol 25 仍兼容旧的 JSON `argv` 请求，但本客户端已对齐正式版 Surge Mac 6.9.0 build 12250 的文本编码。
+<!-- END platform-compatibility -->
+
+<a id="branch-diagnostics"></a>
+<!-- BEGIN diagnostics -->
+# Surge 按需诊断
+
+只在实际排查对应功能时读取，并先按入口 §2 做完引擎状态预检。命令语法、key-path 和响应字段以 [command-reference.md](command-reference.md#branch-command-reference) 为准，协议门槛和平台限制以 [platform-compatibility.md](command-reference.md#branch-platform-compatibility) 为准。这里只写 Surge 特有的行为，不用其他代理软件的语法代替。
+
+## 流量与多帧输出
+
+- `http probe <url> [policy]` 会发真实的 HEAD 请求；DNS、节点、带宽和加密 benchmark 同样会产生真实流量或负载。只在任务需要时执行，执行前确认目标和影响。
+- `diagnostics`、各种 `watch`、带宽和加密 benchmark 持续输出 JSON Lines：按 `hasMore=false` 或结束载荷判断完成，不能拿首帧当最终结果；长期订阅要限时停止。
+
+## 路由与 DNS
+
+```sh
+surge-cli --raw rule match example.com
+surge-cli --raw rule explain https://example.com
+surge-cli --raw dns trace example.com
+surge-cli --raw geoip 1.1.1.1
+```
+
+`rule match` 快速看命中的规则和最终策略；`rule explain` 给出完整的策略组决策路径，回答「为什么这样走」时优先用它。
+
+需要改变路由才能验证、并且用户授权时，优先用临时规则，不改 Profile。先列出已有的规则，记下本次新增的项：
+
+```sh
+surge-cli rule temp list
+# 确认 Proxy 存在且获准测试后再添加：
+surge-cli rule temp add "DOMAIN-SUFFIX,example.com,Proxy"
+surge-cli rule temp list
+```
+
+清理按入口 §3，只移除本次新增的规则；具体的标识和 remove 参数先核对 [命令参考](command-reference.md#branch-command-reference) 和实际返回。
+
+## 性能与隧道
+
+```sh
+surge-cli --raw dump performance
+surge-cli --raw dump rule-usage
+surge-cli --raw benchmark rule-matching
+surge-cli --raw benchmark encryption 25
+```
+
+`dump policy`、`dump performance`、`dump rule-usage` 和各种 benchmark 都按需读取，不作为每次任务的前置或基线。`benchmark encryption` 测的是 Surge 所在设备的本地加密性能，不是网络带宽。
+
+排查 Tailscale/WireGuard 时，用 `proxy-runtime-status` 传策略名读取运行时状态，名称含空格要加引号。`line-hash` 仍然可用，但 `dump policy` 已经不打印它，要从 `policy-group list` 或 `dump policy-group-sub-policies` 的方括号里取：
+
+```sh
+surge-cli --raw proxy-runtime-status "<策略名>"
+surge-cli --raw proxy-runtime-status POLICY::…
+```
+
+优先检查握手、底层策略、Tailscale 会话、Exit Node、DERP 和 peer path，不要先做宽泛的日志搜索。
+
+`test-policy-udp` 需要真实的 Internet 出网：对 P2P 的 Tailscale/WireGuard 策略（`Test Capability: rtt-only`）会返回 not-applicable，这类策略改用 `test-policy` 取 RTT。这个错误**不是**隧道故障的证据。
+
+## CoreDevice/RSD 同机回环（第三方报告，非本机验收）
+
+上游 OpenMinis ios-dev（2026-10-25 本地核对）报告：Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为门槛（这里是 App 发行版本，不是 Controller 内部版本）。上游列出的验证环境是 iOS 27.0.1/27.1 和 Surge 5.23.0；流程要求 Wi-Fi、已开启开发者模式和有效的 RemotePairing 配对材料，同机只运行一个相应的 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑和前提没核对时不据此执行，也不外推到其他系统、实现或全部服务端口。这是第三方报告的 App 版本条件，不是 `references/command-reference.md`〔分支 platform-compatibility〕 门槛表里的 Controller 协议门槛。
+
+只在这个场景下评估 `[IP Rewrite]` 的目标地址 `reflect`，以及该地址 `/32` 的 `tun-included-routes`；先核对目标地址、现有路由、模块、配对前提和上述版本条件。
+
+- 不自动改路由，不整段覆盖已有路由，也不照搬上游「无副作用」的保证。
+- TCP connect 成功不等于协议成功：任意端口都能瞬间连上却没有数据，可能是假通。要分别确认 TCP、Pair-Verify、RSD 会话和获准的只读业务返回。
+- 上游要求导入模块后重启 VPN。不为验证而自动导入、启停模块或重启 VPN；需要的动作先列出影响和回滚，按入口和既有授权执行。前提没满足就不能说验证通过。
+- 配对凭据或设备访问缺授权时停止这一步，不读凭据文件取密。
+
+来源与许可：OpenMinis/MinisSkills，MIT 精选改写；Copyright (c) 2026 OpenMinis；Copyright (c) 2026 OpenMinis contributors；本地许可决定与边界见本包 references/SOURCE.md〈第三方精选改写〉。完整许可随包见 ../LICENSE.openminis.txt、../LICENSE.openminis-ios-dev.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
+<!-- END diagnostics -->
+

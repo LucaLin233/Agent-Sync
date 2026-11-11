@@ -9,7 +9,7 @@ description: 本端记忆读写、更正、用户纠正、事故/复发、自验
 
 ## 资源与触发
 
-实际读写、整理或更正记忆，处理事故或错误复发、固化候选、疑似规则缺口，以及对它们做规划或审查之前，完整读取 `references/maintenance.md`。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时也先读它，再由它转到 `luno-platform/references/minis.md` 的注入资源。Minis 上第一次做记忆操作前，按其〈Minis 记忆读写入口〉选定入口。
+实际读写、整理或更正记忆，处理事故或错误复发、固化候选、疑似规则缺口，以及对它们做规划或审查之前，完整读取 `references/maintenance.md`〔分支 maintenance〕。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时也先读它，再由它转到 `luno-platform/references/minis.md`〔分支 minis〕 的注入资源。Minis 上第一次做记忆操作前，按其〈Minis 记忆读写入口〉选定入口。
 
 ## 检索与采用
 
