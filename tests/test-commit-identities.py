@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """tools/check-commit-identities.py 的离线回归（identity 组定向运行，不入 full）。
 
-真实 git 对象（hash-object 按字节构造，可造畸形身份与伪造签名头）、真实子进程与 gpg
+真实 git 对象（按字节构造并直接写入对象库，可造畸形身份与伪造签名头）与 gpg
 （测试内临时 ed25519 钥，非 web-flow）。真 web-flow 钥无法伪造，只在「验签结果」处打桩。
-无 gpg 时需要真实验签的用例跳过。所有子进程输出都断言不含夹具邮箱或任何 `@`。
+检查器多在进程内调用 main()，另留真实子进程用例守进程边界；同类矩阵串成一条链只跑一次。
+无 gpg 时需要真实验签的用例跳过。所有检查器输出都断言不含夹具邮箱或任何 `@`。
 身份多为合成值（example.invalid 保留域、`名@local` 本地地址），另含规则登记的两个外部身份；
 不依赖本机 git 身份与网络。
 """
 import contextlib
+import hashlib
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -60,6 +65,18 @@ def in_dir(path):
         yield
     finally:
         os.chdir(cwd)
+
+
+def call_tool(argv, cwd, env=None):
+    """进程内运行检查器 main(argv)：cwd、环境（env 给定时整份替换）与标准流同子进程口径。"""
+    out, err = io.StringIO(), io.StringIO()
+    with in_dir(cwd), mock.patch.dict(os.environ, env or {}, clear=env is not None), \
+            contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = T.main(argv)
+        except SystemExit as stop:
+            code = stop.code
+    return types.SimpleNamespace(returncode=code, stdout=out.getvalue(), stderr=err.getvalue())
 
 
 # ── 测试内临时钥环（整轮共用）──
@@ -141,14 +158,24 @@ class Repo:
     def __init__(self, template=None):
         self.dir = Path(tempfile.mkdtemp(prefix='ci-identity.'))
         self.rules = self.dir / 'rules.md'
-        if template:  # 复制已初始化的模板，省掉每例 git init／mktree
+        if template:  # 复制已初始化的模板，省掉每例 git init
             shutil.rmtree(str(self.dir))
             shutil.copytree(str(template.dir), str(self.dir))
             self.tree = template.tree
             return
-        self.git('init', '-q', '-b', 'main')
-        self.tree = self.git('mktree').stdout.strip().decode('ascii')
+        self.git('init', '-q', '-b', 'main', '--template=')
+        self.tree = self.write(b'tree', b'')
         self.rules.write_text(rule_text(), encoding='utf-8')
+
+    def write(self, kind, raw):
+        """松散对象直接落库，等价 `git hash-object -w`，省一次 git 进程。"""
+        data = b'%s %d\0' % (kind, len(raw)) + raw
+        sha = hashlib.sha1(data).hexdigest()
+        path = self.dir / '.git/objects' / sha[:2] / sha[2:]
+        if not path.exists():
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(zlib.compress(data))
+        return sha
 
     def git(self, *args, input=b''):
         proc = subprocess.run(('git',) + args, cwd=str(self.dir), input=input, capture_output=True)
@@ -169,22 +196,23 @@ class Repo:
         elif sign:
             home, faked = (gpg_home('valid')[0], None) if sign is True else sign
             raw += gpg_sign(head + b'\n' + body, home, faked)
-        return self.git('hash-object', '-t', 'commit', '-w', '--stdin',
-                        input=raw + b'\n' + body).stdout.strip().decode('ascii')
+        return self.write(b'commit', raw + b'\n' + body)
 
     def line(self, author=LUNO, committer=LUNO, **kw):
         """基线提交（表外身份，作 --base 不入范围）＋一个待检提交。"""
         base = self.commit(OTHER, OTHER)
         return base, self.commit(author, committer, parents=[base], **kw)
 
-    def run(self, base, head, rules=True, allow_empty=False, extra=(), env=None):
-        args = [sys.executable, '-B', str(TOOL), '--base', str(base), '--head', str(head)]
+    def run(self, base, head, rules=True, allow_empty=False, extra=(), env=None, process=False):
+        args = ['--base', str(base), '--head', str(head)]
         if rules:
             args += ['--rules', str(self.rules if rules is True else rules)]
         if allow_empty:
             args.append('--allow-empty')
-        return subprocess.run(args + list(extra), cwd=str(self.dir), capture_output=True,
-                              text=True, encoding='utf-8', timeout=120, env=env)
+        if not process:
+            return call_tool(args + list(extra), self.dir, env)
+        return subprocess.run([sys.executable, '-B', str(TOOL)] + args + list(extra), cwd=str(self.dir),
+                              capture_output=True, text=True, encoding='utf-8', timeout=120, env=env)
 
 
 class Base(unittest.TestCase):
@@ -202,6 +230,24 @@ class Base(unittest.TestCase):
         self.assertEqual(proc.returncode, rc, out)
         for needle in needles:
             self.assertIn(needle, out)
+
+    def batch(self, cases):
+        """[(标签, author, committer, message, rc, needles)] 串成一条链只跑一次检查器，每例只看
+        自己那个提交的输出行：rc=0 不得报行，rc=1 须报行且含全部 needles。"""
+        parent = base = self.repo.commit(OTHER, OTHER)
+        shas = []
+        for _label, author, committer, message, _rc, _needles in cases:
+            parent = self.repo.commit(author, committer, message, [parent])
+            shas.append(parent[:7])
+        bad = any(case[4] for case in cases)
+        proc = self.repo.run(base, parent)
+        self.verdict(proc, 1 if bad else 0, *(() if bad else ('通过',)))
+        for (label, _a, _c, _m, rc, needles), sha in zip(cases, shas):
+            with self.subTest(label):
+                lines = '\n'.join(x for x in proc.stdout.splitlines() if x.startswith(sha + ' '))
+                self.assertEqual(bool(rc), bool(lines), lines)
+                for needle in needles:
+                    self.assertIn(needle, lines)
 
     def check(self, sha, allow_squash=False, verified=None):
         """直接调用 check_commit；verified 给定时打桩验签结果 → (['字段 类别'…], 豁免种类)。"""
@@ -222,18 +268,13 @@ class Base(unittest.TestCase):
 class PositiveTest(Base):
     def test_known_identities(self):
         # 含 LENS 制稿、FORGE 代提交与两个外部身份
-        for author, committer in ((LUNO, LUNO), (FORGE, FORGE), (FORGE, LUNO), (LENS, FORGE),
-                                  (LIN, LIN), (CLAUDE, LENS)):
-            with self.subTest(author=author[0], committer=committer[0]):
-                base, head = self.repo.line(author, committer)
-                self.verdict(self.repo.run(base, head), 0, '通过')
+        self.batch([('%s/%s' % (a[0], c[0]), a, c, 'subject\n', 0, ())
+                    for a, c in ((LUNO, LUNO), (FORGE, FORGE), (FORGE, LUNO), (LENS, FORGE),
+                                 (LIN, LIN), (CLAUDE, LENS))])
 
     def test_coauthor_allowed(self):
-        for pair in (LUNO, LENS, LIN, CLAUDE):
-            with self.subTest(pair=pair[0]):
-                base, head = self.repo.line(
-                    FORGE, FORGE, message='subject\n\nCo-authored-by: %s <%s>\n' % pair)
-                self.verdict(self.repo.run(base, head), 0, '通过')
+        self.batch([(pair[0], FORGE, FORGE, 'subject\n\nCo-authored-by: %s <%s>\n' % pair, 0, ())
+                    for pair in (LUNO, LENS, LIN, CLAUDE)])
 
     def test_midbody_coauthor_not_parsed(self):
         # 同 git 口径：不在尾部 trailer 块里的同名行不参与解析
@@ -391,10 +432,8 @@ class NegativeIdentityTest(Base):
         cases += [((n, FORGE[1]), LUNO, 'author') for n in ('forge', 'Forge')]
         cases += [((n, LUNO[1]), FORGE, 'author') for n in ('luno', 'Luno')]
         cases += [((n, LENS[1]), FORGE, 'author') for n in ('lens', 'Lens', 'leNs')]
-        for author, committer, field in cases:
-            with self.subTest(author=author[0], committer=committer[0]):
-                base, head = self.repo.line(author, committer)
-                self.verdict(self.repo.run(base, head), 1, field, '身份不在署名表内')
+        self.batch([('%s/%s' % (a[0], c[0]), a, c, 'subject\n', 1, (field, '身份不在署名表内'))
+                    for a, c, field in cases])
 
     def test_replace_ref_cannot_launder(self):
         base = self.repo.commit(OTHER, OTHER)
@@ -417,29 +456,26 @@ class TrailerTest(Base):
     def test_trailers(self):
         L, X = '%s <%s>' % LUNO, '%s <%s>' % OTHER
         bad = ('Co-authored-by#1', '身份不在署名表内')
-        for label, trailers, rc, needles in (
+        self.batch([(label, FORGE, FORGE, 'subject\n\n' + trailers, rc, needles) for label, trailers, rc, needles in (
                 ('畸形值', 'Co-authored-by: FORGE\n', 1, ('Co-authored-by#1', '格式非')),
                 ('身份不在表内', 'Co-authored-by: LUNO <%s>\n' % OTHER[1], 1, bad),
                 ('普通提交与 Author 相同', 'Co-authored-by: FORGE <%s>\n' % FORGE[1], 1, ('与 Author 相同',)),
-                ('同一身份重复只算一次', 'Co-authored-by: %s\nCo-authored-by: %s\n' % (L, L), 0, ('通过',)),
-                ('无空格分隔', 'Co-authored-by:%s\n' % L, 0, ('通过',)),
+                ('同一身份重复只算一次', 'Co-authored-by: %s\nCo-authored-by: %s\n' % (L, L), 0, ()),
+                ('无空格分隔', 'Co-authored-by:%s\n' % L, 0, ()),
                 ('无空格分隔·非法', 'Co-authored-by:%s\n' % X, 1, bad),
-                ('Tab 分隔', 'Co-authored-by:\t%s\n' % L, 0, ('通过',)),
+                ('Tab 分隔', 'Co-authored-by:\t%s\n' % L, 0, ()),
                 ('Tab 分隔·非法', 'Co-authored-by:\t%s\n' % X, 1, bad),
-                ('混合 trailer', 'Co-authored-by: %s\nSigned-off-by: %s\nAcked-by: %s\n' % (L, L, X), 0, ('通过',)),
+                ('混合 trailer', 'Co-authored-by: %s\nSigned-off-by: %s\nAcked-by: %s\n' % (L, L, X), 0, ()),
                 ('混合 trailer·非法', 'Signed-off-by: %s\nAcked-by: %s\nCo-authored-by: %s\n' % (L, X, X), 1, bad),
-                ('续行并入值后判违规', 'Co-authored-by: %s\n 继续\n' % L, 1, ('Co-authored-by#1',))):
-            with self.subTest(label):
-                base, head = self.repo.line(FORGE, FORGE, message='subject\n\n' + trailers)
-                self.verdict(self.repo.run(base, head), rc, *needles)
+                ('续行并入值后判违规', 'Co-authored-by: %s\n 继续\n' % L, 1, ('Co-authored-by#1',)))])
 
 
 class RulesTest(Base):
-    def run_rules(self, text=None, path=True):
+    def run_rules(self, text=None, path=True, process=False):
         if text is not None:
             self.repo.rules.write_text(text, encoding='utf-8')
         base, head = self.repo.line()
-        return self.repo.run(base, head, rules=path)
+        return self.repo.run(base, head, rules=path, process=process)
 
     def test_unreadable_or_missing_section(self):
         self.verdict(self.run_rules(path=self.repo.dir / ('missing.' + OTHER[1])), 2, '规则文件不可读')
@@ -471,9 +507,9 @@ class RulesTest(Base):
             with self.subTest(**kw):
                 self.verdict(self.run_rules(rule_text(**kw)), 2, '形态非法')
 
-    def test_rule_change_takes_effect(self):
-        self.verdict(self.run_rules(), 0, '通过')
-        self.verdict(self.run_rules(rule_text(luno=OTHER[1])), 1, 'author')
+    def test_rule_change_takes_effect(self):  # 真实子进程：守住 0／1 退出码与 stdout 的进程边界
+        self.verdict(self.run_rules(process=True), 0, '通过')
+        self.verdict(self.run_rules(rule_text(luno=OTHER[1]), process=True), 1, 'author')
 
 
 class EnvironmentTest(Base):
@@ -488,7 +524,7 @@ class EnvironmentTest(Base):
         self.verdict(self.repo.run(base, base), 2, '空范围')
         self.verdict(self.repo.run(base, base, allow_empty=True), 0, '空范围')
 
-    def test_bad_arguments_not_echoed(self):
+    def test_bad_arguments_not_echoed(self):  # 真实子进程：守住参数错误 rc=2 与 stderr 的进程边界
         for argv in (['--bogus', OTHER[1]], ['--base', 'HEAD']):
             with self.subTest(argv=argv):
                 proc = subprocess.run([sys.executable, '-B', str(TOOL)] + argv, cwd=str(self.repo.dir),
@@ -502,9 +538,7 @@ class EnvironmentTest(Base):
         self.addCleanup(shutil.rmtree, str(dest.parent), True)
         subprocess.run(('git', 'clone', '-q', '--depth', '1', 'file://' + str(self.repo.dir),
                         str(dest)), capture_output=True, check=True)
-        proc = subprocess.run([sys.executable, '-B', str(TOOL), '--base', base, '--head', head,
-                               '--rules', str(self.repo.rules)], cwd=str(dest),
-                              capture_output=True, text=True, encoding='utf-8', timeout=120)
+        proc = call_tool(['--base', base, '--head', head, '--rules', str(self.repo.rules)], dest)
         self.verdict(proc, 2, '浅克隆')
 
 
