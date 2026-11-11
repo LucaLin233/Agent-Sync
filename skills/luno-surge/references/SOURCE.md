@@ -30,7 +30,7 @@
 
 取源须另获下载及独占证据根写权；无授权就不下载。核 Info.plist 的 bundle id `com.nssurge.surge-mac`、版本和 build，再核文件哈希、差分及发布说明；存在签名目录不等于验签成功。官方包只在获准的私人维护证据范围查阅，原件和 logo 不进入候选发布目录、公开 Git、patch 或托管包。Mac 原生直接从用户自己的已安装应用包使用官方 Skill，与本项目的再分发方案分开。
 
-维护者只人工更新受影响的自编事实与流程，保留本端 iOS、安全及实现差异。更新不自动安装、部署、重启或清空临时规则。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项，不能自动批准新哈希。使用 `python3 -B scripts/update_upstream.py inspect --source <已授权的绝对目录> --version <已核版本及build>` 可只读计算五份来源文件哈希，并与 manifest 末项基线比较。脚本不联网、不暂存、不导入、不输出原文；source 必须是无符号链接的绝对路径，缺文件就停。source 的授权和官方包身份由调用方事前核实，脚本明确报告未认证来源、未验证运行。新的未知哈希只作为待审差异，不能批准准入。历史分类器 `scripts/adapt_upstream_reference.py <已授权参考文件>` 仍可只读识别已知 raw/adapted 哈希；unknown 非零退出，分类结果不授予导入或分发权，也不生成或归一正文。`scripts/sync_upstream.sh` 仅转发该只读入口，不再有默认 prepare；旧 prepare/apply 一律在读文件或建事务前失败。
+维护者只人工更新受影响的自编事实与流程，保留本端 iOS、安全及实现差异。更新不自动安装、部署、重启或清空临时规则。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项，不能自动批准新哈希。`python3 -B scripts/update_upstream.py inspect --source <已授权目录> --version <已核版本及build>` 只读计算五份来源文件的哈希，与 manifest 末项基线比较；不联网、不写入、不导入、不输出原文，缺文件报 `E_SOURCE_READ`。它不认证来源，source 的授权和官方包身份由调用方事前核实。有变化的文件只是待审差异：人工核对并更新自编资料后，再把新 build 追加进 manifest，不能凭哈希批准准入。旧的 prepare/apply 导入流程已移除。
 
 ## 打包、投递及恢复
 

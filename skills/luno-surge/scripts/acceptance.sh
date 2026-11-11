@@ -28,8 +28,6 @@ from pathlib import Path
 root=Path(sys.argv[1]).parent
 for p in (root/'scripts').glob('*.py'): compile(p.read_text(),str(p),'exec')
 for p in root.rglob('*.md'):
-    # Official snapshots use their original upstream directory layout.
-    if p.name.startswith('upstream-'): continue
     for link in re.findall(r'\]\(([^)]+)\)',p.read_text()):
         if '://' in link or link.startswith('#'): continue
         target=link.split('#')[0]
@@ -69,13 +67,6 @@ TMP="$(mktemp -d /tmp/surge-cli-accept.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
 command -v "$CLI" >/dev/null || fail "surge-cli is not installed"
-python3 - "$SELF_DIR/surge_cli.py" "$SELF_DIR/surge_ios.py" "$SELF_DIR/adapt_upstream_reference.py" <<'PY'
-import sys
-for name in sys.argv[1:]:
-    source=open(name,encoding="utf-8").read()
-    compile(source,name,"exec")
-PY
-pass "Python syntax"
 
 "$CLI" --raw version > "$TMP/version.json"; json_check "$TMP/version.json" "version"
 if [ "$MODE" = --network ]; then
