@@ -48,6 +48,7 @@ git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths | s
 ```
 
 - `select-paths` 从 stdin 读 NUL 分隔的变更路径，输出 selector JSON；`select` 读这个 JSON，合并去重后运行。路径到套件的映射在 `tests/test_paths.py`，`run-tests.sh` 头部的说明块必须和 `render-paths` 的输出一致。删除的文件不参与选路，现存但未登记的测试路径会被拒绝。
+- `surge` 组分两个入口：`test-surge-package.py` 只核包态（登记资源、自编资料、真包打包与离线验收），Surge 文档、资源或登记改动只跑它；改 `skills/luno-surge/scripts/` 时另跑脚本行为 `test-surge-scripts.py`。
 - 署名检查的测试（`identity` 组）不进 `full`，改动署名检查器、它的测试或〈Git 提交署名〉规则时由选路触发；没有 gpg 的机器上，涉及真实签名的用例会跳过。
 - 只改正文、没有命中专项时只跑 smoke，不能把它当作各专项都已通过。结构通过不证明行为没有弱化；改加载边或资源边要在同一批更新 `tools/rule-claims.tsv`。
 - 测试在白名单环境里运行：独占的 HOME 和 TMPDIR，调用方的其他环境变量不进入，stdin 固定为 `/dev/null`。

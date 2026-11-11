@@ -4,7 +4,8 @@ scripts/*。多数用例在本进程内执行入口（见 run_entry），每个�
 
 覆盖：输出脱敏（_privacy 语料＋各入口全部输出路径）、3xx 不外泄 X-Key、出网门禁、安全分节
 写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、只读来源检查及旧导入入口拒绝、
-专用打包器（拒绝完整官方文件）、安装与验收档、自编资源清单。来源检查不需要官方原件。
+专用打包器（拒绝完整官方文件）、安装与验收档。来源检查不需要官方原件。真包与登记等包态判据在
+test-surge-package.py。
 """
 import contextlib
 import errno
@@ -42,7 +43,6 @@ UPDATE = SCRIPTS / 'update_upstream.py'
 PACKER = SCRIPTS / 'package_release.py'
 ADAPTER_PATH = SCRIPTS / 'adapt_upstream_reference.py'
 COMMAND_REFERENCE = SKILL / 'references/command-reference.md'
-MANIFEST = SKILL / 'references/upstream-manifest.json'
 API_KEY = 'test'                      # 哑值
 
 
@@ -680,8 +680,7 @@ class UpstreamAdapterTest(unittest.TestCase):
             self.assertEqual('adapted', ADAPTER.classify(digest))
         for digest in ADAPTER.REVIEWED_SHA256:
             self.assertEqual('raw', ADAPTER.classify(digest))
-        overlay = COMMAND_REFERENCE.read_bytes()       # 活动覆盖层不得被当作原件或历史成品
-        self.assertEqual('unknown', ADAPTER.classify(hashlib.sha256(overlay).hexdigest()))
+        overlay = COMMAND_REFERENCE.read_bytes()       # 未登记内容（分类见包态测试）
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'overlay'
             path.write_bytes(overlay)
@@ -1074,20 +1073,6 @@ class PackerTest(unittest.TestCase):
             self.assertEqual((1, 'Output ZIP must be outside the Skill directory\n'), (r.returncode, r.stderr))
             self.assertFalse(inside.exists())
 
-    def test_real_skill_package_is_self_contained(self):
-        with tempfile.TemporaryDirectory(prefix='surge-zip-') as tmp:
-            out = Path(tmp) / 'release.zip'
-            result = self.pack(PACKER, out)
-            self.assertEqual(0, result.returncode, result.stderr)
-            registry = json.loads((ROOT / 'tools/sync-targets.json').read_text())
-            (obj,) = [o for o in registry['objects'] if o['id'] == 'luno-surge']
-            expected = sorted(['SKILL.md'] + [str(Path(r).relative_to('skills/luno-surge'))
-                                            for r in obj['resources']])
-            with zipfile.ZipFile(out) as archive:
-                self.assertEqual(expected, archive.namelist())
-                for name in expected:
-                    self.assertEqual((SKILL / name).read_bytes(), archive.read(name))
-
     def test_whole_official_files_and_logo_are_rejected(self):
         for name in ('references/upstream-SKILL.md', 'references/upstream-command-reference.md', 'assets/logo.png'):
             with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='surge-no-official-') as tmp:
@@ -1169,14 +1154,15 @@ class PackerTest(unittest.TestCase):
 
 # ── 安装与验收档 ─────────────────────────────────────────────────────────────
 class InstallTest(unittest.TestCase):
-    """整包复制到临时目录，PATH 只含夹具 bin，SURGE_CLI_BIN／SURGE_CLI_LINK 指向隔离落点。"""
+    """scripts/ 复制到临时包目录（真包文档链接由包态测试核对），PATH 只含夹具 bin，
+    SURGE_CLI_BIN／SURGE_CLI_LINK 指向隔离落点。"""
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.tmp = Path(temp.name)
         self.pkg = self.tmp / 'pkg'
-        shutil.copytree(str(SKILL), str(self.pkg))
+        shutil.copytree(str(SCRIPTS), str(self.pkg / 'scripts'))
         self.cli = self.pkg / 'scripts/surge_cli.py'
         self.bin = self.tmp / 'bin'
         self.bin.mkdir()
@@ -1734,25 +1720,6 @@ class SectionWriteTest(unittest.TestCase):
         truncated = self.server(truncate_post_response=True)    # 结论以写后 GET 为准
         self.assertEqual(0, self.replace(truncated, backups).returncode)
         self.assertEqual((1, SEC_CONTENT), (len(truncated.posts()), truncated.content))
-
-
-# ── 官方原件取件状态与登记 ───────────────────────────────────────────────────
-class AuthoredResourceStateTest(unittest.TestCase):
-    def test_registry_resources_are_present_without_official_exceptions(self):
-        doc = json.loads((ROOT / 'tools/sync-targets.json').read_text())
-        self.assertFalse(any('officialPackageResources' in o for o in doc['objects']))
-        (obj,) = [o for o in doc['objects'] if o['id'] == 'luno-surge']
-        self.assertIn('skills/luno-surge/references/plugin-authoring.md', obj['resources'])
-        for name in obj['resources']:
-            self.assertTrue((ROOT / name).is_file(), name)
-        raw = json.loads(MANIFEST.read_text())['raw_sha256']
-        for source, own in (('references/command-reference.md', COMMAND_REFERENCE),
-                            ('references/plugin-authoring.md', SKILL / 'references/plugin-authoring.md'),
-                            ('agents/openai.yaml', SKILL / 'agents/openai.yaml')):
-            self.assertNotEqual(raw[source], hashlib.sha256(own.read_bytes()).hexdigest())
-        self.assertFalse((SKILL / 'references/upstream-SKILL.md').exists())
-        self.assertFalse((SKILL / 'references/upstream-command-reference.md').exists())
-        self.assertFalse((SKILL / 'assets/logo.png').exists())
 
 
 if __name__ == '__main__':
