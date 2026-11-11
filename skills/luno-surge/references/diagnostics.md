@@ -18,7 +18,7 @@ surge-cli --raw geoip 1.1.1.1
 
 `rule match` 快速看命中的规则和最终策略；`rule explain` 给出完整的策略组决策路径，回答「为什么这样走」时优先用它。
 
-需要改变路由才能验证、并且用户授权时，优先用临时规则，不改 Profile；临时规则立即生效，优先于 Profile 规则。先列出已有的规则，记下本次新增的项：
+需要改变路由才能验证、并且用户授权时，优先用临时规则，不改 Profile。先列出已有的规则，记下本次新增的项：
 
 ```sh
 surge-cli rule temp list
@@ -27,7 +27,7 @@ surge-cli rule temp add "DOMAIN-SUFFIX,example.com,Proxy"
 surge-cli rule temp list
 ```
 
-`rule temp flush` 会清空全部临时规则，禁止当作本次测试的常规清理。只移除本次新增的规则；具体的标识和 remove 参数先核对 [命令参考](command-reference.md) 和实际返回，不能猜索引，也不能清掉用户已有的规则。
+清理按入口 §3，只移除本次新增的规则；具体的标识和 remove 参数先核对 [命令参考](command-reference.md) 和实际返回。
 
 ## 性能与隧道
 

@@ -74,7 +74,7 @@ HELP = {
 "script":"Usage:\n  script list\n  script run <cron-name>\n  script evaluate <script-js-path> [mock-script-type] [timeout]",
 "benchmark":"Usage: benchmark <encryption [data-size-mib] | rule-matching>",
 "vmnet":"Usage: vmnet <status|arp|ndp|ra>\n\nInspect the VMNET virtual interface used by Enhanced/Gateway Mode. Available on macOS only.\n\n  status  Interface configuration, addresses, MTU, and table sizes\n  arp     IPv4 neighbors learned from Gateway Mode clients\n  ndp     IPv6 neighbor table\n  ra      IPv6 Router Advertisement takeover state",
-"reload":"Usage: reload\n\nApply changed profile sections whenever possible while preserving unaffected runtime state.",
+"reload":"Usage: reload\n\nApply changed profile sections whenever possible while preserving unaffected runtime state.\nWhen a change requires it, Surge falls back to a full engine restart automatically.",
 "restart-engine":"Usage: restart-engine\n\nCompletely restart the Surge engine, close active connections, and clear caches and temporary rules.",
 "kill":"Usage: kill <connection-id>",
 "stop":"Usage: stop\n\nShut down Surge.",

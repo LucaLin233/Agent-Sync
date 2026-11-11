@@ -12,7 +12,7 @@
 | `geoip`、性能/规则使用/虚拟 IP 的 dump、`benchmark rule-matching` | 22 | 共享 | |
 | `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
 | `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
-| `restart-engine` | 24 | 共享 | 总是关闭连接、清除缓存和临时规则；`reload` 必要时亦会自动完整重启，无法排除时按入口再次单独确认 |
+| `restart-engine` | 24 | 共享 | 影响和再确认按入口 §3 |
 | logbook 的大小截断语义 | 27 | 共享 | 下面各行依据官方 Mac 6.11.0 命令参考（12680；37 起为 12710） |
 | `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
 | `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |

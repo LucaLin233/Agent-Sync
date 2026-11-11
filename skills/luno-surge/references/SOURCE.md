@@ -18,7 +18,7 @@
 
 ## 安装和验收
 
-`scripts/install.sh` 仅建立本包 `scripts/surge_cli.py` 到安装点的链接；安装是包外写入，须有目标授权。随后使用 `scripts/acceptance.sh --installed` 核链接实际指向；仅包内检查不证明 PATH 安装正确。
+`scripts/install.sh` 先把本包 `scripts/` 下的 `*.py`、`*.sh` 设为 755，再建立 `scripts/surge_cli.py` 到安装点的链接；安装是包外写入，须有目标授权。随后使用 `scripts/acceptance.sh --installed` 核链接实际指向；仅包内检查不证明 PATH 安装正确。
 
 `--offline` 核语法和相对链接，不证明运行行为；`--controller` 会连接指定实例；`--network` 还会上传合成无秘密 Profile 并产生 DNS 请求。联机档有临时目录和输出写入，须分别满足工作根、清理、实例、网络和上传授权，未满足不运行。临时目录须按总控在单条命令内独占创建、退出清理并逐路径核验；脚本 trap 不保证 SIGKILL 后清理，未核实残留不得声称已清理。缺失变量只报告，不输出值、不换来源。当前设备未验证的能力如实标未实测。
 
@@ -26,7 +26,7 @@
 
 官方 Agent Skill 随 Surge Mac 应用包分发，不以同名第三方 GitHub 仓库代替。官方手册 `https://manual.nssurge.com/tools/cli.html` 说明应用包 Skills 目录；Mac 官方 beta appcast `https://nssurge.com/mac/latest/appcast-signed-beta.xml` 可发现版本，它不是 iOS 能力证据。
 
-当前来源基线是 Surge Mac 6.11.0（12710）：2026-11-11 从本机已安装的应用包只读取得逐文件哈希，Info.plist 的 bundle id、版本和 build 已核，没有对应的下载包哈希。上一基线 12680 于 2026-11-03 取自官方直链 `https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`，包 sha256 为 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。逐文件来源哈希按 build 记在 `references/upstream-manifest.json` 的 builds 里：只追加、不删旧条目，末项是当前基线。它只是取证记录，不要求把对应原文装入运行包，也不是当前实测状态。raw_sha256 只记真正官方原件，不把自编正文、覆盖层或适配结果登记成官方原文；包身份、逐文件证据及运行验证状态不得互相冒充。
+当前来源基线是 Surge Mac 6.11.0（12710）：2026-11-11 从本机已安装的应用包只读取得逐文件哈希，Info.plist 的 bundle id、版本和 build 已核，没有对应的下载包哈希。上一基线 12680 于 2026-11-03 取自官方直链 `https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`，包 sha256 为 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。逐文件来源哈希按 build 记在 `references/upstream-manifest.json` 的 builds 里：只追加、不删旧条目，末项是当前基线。它只是取证记录，不要求把对应原文装入运行包，也不是当前实测状态。raw_sha256 只记真正官方原件，不把自编正文登记成官方原文；包身份、逐文件证据及运行验证状态不得互相冒充。
 
 取源须另获下载及独占证据根写权；无授权就不下载。核 Info.plist 的 bundle id `com.nssurge.surge-mac`、版本和 build，再核文件哈希、差分及发布说明；存在签名目录不等于验签成功。官方包只在获准的私人维护证据范围查阅，原件和 logo 不进入候选发布目录、公开 Git、patch 或托管包。Mac 原生直接从用户自己的已安装应用包使用官方 Skill，与本项目的再分发方案分开。
 
@@ -46,4 +46,4 @@ CoreDevice/RSD 同机回环内容精选改写自 `OpenMinis/MinisSkills@164395f1
 
 ## 本地帮助证据
 
-2026-11-10 已核 Minis 当前安装的 Python 桥与仓库脚本字节相同：SHA-256 `4e58a2411a6af6ef271a1f68fcb749cfd0a9daee5f29e8a520fe2e3e1fb20732`。在清空凭据环境并禁止写入/网络的审计下，--help、help 和全部静态 HELP 键均可本地读取；plugin、capture-filter 的 help 返回主帮助而非目标契约。该结果不证明远端实例支持任何命令，升级后须重核。只保留帮助未覆盖的领域事实、安全风险、平台约束及复杂语义；不复制可靠帮助已有的参数说明。
+仓库桥脚本 SHA-256 为 `0ff3ef70080190856e435f57957afa14a995dbed6ffffbe91ddf99729b9bdd72`。2026-11-10 核过 Minis 当时安装的上一版（`4e58a2411a6af6ef271a1f68fcb749cfd0a9daee5f29e8a520fe2e3e1fb20732`，与当前仓库版只差 reload 帮助补了自动完整重启一句）：在清空凭据环境并禁止写入/网络的审计下，--help、help 和全部静态 HELP 键均可本地读取；plugin、capture-filter 的 help 返回主帮助而非目标契约。该结果不证明远端实例支持任何命令；部署后核端上字节等于上述哈希，升级后须重核。只保留帮助未覆盖的领域事实、安全风险、平台约束及复杂语义；不复制可靠帮助已有的参数说明。

@@ -4,9 +4,9 @@
 
 ## 调用与证据
 
-基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。2026-11-10 已在清空凭据环境、禁止写入/网络的审计下核过当前安装桥帮助；该证据只对 SOURCE 所述桥版本有效，升级须重核。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
+基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。帮助证据的版本和范围见 `references/SOURCE.md`〈本地帮助证据〉。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
 
-本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识；reload 帮助未揭示自动完整重启风险，必须读本参考和入口。plugin、capture-filter 帮助在已核桥上回落主帮助，没有该族的实际契约。
+本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识。plugin、capture-filter 帮助在已核桥上回落主帮助，capture-session 在桥里没有帮助条目，都没有该族的实际契约。
 
 本端 default 同机不授予远程连接权；IPv6 地址使用方括号加端口，参数含 CR/LF 会在本地拒绝。凭据只用入口允许的变量或 stdin，不采纳官方客户端的密码文件、其他凭据变量和交互提示。
 
@@ -77,9 +77,9 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |特性|共享名及基本用法查 help feature；Mac 才有 system-proxy/enhanced-mode，后两者等待实际切换，未完成报错。启 MITM/Rewrite/脚本/抓包先说明隐私影响；开关抓包会断开全部现有连接，按入口 §3 再确认。|
 |捕获范围|协议≥36：`capture-filter list`、`get <in-memory|on-disk>`、`set <scope> <option=value>...`；in-memory 管未开 HTTP capture 时的近期记录，on-disk 管 capture 会话。选项顺序应用，任一无效则不修改。http-only/hide-crash-reporter/hide-apple/hide-udp 为 on/off，crash reporter 默认隐藏；type=off/with-keywords/without-keywords/pattern；keywords=a,b,... 替换（空清除），add-keyword/remove-keyword 单项增删，enable-keyword/disable-keyword 保留但切换。含逗号单项用 add-keyword。pattern 的 *、? 与前缀 - 排除主机语义需保留。list 返回 active 和 filters，get/set 返回 scope、active 布尔与 filter；filter 字段为 httpOnly、hideCrashReporterRequests、hideAppleRequests、hideUDP、type、keywords、disabledKeywords。隐藏项、http-only 和关键词过滤共同决定记录范围，不改变网络是否通。|
 |模块/资源|语法查 help module；改变模块状态会安排 profile reload；`external-resource update <key|all>` 会更新资源，all 不作为默认；Mac 的 `managed-profile update` 强制检查活动托管配置，等待下载/校验/替换，变化才安排 reload，返回 updated/unchanged。|
-|配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先应用变化，但必要时会自动完整重启；无法保证保留连接、缓存和临时规则。若本次直接或间接 reload 无法排除完整重启，即使整批获准仍须再次单独确认这些影响，未准不执行。`restart-engine` 总是完整重启并清连接、缓存、临时规则；`stop` 仅用户明确要求时执行。|
-|临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。规则立即生效、先于 Profile、引擎停止后丢失。先列已有项，只按实际规则标识删除本次新增项，不猜索引；flush 不是常规清理。|
-|连接与封禁|语法查 help kill；它断连接；批量断开再确认。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
+|配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先差量应用；它与 `restart-engine`、`stop` 的影响和再确认按入口 §3。|
+|临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。生效范围和清理限制按入口 §3；先列已有项，按实际规则标识删除。|
+|连接与封禁|语法查 help kill；它断连接，批量断开按入口 §3。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
 |Mac 设备/升级|`set-dhcp-device <mac> <type> [value]`：takeover 与 disable-udp-fast-path 接 0/1；address 接 IPv4 或空；name/icon 接名字或空。`remove-device-record <identifier...>` 删除记录；`reconnect-device <mac>` 重连 AP 客户端；`unattended-upgrade` 升级；均不套到 iOS，升级/断网/删除不因在目录出现而获准。|
 
 分节读取/编辑/恢复先完整读 `references/http-api.md` 和 `references/http-sections.md`。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
@@ -90,7 +90,7 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 
 Mac 插件在线命令（协议≥24）：`plugin list`、`info <id>`、`parameters <id>`、`load-unpacked <directory>`、`configure <id> <key=value>...`、`enable|disable <id>`、`select <type> <id|none>`、`uninstall <id>`。list 的 plugins/单对象可含 id/name/version/type/state/source/parameters/values；state=unconfigured/enabled/disabled/error，source=builtin/url/unpacked，values 可能含秘密，先限制读取。configure 成功后启用，支持时运行 system.validate；enable 也选择为该类型活动项；builtin 只能 disable。load-unpacked 重读 manifest，schema 不兼容可能清配置；uninstall 可丢持久数据。`plugin install <manifest-url>` 在历史版本尚未开放，不靠透明转发假定可用。完整自编开发/事件/限制先读 `references/plugin-authoring.md`。
 
-`plugin validate <directory>`、`plugin pack <directory> [asset-url]` 和 `lsp [--stdio]` 是官方 Mac 本地能力，本桥不实现，不能发 Controller。pack 的 ZIP 不含 manifest，另产带 asset.sha256 的托管 manifest；构建不自动授权上传/发布。官方 LSP 是编辑器长驻服务而非一次校验，历史支持 surge/surge-module/surge-ruleset、全量文本同步与诊断，配套 VS Code 扩展需 Mac 6.10.0+；本端不提供该编辑器离线能力。`--check <file>` 在本桥是向官方 HTTPS 服务上传，不是 Mac 本地解析；先告知，禁止默认上传活动 Profile，只按授权用无秘密副本。
+`plugin validate <directory>`、`plugin pack <directory> [asset-url]` 和 `lsp [--stdio]` 是官方 Mac 本地能力，本桥不实现，不能发 Controller。pack 的 ZIP 不含 manifest，另产带 asset.sha256 的托管 manifest；构建不自动授权上传/发布。官方 LSP 是编辑器长驻服务而非一次校验，历史支持 surge/surge-module/surge-ruleset、全量文本同步与诊断，配套 VS Code 扩展需 Mac 6.10.0+；本端不提供该编辑器离线能力。`--check` 的上传风险按入口 §3。
 
 ## 环境 key-path：类型、合并与回读
 
