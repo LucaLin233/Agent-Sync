@@ -278,7 +278,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_i1kVTvhDPR0j",
+          "id": "skl_YZMjnPkCJWSs",
           "fields": "content,name,description"
         }
       }
@@ -322,7 +322,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_4XM4SEKbuGzC",
+          "id": "skl_Pt6WMTLPKKgy",
           "fields": "content,name,description",
           "key": "surge-ca269bdf3861.zip"
         }
