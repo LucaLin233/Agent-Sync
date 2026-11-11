@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""luno-surge 脚本离线回归：只连 127.0.0.1 夹具、用哑凭据，经真实子进程入口执行 scripts/*。
+"""luno-surge 脚本离线回归：只连 127.0.0.1 夹具、用哑凭据，按 `python3 脚本 参数` 的入口边界执行
+scripts/*。多数用例在本进程内执行入口（见 run_entry），每个入口脚本至少保留一个真实子进程用例。
 
 覆盖：输出脱敏（_privacy 语料＋各入口全部输出路径）、3xx 不外泄 X-Key、出网门禁、安全分节
 写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、只读来源检查及旧导入入口拒绝、
@@ -12,7 +13,9 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 import shutil
+import signal
 import socketserver
 import ssl
 import stat
@@ -20,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 import types
 import unittest
 import urllib.request
@@ -65,20 +69,71 @@ def offline_env(base=None, api_key=API_KEY):
     return env
 
 
-def run_script(script, args, base=None, stdin=None):
-    return subprocess.run([sys.executable, str(script), *args], env=offline_env(base),
-                          input=stdin, capture_output=True, text=True, timeout=60)
+def run_entry(script, args, env, stdin=b'', text=True, process=False):
+    """等价于 `python3 script args`（给定环境与 stdin），返回 returncode／stdout／stderr。
+
+    默认在本进程内执行（iSH 上每起一个解释器都很贵）：替换 argv、环境、标准流（含 .buffer）、
+    sys.path[0] 与 SIGPIPE 处置，结束后清掉脚本目录的同级模块（下次重新导入，导入期读环境仍真实）；
+    SystemExit 与未捕获异常按解释器口径折算退出码。process=True 起真实子进程。
+    """
+    data = stdin.encode('utf-8') if isinstance(stdin, str) else stdin
+    if process:
+        done = subprocess.run([sys.executable, str(script), *map(str, args)], env=env, input=data,
+                              capture_output=True, timeout=90)
+        code, out, err = done.returncode, done.stdout, done.stderr
+    else:
+        code, out, err = _run_in_process(str(script), [str(a) for a in args], env, data)
+    if text:
+        out, err = out.decode('utf-8'), err.decode('utf-8')
+    return types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
 
 
-def run_cli(args, remote=None, stdin=None):
+def _run_in_process(script, args, env, data):
+    home = os.path.dirname(os.path.realpath(script))      # 解释器按解析后的脚本目录设 sys.path[0]
+    out, err = io.BytesIO(), io.BytesIO()
+    streams = (io.TextIOWrapper(io.BytesIO(data), encoding='utf-8'),
+               io.TextIOWrapper(out, encoding='utf-8', write_through=True),
+               io.TextIOWrapper(err, encoding='utf-8', errors='backslashreplace', write_through=True))
+    saved = sys.argv, sys.path[:], sys.stdin, sys.stdout, sys.stderr, signal.getsignal(signal.SIGPIPE)
+    before = set(sys.modules)
+    sys.argv, sys.path[:0] = [script, *args], [home]
+    sys.stdin, sys.stdout, sys.stderr = streams
+    try:
+        with mock.patch.dict(os.environ, env, clear=True):
+            runpy.run_path(script, run_name='__main__')
+        code = 0
+    except SystemExit as stop:
+        code = stop.code
+        if code is None:
+            code = 0
+        elif not isinstance(code, int):
+            print(code, file=sys.stderr)
+            code = 1
+    except Exception:
+        traceback.print_exc()
+        code = 1
+    finally:
+        sys.argv, sys.path[:], sys.stdin, sys.stdout, sys.stderr = saved[:5]
+        signal.signal(signal.SIGPIPE, saved[5])
+        for name in set(sys.modules) - before:
+            path = getattr(sys.modules[name], '__file__', None)
+            if path and os.path.dirname(os.path.realpath(path)) == home:
+                del sys.modules[name]
+    return code, out.getvalue(), err.getvalue()
+
+
+def run_script(script, args, base=None, stdin=b'', process=False):
+    return run_entry(script, args, offline_env(base), stdin, process=process)
+
+
+def run_cli(args, remote=None, stdin=b'', process=False):
     if remote is not None:
         args = [*args, '--remote', remote]
-    return subprocess.run([sys.executable, str(SURGE_CLI), *args], env=offline_env(),
-                          input=stdin, capture_output=True, text=True, timeout=60)
+    return run_entry(SURGE_CLI, args, offline_env(), stdin, process=process)
 
 
 def serve(server):
-    thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.05},
+    thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01},
                               daemon=True)
     thread.start()
 
@@ -434,7 +489,7 @@ class HttpEntryTest(unittest.TestCase):
                 sink = self.fixture(lambda: (302, {'Location': target.base + '/v1/leaked'}, b''))
                 if script == POLICY_DESCRIPTOR:
                     args = ['--api-base', sink.base] + args
-                r = run_script(script, args, base=sink.base, stdin=PROBE)
+                r = run_script(script, args, base=sink.base, stdin=PROBE, process=True)  # 进程边界
                 self.assertNotEqual(0, r.returncode)
                 self.assertIn(expect, r.stdout + r.stderr)
                 self.assertEqual([API_KEY], sink.keys())
@@ -590,7 +645,7 @@ class SurgeCliTest(unittest.TestCase):
                 self.assertIn('Failed:', stderr.getvalue())
 
     def test_check_requires_a_readable_profile(self):
-        r = run_cli(['--check', '/nonexistent/synthetic-profile.conf'])
+        r = run_cli(['--check', '/nonexistent/synthetic-profile.conf'], process=True)  # 进程边界
         self.assertEqual((2, ''), (r.returncode, r.stdout))
         self.assertIn('Cannot read profile file', r.stderr)
 
@@ -922,10 +977,8 @@ class PackerTest(unittest.TestCase):
             key: hashlib.sha256(value).hexdigest() for key, value in payloads.items()}}))
         return manifest, payloads
 
-    def pack(self, script, out, driver=None):
-        argv = [str(script), str(out)] if driver is None else ['-c', driver, str(script), str(out)]
-        return subprocess.run([sys.executable, '-B', *argv], env=offline_env(),
-                              capture_output=True, text=True, timeout=60)
+    def pack(self, script, out, process=False):
+        return run_entry(script, [out], offline_env(), process=process)
 
     def test_collect_filters_and_refuses_unsafe_entries(self):
         with tempfile.TemporaryDirectory(prefix='surge-pack-') as tmp:
@@ -995,18 +1048,15 @@ class PackerTest(unittest.TestCase):
             skill, script, _module = self.isolated(tmp)
             out = Path(tmp) / 'release.zip'
             out.write_bytes(b'OLD-ARTIFACT')
-            denied = ('import pathlib, runpy, sys\n'
-                      'def deny(self, target):\n'
-                      '    raise PermissionError("synthetic-replace-denied")\n'
-                      'pathlib.Path.replace = deny\n'
-                      'sys.argv = sys.argv[1:]\n'
-                      'runpy.run_path(sys.argv[0], run_name="__main__")\n')
-            r = self.pack(script, out, denied)
+            def deny(self, target):
+                raise PermissionError('synthetic-replace-denied')
+            with mock.patch.object(Path, 'replace', deny):
+                r = self.pack(script, out)
             self.assertNotEqual(0, r.returncode)
             self.assertIn('PermissionError', r.stderr)
             self.assertEqual(b'OLD-ARTIFACT', out.read_bytes())
             self.assertFalse(Path(str(out) + '.tmp').exists())
-            r = self.pack(script, out)
+            r = self.pack(script, out, process=True)        # 进程边界
             self.assertEqual(0, r.returncode, r.stderr)
             self.assertFalse(Path(str(out) + '.tmp').exists())
             expected = sorted(str(p.relative_to(skill)) for p in skill.rglob('*')
@@ -1350,13 +1400,12 @@ class SectionWriteTest(unittest.TestCase):
         os.chmod(path, mode)
         return path
 
-    def run_section(self, payload, base, confirm=True, extra=(), env_extra=None):
-        args = [sys.executable, str(SURGE_IOS)] + (['--confirm-dangerous'] if confirm else [])
+    def run_section(self, payload, base, confirm=True, extra=(), env_extra=None, process=False):
+        args = (['--confirm-dangerous'] if confirm else []) + ['section', 'replace', '--input', '-', *extra]
         env = offline_env(base, SEC_KEY)
         env.update(env_extra or {})
-        return subprocess.run(args + ['section', 'replace', '--input', '-', *extra], env=env,
-                              input=jbytes(payload) if isinstance(payload, dict) else payload,
-                              capture_output=True, timeout=90)
+        return run_entry(SURGE_IOS, args, env, jbytes(payload) if isinstance(payload, dict) else payload,
+                         text=False, process=process)
 
     def replace(self, server, backups, **overrides):
         return self.run_section(section_payload(backup_dir=backups, **overrides), server.base)
@@ -1376,7 +1425,7 @@ class SectionWriteTest(unittest.TestCase):
 
     def test_t1_vertical_slice_carries_exact_bytes_and_backup(self):
         server, backups = self.server(), self.backup_dir()
-        done = self.replace(server, backups)
+        done = self.run_section(section_payload(backup_dir=backups), server.base, process=True)  # 进程边界
         self.assertEqual(0, done.returncode, done.stderr)
         self.assertEqual(b'{"changed":true,"ok":true,"verified":true}\n', done.stdout)
         self.assertEqual(['GET', 'POST', 'GET'], server.methods())
@@ -1652,8 +1701,7 @@ class SectionWriteTest(unittest.TestCase):
                      ['section', 'replace', '--input', '/tmp/' + sentinel],
                      ['section', 'replace', '-', '--input'], ['section']):
             with self.subTest(argv=argv):
-                done = subprocess.run([sys.executable, str(SURGE_IOS), *argv], input=b'',
-                                      env=offline_env(server.base, SEC_KEY), capture_output=True, timeout=90)
+                done = run_entry(SURGE_IOS, argv, offline_env(server.base, SEC_KEY), text=False)
                 self.assert_stopped(done, 2, 'E_INPUT', [sentinel])
         # 通用 POST 命中分节路由：先于 JSON 解析、取密与联网拒绝（含规范化绕过写法）
         for path, body in (('/v1/profiles/section', '{"name":"Rule"'), ('/v1/profiles/section', '[1,2,'),
