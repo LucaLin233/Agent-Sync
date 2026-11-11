@@ -299,8 +299,6 @@
         "skills/luno-surge/references/SOURCE.md",
         "skills/luno-surge/references/http-api.md",
         "skills/luno-surge/references/http-sections.md",
-        "skills/luno-surge/references/http-descriptor.md",
-        "skills/luno-surge/references/http-metrics.md",
         "skills/luno-surge/references/controller-cli.md",
         "skills/luno-surge/references/upstream-manifest.json",
         "skills/luno-surge/references/diagnostics.md",
