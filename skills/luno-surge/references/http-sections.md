@@ -29,7 +29,7 @@
 
 **回归范围**：测试用本机合成数据和本机随机端口的夹具（真实子进程入口，含可信 CA 正向和 hostname 错配两组 TLS 用例），不等于设备实测；修改活动配置仍要有当次授权。
 
-**同步注意**：iOS 上的改动会立即上传 iCloud，Dropbox 在下次打开 App 时同步。Surge 的 iCloud Drive 文件夹超过 200 个文件和文件夹时后台同步不可用，只影响该目录的 profile 在 App 关闭期间的修改，不泛化为所有 profile 或前台编辑的上限。
+**同步注意**：iOS 上由隧道扩展写文件并立即上传 iCloud，Dropbox 在主 App 下次激活时上传。Surge 的 iCloud Drive 文件夹超过 200 个文件和文件夹时后台同步关闭，存放在该目录的 profile 的分节写入会被明确拒绝（官方 Mac 6.11.0 12710 命令参考）；入口不输出错误体，遇到 `E_REJECTED` 不重试、不换入口绕过，请用户在 App 里看报错和该目录的文件数。不泛化到其他目录的 profile。
 
 **内置 MCP**：默认关闭，端点是 POST `/v1/mcp`，用 `http-api-mcp=true` 启用；stateless Streamable HTTP，和 HTTP API 共用 key，可以用 `X-Key` 或新版的 Bearer。`get_profile_section`/`replace_profile_section` 通过回传 revision 编辑；工具注解不代替授权，iOS 6 的 MCP 另需核对订阅权益。新建或启用 MCP 须另获授权，不自动执行。官方 CLI `profile section set <name> <file|-> [revision]` 的本地文件和 stdin 转换不能照搬到 Controller 桥上。
 

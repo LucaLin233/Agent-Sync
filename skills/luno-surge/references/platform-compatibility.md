@@ -13,7 +13,7 @@
 | `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
 | `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
 | `restart-engine` | 24 | 共享 | 总是关闭连接、清除缓存和临时规则；`reload` 必要时亦会自动完整重启，无法排除时按入口再次单独确认 |
-| logbook 的大小截断语义 | 27 | 共享 | 下面各行依据官方 Mac 6.11.0 build 12680 命令参考 |
+| logbook 的大小截断语义 | 27 | 共享 | 下面各行依据官方 Mac 6.11.0 命令参考（12680；37 起为 12710） |
 | `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
 | `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |
 | `summary.network` 的 ipv4/ipv6 | 30 | 共享 | |
@@ -21,6 +21,9 @@
 | `summary.network` 的 encrypted-dns | 33 | 共享 | |
 | `traffic.testBytes` | 35 | 共享 | |
 | `capture-filter` | 36 | 共享 | 改捕获过滤会影响记录范围，按既有授权和数据最小化执行 |
+| `capture-session list`/`dump`/`data` | 37 | 共享 | 读取已存盘的 HTTP 抓包会话，取代 `retrieve-data` |
+| `dump traffic-stat-breakdown` | 38 | 共享 | |
+| `dump traffic-stat-records` | 39 | 共享 | |
 
 27 及以上各行只是官方给出的能力条件，不代表本端设备已验收；不要从历史上的 Protocol 25 推断它们可用，也不要把 HTTP 版本条件当成 Controller 门槛。
 
