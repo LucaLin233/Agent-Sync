@@ -302,3 +302,51 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 |`skills/luno-writing/references/i18n.md`|`skills/luno-authoring/references/i18n.md`|
 |`skills/luno-writing/references/prose.md`|`skills/luno-authoring/references/prose.md`|
 |`skills/luno-writing/references/wordpress.md`|`skills/luno-authoring/references/wordpress.md`|
+
+
+## 共读资源的分支迁移
+
+以提交 abfee03ab5655eb86e01cf0677645ab28aff4c39 为仓库差分基线；仅 delegation 分支以 Minis 现役 SHA-256 df6933b1389475f67bd8fd9e9e1b42b6a6398feac6428e26c3947422f54800c8 为迁移正文覆盖前态，其余输入仍取该固定提交；本节未记录部署成功。上文固定上游、取材、历史坐标、日期、许可及未决不改；涉及现役资源定位时再按下表解析至完整原分支。所有分支保留原通知、作者、修改声明和完整许可附件；合并不产生新的取材或分发许可。
+
+|迁移前资源|现役资源与完整分支|
+|---|---|
+|skills/luno-core/references/execution.md|skills/luno-core/references/execution.md〔分支 execution〕|
+|skills/luno-core/references/safety.md|skills/luno-core/references/execution.md〔分支 safety〕|
+|skills/luno-core/references/writing-safety.md|skills/luno-core/references/execution.md〔分支 writing-safety〕|
+|skills/luno-core/references/sync.md|skills/luno-core/references/sync.md〔分支 sync〕|
+|skills/luno-core/references/sync-workflow.md|skills/luno-core/references/sync.md〔分支 sync-workflow〕|
+|skills/luno-core/references/agent-document-writing.md|skills/luno-core/references/agent-document-writing.md〔分支 agent-document-writing〕|
+|skills/luno-core/references/skill-authoring.md|skills/luno-core/references/agent-document-writing.md〔分支 skill-authoring〕|
+|skills/luno-core/references/review.md|skills/luno-core/references/review.md〔分支 review〕|
+|skills/luno-core/references/delegation.md|skills/luno-core/references/review.md〔分支 delegation〕|
+|skills/luno-platform/references/minis.md|skills/luno-platform/references/minis.md〔分支 minis〕|
+|skills/luno-platform/references/minis-configuration.md|skills/luno-platform/references/minis.md〔分支 minis-configuration〕|
+|skills/luno-platform/references/minis-runtime.md|skills/luno-platform/references/minis.md〔分支 minis-runtime〕|
+|skills/luno-platform/references/minis-runtime-context.md|skills/luno-platform/references/minis.md〔分支 minis-runtime-context〕|
+|skills/luno-platform/references/minis-runtime-device.md|skills/luno-platform/references/minis.md〔分支 minis-runtime-device〕|
+|skills/luno-platform/references/minis-memory.md|skills/luno-platform/references/minis.md〔分支 minis-memory〕|
+|skills/luno-platform/references/cchp.md|skills/luno-platform/references/cchp.md〔分支 cchp〕|
+|skills/luno-platform/references/cchp-interfaces.md|skills/luno-platform/references/cchp.md〔分支 cchp-interfaces〕|
+|skills/luno-platform/references/cchp-workflow-writes.md|skills/luno-platform/references/cchp.md〔分支 cchp-workflow-writes〕|
+|skills/luno-platform/references/lobehub.md|skills/luno-platform/references/lobehub.md〔分支 lobehub〕|
+|skills/luno-platform/references/lobehub-access.md|skills/luno-platform/references/lobehub.md〔分支 lobehub-access〕|
+|skills/luno-platform/references/lobehub-agents.md|skills/luno-platform/references/lobehub.md〔分支 lobehub-agents〕|
+|skills/luno-platform/references/lobehub-skills.md|skills/luno-platform/references/lobehub.md〔分支 lobehub-skills〕|
+|skills/luno-surge/references/command-reference.md|skills/luno-surge/references/command-reference.md〔分支 command-reference〕|
+|skills/luno-surge/references/controller-cli.md|skills/luno-surge/references/command-reference.md〔分支 controller-cli〕|
+|skills/luno-surge/references/platform-compatibility.md|skills/luno-surge/references/command-reference.md〔分支 platform-compatibility〕|
+|skills/luno-surge/references/diagnostics.md|skills/luno-surge/references/command-reference.md〔分支 diagnostics〕|
+|skills/luno-surge/references/http-api.md|skills/luno-surge/references/http-api.md〔分支 http-api〕|
+|skills/luno-surge/references/http-sections.md|skills/luno-surge/references/http-api.md〔分支 http-sections〕|
+|skills/luno-ops/references/service-runtime.md|skills/luno-ops/references/service-runtime.md〔分支 service-runtime〕|
+|skills/luno-ops/references/remote-files-backup.md|skills/luno-ops/references/service-runtime.md〔分支 remote-files-backup〕|
+|skills/luno-ops/references/ssh.md|skills/luno-ops/references/service-runtime.md〔分支 ssh〕|
+|skills/luno-ops/references/execution-environment.md|skills/luno-ops/references/execution-environment.md〔分支 execution-environment〕|
+|skills/luno-ops/references/onlyboxes.md|skills/luno-ops/references/execution-environment.md〔分支 onlyboxes〕|
+|skills/luno-ops/references/onlyboxes-baseline.md|skills/luno-ops/references/execution-environment.md〔分支 onlyboxes-baseline〕|
+|skills/luno-memory/references/maintenance.md|skills/luno-memory/references/maintenance.md〔分支 maintenance〕|
+|skills/luno-memory/references/correction.md|skills/luno-memory/references/maintenance.md〔分支 correction〕|
+|skills/luno-authoring/references/prose.md|skills/luno-authoring/references/prose.md〔分支 prose〕|
+|skills/luno-authoring/references/wordpress.md|skills/luno-authoring/references/prose.md〔分支 wordpress〕|
+|skills/luno-authoring/references/coding.md|skills/luno-authoring/references/coding.md〔分支 coding〕|
+|skills/luno-authoring/references/i18n.md|skills/luno-authoring/references/coding.md〔分支 i18n〕|

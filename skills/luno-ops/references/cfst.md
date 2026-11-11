@@ -7,7 +7,7 @@
 - 只在 **Minis 本机（iSH）** 执行：测速流量要走 iOS 直连，需要临时让指定网段绕过 Surge VIF，其他端不适用。
 - 三个前提必须同时成立：脚本 `/var/minis/shared/cfst/cfst-run.sh` 可读可执行；同目录有 `cfst`（arm64）和 `ip.txt`；模块「CFST 测速直连」（同目录 `CFST.sgmodule`）在 `surge-cli module list` 里可见。**缺任何一项就停**，不自行改脚本、模块或网段。
 - 环境：`surge-cli`、`curl` 在 PATH 里，`SURGE_API_KEY` 已注入（缺了脚本会直接退出）。凭据只引用变量，不打印、不进命令行、不写文件。
-- **执行要另核授权**：测速占用带宽或蜂窝流量，并临时改变 Surge 模块状态（TUN 重配），启停模块可能导致 VPN 或隧道重连、短暂断网；模块自述的「测完关闭并重连 VPN」不是自动恢复的保证。按 `luno-core/references/safety.md`〈授权与安全〉当次确认，不把重新测速当作默认的验收手段。
+- **执行要另核授权**：测速占用带宽或蜂窝流量，并临时改变 Surge 模块状态（TUN 重配），启停模块可能导致 VPN 或隧道重连、短暂断网；模块自述的「测完关闭并重连 VPN」不是自动恢复的保证。按 `luno-core/references/execution.md`〔分支 safety〕〈授权与安全〉当次确认，不把重新测速当作默认的验收手段。
 
 ## 运行
 

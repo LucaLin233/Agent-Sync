@@ -1,6 +1,6 @@
 # Surge macOS 插件开发（非官方摘要）
 
-本指南是依据官方插件指南整理的中文接口事实摘要，非官方，不是译本，没有原文摘录。仅在用户明确要求 macOS 插件工作时使用；iOS 不支持此插件分支。先完整读 `references/platform-compatibility.md`；在线命令的传输、凭据和秘密边界另读 `references/controller-cli.md`。新版本或未列出的字段须核官方资料，不把本指南当未来版本保证。
+本指南是依据官方插件指南整理的中文接口事实摘要，非官方，不是译本，没有原文摘录。仅在用户明确要求 macOS 插件工作时使用；iOS 不支持此插件分支。先完整读 `references/command-reference.md`〔分支 platform-compatibility〕；在线命令的传输、凭据和秘密边界另读 `references/command-reference.md`〔分支 controller-cli〕。新版本或未列出的字段须核官方资料，不把本指南当未来版本保证。
 
 ## 范围和交付物
 

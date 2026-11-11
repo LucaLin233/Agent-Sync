@@ -1,6 +1,6 @@
 # 来源、维护与交付
 
-本项目非 Surge 官方技能。运行资料由自编工作流和依据官方资料整理的接口事实摘要组成，不分发官方 Skill 完整文件、整篇译文或官方 logo。Surge 名称与官方材料归 Surge Networks；根 MIT 不替代第三方授权。命令、平台和安全门禁分别以入口及对应专业资源为准，本文件不授予连接、写入、删除或发布权限。取源、构包或部署前完整读取 `luno-core/references/safety.md`、`luno-core/references/sync.md` 及其命中的完整分支，写入和临时产物另外满足总控的写入安全规则。
+本项目非 Surge 官方技能。运行资料由自编工作流和依据官方资料整理的接口事实摘要组成，不分发官方 Skill 完整文件、整篇译文或官方 logo。Surge 名称与官方材料归 Surge Networks；根 MIT 不替代第三方授权。命令、平台和安全门禁分别以入口及对应专业资源为准，本文件不授予连接、写入、删除或发布权限。取源、构包或部署前完整读取 `luno-core/references/execution.md`〔分支 safety〕、`luno-core/references/sync.md`〔分支 sync〕 及其命中的完整分支，写入和临时产物另外满足总控的写入安全规则。
 
 ## 共同前置
 

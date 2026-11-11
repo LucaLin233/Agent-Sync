@@ -5,7 +5,7 @@
 - **删除前**盘点知识库的内容和关联，并确认；核对 embedding 的供应商和模型。
 - **挂载**用 `lh agent add-kb`。`lh agent edit --config-file` 会静默忽略 `knowledgeBases`（agent.updatedAt 变了，但 `agents_knowledge_bases` 没变）。核对挂载要查关系表，或用 `lh agent view <agentId> --json <已确认的非秘密字段白名单>` 回读（先核对当前 CLI 的字段语法，不能安全限定子字段就停，禁止全量读取再脱敏），不能只看 CLI 打了勾。`lh agent list --json` 不返回这个字段（请求得到 `{}`），不能用来判断；2026-10-01 实测 CLI 0.0.55（现版本未核）：`lh agent view <id> --json knowledgeBases` 可用，并与关系表一致。
 - **入库的两条路**：`custom/document`（`lh doc create`、`doc batch-create`）不分块，走 BM25 全文检索（`documents_bm25_idx`）；上传文件才会分块和向量化。知识库检索并行走文件向量和文档 BM25，一路失败会自动降级并附注。
-- **上传不会自动分块**（2026-10-01 实测 CLI 0.0.55，现版本未核）：`lh kb upload`、`lh file upload`、`lh doc parse` 都不触发分块（CLI 里没有 `chunk.*` 调用，Web 端才有 `createParseFileTask`；当时本实例 `files.chunk_task_id` 全部为 NULL）。需要向量召回时，补调 `POST /trpc/lambda/chunk.createParseFileTask`，请求头 `X-API-Key`，请求体 `{"json":{"id":"<fileId>"}}`（同族还有 `chunk.createEmbeddingChunksTask`；需要 `knowledge_base:update` 权限）。HTTP 写法见 `references/lobehub-access.md`。
+- **上传不会自动分块**（2026-10-01 实测 CLI 0.0.55，现版本未核）：`lh kb upload`、`lh file upload`、`lh doc parse` 都不触发分块（CLI 里没有 `chunk.*` 调用，Web 端才有 `createParseFileTask`；当时本实例 `files.chunk_task_id` 全部为 NULL）。需要向量召回时，补调 `POST /trpc/lambda/chunk.createParseFileTask`，请求头 `X-API-Key`，请求体 `{"json":{"id":"<fileId>"}}`（同族还有 `chunk.createEmbeddingChunksTask`；需要 `knowledge_base:update` 权限）。HTTP 写法见 `references/lobehub.md`〔分支 lobehub-access〕。
 - `lh file view` 的 `chunkCount`/`chunkingStatus`/`embeddingStatus` 为 `null` 时不单独判定失败；`chunkCount>0` 只表示有分块，不是检索验收（本资源未提供对应版本的检索验收正例）。
 - `unboxing minimum_should_match_ argument failed` 的已知原因之一是 SQL 定义和 .so 不匹配，不能只凭这条报错定因；`pg_search` 版本核对和扩展更新见 `references/lobehub-instance.md`。
 

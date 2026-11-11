@@ -1,5 +1,4 @@
-# B+ 加载／资源边登记；仅四列（来源、目标、形态、标签），制表符分隔。
-# 改加载边／资源边须同批更新本表；不保存正文片段、副本或逐字固定期望。
+# 四列资源/加载边；正文的分支触发为准，合并不授予权限。
 prompt/LUNO.md	luno-core	必需加载	核心入口加载
 subagents/LENS.md	luno-core	必需加载	核心入口加载
 subagents/FORGE.md	luno-core	必需加载	核心入口加载
@@ -7,177 +6,124 @@ subagents/minis-general-fallback.md	luno-core	必需加载	核心入口加载
 prompt/LUNO.md	luno-memory	必需加载	记忆操作与事故/复发/固化/规则缺口；普通纠正不触发
 skills/luno-ops/SKILL.md	luno-core/references/sync.md	资源条件	规则仓库前置加载
 skills/luno-core/SKILL.md	references/retrieval.md	资源必需	资源加载边（core·检索）
-skills/luno-core/SKILL.md	references/delegation.md	资源条件	仅实际派发/受派、独立判断或非低风险任务读取对应完整分支
+skills/luno-core/SKILL.md	references/review.md	资源条件	delegation分支：仅实际派发/受派或正式独立判断时读取对应完整分节 | review分支：命中正文触发时完整读取；范围以该分支为准
 skills/luno-memory/SKILL.md	references/maintenance.md	资源必需	实际记忆操作、事故/复发、固化候选或疑似规则缺口；普通纠正不触发
-skills/luno-platform/references/lobehub.md	references/lobehub-skills.md	资源条件	资源加载边（入口·skills）
+skills/luno-platform/references/lobehub.md	references/lobehub.md	资源条件	资源加载边（入口·skills） | 精简提案新增分支，触发与全文见入口 | 资源加载边
 skills/luno-platform/references/lobehub.md	references/lobehub-knowledge.md	资源条件	资源加载边（入口·knowledge）
 skills/luno-platform/references/lobehub.md	references/lobehub-instance.md	资源条件	资源加载边（入口·instance）
 skills/luno-platform/references/lobehub-knowledge.md	references/lobehub-instance.md	资源条件	资源加载边（knowledge→instance）
 skills/luno-core/references/review.md	references/code-review.md	资源条件	资源加载边（review·代码审查/代码判断；CI-only仅读〈代码双轴与 CI〉）
 skills/luno-ops/SKILL.md	references/execution-environment.md	资源必需	资源加载边（ops）
-skills/luno-ops/SKILL.md	references/onlyboxes.md	资源条件	资源加载边（ops·沙箱落地）
-skills/luno-ops/references/execution-environment.md	references/onlyboxes-baseline.md	资源条件	资源加载边（ops 执行环境→能力基线）
-skills/luno-ops/references/onlyboxes.md	references/onlyboxes-baseline.md	资源条件	资源加载边（ops 沙箱落地→能力基线）
+skills/luno-ops/SKILL.md	references/execution-environment.md	资源条件	资源加载边（ops·沙箱落地）
+skills/luno-ops/references/execution-environment.md	references/execution-environment.md	资源条件	资源加载边（ops 执行环境→能力基线） | 资源加载边（ops 沙箱落地→能力基线） | 资源加载边（B批 ops references/onlyboxes-baseline.md→execution-environment.md） | 资源加载边（B批 ops references/onlyboxes.md→execution-environment.md） | 资源加载边
 skills/luno-ops/SKILL.md	references/github.md	资源必需	资源加载边（ops·GitHub）
-skills/luno-ops/SKILL.md	references/service-runtime.md	资源必需	资源加载边（ops·服务运行）
-skills/luno-ops/SKILL.md	references/remote-files-backup.md	资源必需	资源加载边（ops·远端文件与备份）
+skills/luno-ops/SKILL.md	references/service-runtime.md	资源必需	资源加载边（ops·服务运行） | 资源加载边（ops·远端文件与备份）
 skills/luno-ops/SKILL.md	references/cfst.md	资源必需	资源加载边（ops·CFST 测速）
-skills/luno-ops/references/service-runtime.md	references/remote-files-backup.md	资源条件	资源加载边（ops 服务→备份）
-skills/luno-core/references/sync.md	references/sync-workflow.md	资源必需	资源加载边（sync·作业与变更纪律）
-skills/luno-core/references/sync.md	references/agent-document-writing.md	资源条件	资源加载边（sync·书写判据）
+skills/luno-ops/references/service-runtime.md	references/service-runtime.md	资源条件	资源加载边（ops 服务→备份）
+skills/luno-core/references/sync.md	references/sync.md	资源必需	资源加载边（sync·作业与变更纪律）
+skills/luno-core/references/sync.md	references/agent-document-writing.md	资源条件	资源加载边（sync·书写判据） | 资源加载边（sync·技能编写与校验）
 skills/luno-core/references/sync.md	references/test-authoring.md	资源条件	资源加载边（sync·测试编写与准入）
-skills/luno-core/references/test-authoring.md	references/sync-workflow.md	资源条件	资源加载边（sync·按需巡检与落端回读）
-skills/luno-authoring/SKILL.md	references/prose.md	资源条件	资源加载边（writing·prose）
-skills/luno-authoring/SKILL.md	references/i18n.md	资源条件	资源加载边（writing·i18n）
-skills/luno-authoring/SKILL.md	references/wordpress.md	资源条件	资源加载边（writing·wordpress）
-skills/luno-platform/references/minis.md	references/minis-configuration.md	资源条件	客户端配置任务整份读取
-skills/luno-platform/references/minis.md	references/minis-runtime.md	资源条件	资源加载边（minis 入口·运行时）
-skills/luno-platform/references/minis.md	references/minis-memory.md	资源条件	资源加载边（minis 入口·记忆）
+skills/luno-core/references/test-authoring.md	references/sync.md	资源条件	资源加载边（sync·按需巡检与落端回读）
+skills/luno-authoring/SKILL.md	references/prose.md	资源条件	资源加载边（writing·prose） | 资源加载边（writing·wordpress）
+skills/luno-authoring/SKILL.md	references/coding.md	资源条件	资源加载边（writing·i18n） | 命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/minis.md	references/minis.md	资源条件	客户端配置任务整份读取 | 资源加载边（minis 入口·运行时） | 资源加载边（minis 入口·记忆） | 命中正文触发完整读取；范围以该分支为准 | 资源加载边（minis 入口·运行时上下文分支） | 资源加载边（minis 入口·运行时本机分支）
 subagents/LENS.md	luno-core/references/review.md	资源条件	审查前置加载（LENS）
-skills/luno-platform/references/lobehub.md	references/lobehub-access.md	资源必需	资源加载边（入口·access）
-skills/luno-platform/references/lobehub-knowledge.md	references/lobehub-access.md	资源必需	资源加载边（knowledge→access）
+skills/luno-platform/references/lobehub.md	references/lobehub.md	资源必需	资源加载边（入口·access）
+skills/luno-platform/references/lobehub-knowledge.md	references/lobehub.md	资源必需	资源加载边（knowledge→access）
 skills/luno-surge/SKILL.md	references/official-sources.md	资源条件	资源加载边（surge·资料路由与手册入口）
-skills/luno-surge/SKILL.md	references/controller-cli.md	资源条件	资源加载边（surge·客户端与凭据）
-skills/luno-surge/SKILL.md	references/http-api.md	资源条件	资源加载边（surge·HTTP API）
-skills/luno-surge/SKILL.md	references/http-sections.md	资源条件	资源加载边（surge·安全分节写入）
+skills/luno-surge/SKILL.md	references/command-reference.md	资源条件	资源加载边（surge·客户端与凭据） | 资源加载边（surge·诊断工作流） | 资源加载边（surge·命令参考）
+skills/luno-surge/SKILL.md	references/http-api.md	资源条件	资源加载边（surge·HTTP API） | 资源加载边（surge·安全分节写入）
 skills/luno-surge/SKILL.md	references/SOURCE.md	资源条件	资源加载边（surge·上游同步与脚本）
-skills/luno-surge/SKILL.md	references/platform-compatibility.md	资源必需	资源加载边（surge·协议门槛与版本表）
-skills/luno-surge/SKILL.md	references/diagnostics.md	资源条件	资源加载边（surge·诊断工作流）
-skills/luno-surge/SKILL.md	references/command-reference.md	资源条件	资源加载边（surge·命令参考）
+skills/luno-surge/SKILL.md	references/command-reference.md	资源必需	资源加载边（surge·协议门槛与版本表）
 skills/luno-surge/SKILL.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
-skills/luno-surge/references/diagnostics.md	references/platform-compatibility.md	资源条件	资源加载边（surge 诊断→平台兼容）
-skills/luno-core/references/sync.md	references/skill-authoring.md	资源条件	资源加载边（sync·技能编写与校验）
-skills/luno-core/references/skill-authoring.md	references/agent-document-writing.md	资源条件	资源加载边（sync 技能编写→书写判据）
-skills/luno-platform/references/cchp.md	references/cchp-interfaces.md	资源必需	资源加载边（cchp 入口·接口契约或覆盖规则实际调用）
-skills/luno-platform/references/cchp.md	references/cchp-workflow-org.md	资源条件	业务分支命中后整份读取（用量·请求·token·导入）
-skills/luno-platform/references/cchp.md	references/cchp-workflow-providers.md	资源条件	业务分支命中后整份读取（provider/endpoint/key）
+skills/luno-surge/references/command-reference.md	references/command-reference.md	资源条件	资源加载边（surge 诊断→平台兼容） | 资源加载边（surge 命令参考→客户端） | 资源加载边（surge 命令参考→诊断） | 资源加载边（surge 命令参考→平台判据） | Controller兼容判据
+skills/luno-core/references/agent-document-writing.md	references/agent-document-writing.md	资源条件	资源加载边（sync 技能编写→书写判据）
+skills/luno-platform/references/cchp.md	references/cchp.md	资源必需	资源加载边（cchp 入口·接口契约或覆盖规则实际调用）
+skills/luno-platform/references/cchp.md	references/cchp-workflow-org.md	资源条件	业务分支命中后整份读取（用量·请求·token·导入） | 命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/cchp.md	references/cchp-workflow-providers.md	资源条件	业务分支命中后整份读取（provider/endpoint/key） | 命中正文触发完整读取；范围以该分支为准
 skills/luno-core/SKILL.md	luno-platform	条件加载	Minis 运行时按需加载（ops）
-skills/luno-ops/references/onlyboxes-baseline.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes-baseline.md→execution-environment.md）
-skills/luno-ops/references/onlyboxes.md	references/execution-environment.md	资源条件	资源加载边（B批 ops references/onlyboxes.md→execution-environment.md）
-skills/luno-platform/references/cchp.md	references/cchp-coverage-rules.md	资源条件	资源加载边（cchp 入口·覆盖规则）
-skills/luno-platform/references/cchp-interfaces.md	references/cchp-coverage-rules.md	资源条件	资源加载边（interfaces→覆盖规则）
-skills/luno-platform/references/cchp-coverage-rules.md	references/cchp-interfaces.md	资源条件	资源加载边（覆盖规则→实际调用输出或接口契约）
-skills/luno-surge/references/command-reference.md	references/controller-cli.md	资源条件	资源加载边（surge 命令参考→客户端）
-skills/luno-surge/references/command-reference.md	references/diagnostics.md	资源条件	资源加载边（surge 命令参考→诊断）
-skills/luno-surge/references/command-reference.md	references/platform-compatibility.md	资源条件	资源加载边（surge 命令参考→平台判据）
-skills/luno-surge/references/command-reference.md	references/http-api.md	资源条件	资源加载边（surge 命令参考→安全分节写入）
-skills/luno-surge/references/platform-compatibility.md	references/http-api.md	资源条件	资源加载边（surge 平台判据→安全分节写入）
-skills/luno-surge/references/http-api.md	references/platform-compatibility.md	资源条件	资源加载边（surge HTTP→平台版本权益判据）
+skills/luno-platform/references/cchp.md	references/cchp-coverage-rules.md	资源条件	资源加载边（cchp 入口·覆盖规则） | 资源加载边（interfaces→覆盖规则）
+skills/luno-platform/references/cchp-coverage-rules.md	references/cchp.md	资源条件	资源加载边（覆盖规则→实际调用输出或接口契约）
+skills/luno-surge/references/command-reference.md	references/http-api.md	资源条件	资源加载边（surge 命令参考→安全分节写入） | 资源加载边（surge 平台判据→安全分节写入） | 资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/http-api.md	references/command-reference.md	资源条件	资源加载边（surge HTTP→平台版本权益判据） | 命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/SOURCE.md	references/upstream-manifest.json	资源条件	资源加载边（surge SOURCE·manifest版本与哈希）
-
-# skill-slim-20261107：待审新增资源边（应用前与现有编号/守卫契约核对）
 skills/luno-core/SKILL.md	references/handoff.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-core/SKILL.md	references/writing-safety.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-platform/references/lobehub.md	references/lobehub-agents.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-ops/SKILL.md	references/ssh.md	资源条件	精简提案新增分支，触发与全文见入口
-skills/luno-surge/references/controller-cli.md	references/platform-compatibility.md	资源条件	Controller兼容判据
-skills/luno-core/references/agent-document-writing.md	references/sync-workflow.md	资源条件	资源加载边
-skills/luno-ops/references/onlyboxes-baseline.md	references/onlyboxes.md	资源条件	资源加载边
-skills/luno-platform/references/lobehub-agents.md	references/lobehub-access.md	资源条件	资源加载边
-skills/luno-platform/references/lobehub-instance.md	references/lobehub-skills.md	资源条件	资源加载边
-skills/luno-platform/references/cchp-source.md	references/cchp-interfaces.md	资源条件	资源加载边（B批 cchp SOURCE.md→interfaces.md）
+skills/luno-core/SKILL.md	references/execution.md	资源条件	精简提案新增分支，触发与全文见入口 | 命中正文触发完整读取；范围以该分支为准
+skills/luno-ops/SKILL.md	references/service-runtime.md	资源条件	精简提案新增分支，触发与全文见入口
+skills/luno-core/references/agent-document-writing.md	references/sync.md	资源条件	资源加载边
+skills/luno-platform/references/lobehub-instance.md	references/lobehub.md	资源条件	资源加载边
+skills/luno-platform/references/cchp-source.md	references/cchp.md	资源条件	资源加载边（B批 cchp SOURCE.md→interfaces.md）
 skills/luno-platform/references/cchp-source.md	references/cchp-coverage-rules.md	资源条件	资源加载边（cchp SOURCE.md→覆盖规则）
 skills/luno-platform/references/cchp.md	luno-ops	条件加载	实际备份或命中运维时读取完整命中资源
 prompt/LUNO.md	luno-core/references/retrieval.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/SKILL.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/SKILL.md	luno-authoring	条件加载	命中正文加载条件；完整分支与共同前置
-skills/luno-core/SKILL.md	references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/SKILL.md	references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/SKILL.md	references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/SKILL.md	references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/agent-document-writing.md	luno-surge/references/SOURCE.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/code-review.md	luno-authoring/references/coding.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/code-review.md	references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/delegation.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/delegation.md	luno-core/references/sync-workflow.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/delegation.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/delegation.md	luno-core/references/writing-safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/execution.md	luno-core	必需加载	命中正文加载条件；完整分支与共同前置
-skills/luno-core/references/execution.md	references/delegation.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/review.md	luno-core/references/delegation.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/review.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/review.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/safety.md	luno-core	必需加载	命中正文加载条件；完整分支与共同前置
-skills/luno-core/references/safety.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/safety.md	luno-ops/references/github.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/safety.md	luno-platform/references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/skill-authoring.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/skill-authoring.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/skill-authoring.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/sync-workflow.md	luno-core/references/delegation.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-core/references/sync-workflow.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/review.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/execution.md	luno-core	必需加载	命中正文加载条件；完整分支与共同前置
+skills/luno-core/references/execution.md	references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/execution.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/execution.md	luno-ops/references/github.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/execution.md	luno-platform/references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/agent-document-writing.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/agent-document-writing.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/agent-document-writing.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-core/references/sync.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/sync.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/sync.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/sync.md	luno-surge/references/SOURCE.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-core/references/test-authoring.md	luno-core/references/code-review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-memory/SKILL.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-memory/references/correction.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-memory/references/correction.md	references/maintenance.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-memory/references/maintenance.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-memory/references/maintenance.md	references/maintenance.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-memory/references/maintenance.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-memory/references/maintenance.md	references/correction.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-ops/SKILL.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-ops/SKILL.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-ops/SKILL.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-ops/references/cfst.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-ops/references/remote-files-backup.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/SKILL.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-ops/references/cfst.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-ops/references/service-runtime.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/SKILL.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准 | 正文指定触发完整读取；不得省略共同前置
 skills/luno-platform/SKILL.md	references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/SKILL.md	references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp-coverage-rules.md	references/cchp-workflow-providers.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-interfaces.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-interfaces.md	luno-platform/references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-interfaces.md	references/cchp-workflow-org.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-source.md	luno-core/references/sync-workflow.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/cchp.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/cchp.md	luno-platform/references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp-source.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp-source.md	luno-platform/references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-providers.md	references/cchp-interfaces.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-providers.md	references/cchp-workflow-writes.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp-workflow-providers.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-org.md	references/cchp-interfaces.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-org.md	references/cchp-workflow-providers.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-org.md	references/cchp-workflow-writes.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp-workflow-org.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-writes.md	references/cchp-interfaces.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-writes.md	references/cchp-workflow-providers.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp-workflow-writes.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/cchp-workflow-org.md	references/cchp-workflow-providers.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/cchp.md	references/cchp.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp.md	luno-platform/references/cchp-source.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/cchp.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/cchp.md	references/cchp-workflow-writes.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/lobehub-access.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/lobehub-instance.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/lobehub.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/lobehub-instance.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/lobehub-instance.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/lobehub.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-configuration.md	luno-core/references/delegation.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-configuration.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-configuration.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime-context.md	references/minis-memory.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime-context.md	references/minis-runtime.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime-device.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis-runtime-device.md	references/minis-runtime.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-platform/references/minis.md	references/minis-runtime-context.md	资源条件	资源加载边（minis 入口·运行时上下文分支）
-skills/luno-platform/references/minis.md	references/minis-runtime-device.md	资源条件	资源加载边（minis 入口·运行时本机分支）
+skills/luno-platform/references/lobehub.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/minis.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/minis.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-platform/references/minis.md	luno-platform/references/minis.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/references/minis.md	luno-platform/references/lobehub.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-authoring/SKILL.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-authoring/SKILL.md	references/coding.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-authoring/references/coding.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-authoring/references/coding.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-surge/references/SOURCE.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-surge/references/SOURCE.md	luno-core/references/execution.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/SOURCE.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/SKILL.md	luno-ops/references/github.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-surge/references/http-api.md	references/http-sections.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-surge/references/http-sections.md	references/http-api.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-surge/references/http-sections.md	references/platform-compatibility.md	资源条件	命中正文触发完整读取；范围以该分支为准
+skills/luno-surge/references/http-api.md	references/http-api.md	资源条件	命中正文触发完整读取；范围以该分支为准
 subagents/FORGE.md	luno-core/references/review.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-platform/SKILL.md	luno-platform/references/lobehub.md	资源条件	正文指定触发完整读取；不得省略共同前置
-skills/luno-platform/SKILL.md	references/cchp-interfaces.md	资源条件	正文指定触发完整读取；不得省略共同前置
 skills/luno-platform/SKILL.md	references/lobehub-instance.md	资源条件	正文指定触发完整读取；不得省略共同前置
 skills/luno-surge/references/SOURCE.md	references/official-sources.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/command-reference.md	references/SOURCE.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
-skills/luno-surge/references/command-reference.md	references/http-sections.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/command-reference.md	references/official-sources.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/command-reference.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/command-reference.md	references/upstream-manifest.json	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
-skills/luno-surge/references/platform-compatibility.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/plugin-authoring.md	references/SOURCE.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
-skills/luno-surge/references/plugin-authoring.md	references/controller-cli.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
-skills/luno-surge/references/plugin-authoring.md	references/platform-compatibility.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/plugin-authoring.md	references/command-reference.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/plugin-authoring.md	references/upstream-manifest.json	资源条件	资源加载边（Surge 自编运行资料；按正文触发）

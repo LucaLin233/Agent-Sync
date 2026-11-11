@@ -6,7 +6,7 @@
 
 ## 上游更新核对
 
-通用取源与同步依 `luno-core/references/sync.md`〈真源与落点〉及 `luno-core/references/sync-workflow.md`；只用获准来源与认证，缺证或限流标待核实，不换凭据。
+通用取源与同步依 `luno-core/references/sync.md`〔分支 sync〕〈真源与落点〉及 `luno-core/references/sync.md`〔分支 sync-workflow〕；只用获准来源与认证，缺证或限流标待核实，不换凭据。
 
 1. 锁定默认分支 HEAD 与技能目录末次提交；以仓库 skills-sources.md〈luno-cchp〉登记的完整取材提交为旧 ref，比较期间不改基线。
 2. 对全部取材文件逐个比较两 ref 的哈希，变化项逐文件 diff。末次提交或目录未变不能代替文件比较（含目录外 docs、LICENSE）；404 不等于未变：旧 ref 缺失为新增，新 ref 缺失为删除或可能改名，结合 compare 的 added／removed／renamed 与原路径核对。取不齐即报缺证，不判无需更新。
@@ -18,5 +18,5 @@
 
 ### 处理规则
 
-不自动跟版；先列 `luno-platform/references/cchp.md` 及其〈业务分支〉列明的完整业务资源、`references/cchp-interfaces.md`、`references/cchp-coverage-rules.md` 的受影响小节、旧→新差异及实例兼容性，再按 `luno-core/references/sync-workflow.md` 与当次授权处理。核对不授权实施／部署；未采纳只记录核对状态，不改基线。包变化后重算部署哈希，以部署回读值为准。上游仅新增命令且本端无授权场景时不补步骤；需要时依既有流程处理。
+不自动跟版；先列 `luno-platform/references/cchp.md`〔分支 cchp〕 及其〈业务分支〉列明的完整业务资源、`references/cchp.md`〔分支 cchp-interfaces〕、`references/cchp-coverage-rules.md` 的受影响小节、旧→新差异及实例兼容性，再按 `luno-core/references/sync.md`〔分支 sync-workflow〕 与当次授权处理。核对不授权实施／部署；未采纳只记录核对状态，不改基线。包变化后重算部署哈希，以部署回读值为准。上游仅新增命令且本端无授权场景时不补步骤；需要时依既有流程处理。
 

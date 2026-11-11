@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 
 # 身份规则单真源；〈Git 提交署名〉段迁到别的文件时改这一行（并同步 tests/test_paths.py 的 identity 选路）。
-DEFAULT_RULES = 'skills/luno-core/references/delegation.md'
+DEFAULT_RULES = 'skills/luno-core/references/review.md'
 SECTION_TITLE = 'Git 提交署名'
 NAMES = (b'LUNO', b'FORGE', b'LENS', b'Claude Opus 5.5', b'LIN student')
 IDENT_LINE = re.compile(rb'^(.*?) <([^<>]*)> (\d+) ([+-]\d{4})$')

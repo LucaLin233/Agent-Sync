@@ -1,6 +1,6 @@
 # CCHP 用量、成员与配额、请求与审计、LLM token 与导入
 
-先完整读 `references/cchp.md`，按其〈业务分支〉的触发与共同前置使用本资源。涉及写入的解释、方案、审查或执行，还须完整读 `references/cchp-workflow-writes.md`；实际调用或展示结果先完整读 `references/cchp-interfaces.md`。
+先完整读 `references/cchp.md`〔分支 cchp〕，按其〈业务分支〉的触发与共同前置使用本资源。涉及写入的解释、方案、审查或执行，还须完整读 `references/cchp.md`〔分支 cchp-workflow-writes〕；实际调用或展示结果先完整读 `references/cchp.md`〔分支 cchp-interfaces〕。
 
 ## 用量与耗材
 

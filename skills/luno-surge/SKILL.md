@@ -13,7 +13,7 @@ description: Surge配置、模块、规则、脚本与日志诊断；CLI/Externa
 
 先读用户给的材料，保留原有的顺序、注释、策略名和资源 URL。配置问题按 §4，运行状态按 §5；两者相关时按「只读检查 → 最小修改 → 立即复验」推进。结论对版本、平台或语义敏感时，按 `references/official-sources.md` 查官方资料；不套用其他客户端的语法，不猜字段和能力。
 
-实际执行 Surge 命令（CLI、HTTP API 或脚本）之前，完整读 `references/platform-compatibility.md`：协议门槛、平台限制和历史验证只以它为准，未知或不满足的不执行；本文件和官方原文里出现的协议号都不作门槛。遇到异常先跑 `surge-cli --raw version`；报 Unknown 或 Unsupported command 时再查 `help <command>`，不要把 Mac 专属能力当成 iOS 能力。
+实际执行 Surge 命令（CLI、HTTP API 或脚本）之前，完整读 `references/command-reference.md`〔分支 platform-compatibility〕：协议门槛、平台限制和历史验证只以它为准，未知或不满足的不执行；本文件和官方原文里出现的协议号都不作门槛。遇到异常先跑 `surge-cli --raw version`；报 Unknown 或 Unsupported command 时再查 `help <command>`，不要把 Mac 专属能力当成 iOS 能力。
 
 ## 2. 引擎状态预检
 
@@ -27,7 +27,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 - **凭据**：Controller 密码或 HTTP API Key 只从 `SURGE_API_KEY` 或 `--password-stdin` 取，不进 argv、文件、日志或回复。客户端非交互，不读凭据文件，不在 TTY 补问；缺失时给出[设置入口](minis://settings/environments?create_key=SURGE_API_KEY&create_value=)，不要让用户在聊天里发密码。
 - **隐私数据**：`dump profile`、请求正文和日志可能含节点、订阅 URL 和隐私，只在必要时最小读取、脱敏引用，不放进支持包。启用 MITM、Rewrite、脚本、抓包或远程控制之前，先说明影响；hostname 不默认写 `*`。
 - **高影响操作再确认**：`stop`、`restart-engine`、切换或更新 profile、批量终止连接（开关 HTTP capture 也算：`feature set capture` 和 `set Replica=…` 都会断开全部现有连接）、改变模式或策略之前，**即使整批已获批准，也要再单独确认一次**（比 `luno-core` 更严）；`stop` 只在用户明确要求时执行。`reload` 通常差量应用，但必要时会自动转完整重启，不能保证保留连接、缓存和临时规则。直接或间接触发 reload 前，应核对本次变更与实例版本；无法排除完整重启时，即使整批已获批准，也必须就这些影响再次单独确认，未获准即不执行。`restart-engine` 总是完整重启（关闭连接、清除缓存和临时规则），亦须再次单独确认；不能仅凭命令名或历史成功判为无损。
-- **临时规则**立即生效、优先于 Profile，引擎停止后失效。`rule temp flush` 会清空全部临时规则，**禁止当作本次的默认清理**；只删本次新增的项，不猜索引。清理和处理多帧输出之前，完整读 `references/diagnostics.md`。
+- **临时规则**立即生效、优先于 Profile，引擎停止后失效。`rule temp flush` 会清空全部临时规则，**禁止当作本次的默认清理**；只删本次新增的项，不猜索引。清理和处理多帧输出之前，完整读 `references/command-reference.md`〔分支 diagnostics〕。
 - **真实流量**：`http probe` 会发真实的 HEAD 请求，DNS、节点、带宽和加密 benchmark 也会产生真实流量或负载，都按需执行。`watch`、`diagnostics` 和 benchmark 输出 JSON Lines，要限流读到 `hasMore=false`；长期订阅由外部限时停止，首帧不是终态。
 - **`--check` 会上传**：它把文件发到官方服务校验，不是本地解析；禁止自动上传活动 Profile，先告知用户，必要时只校验脱敏副本。
 - **`policy-descriptor`** 可能含密码或 PSK，和认证凭据是两回事：只经 stdin（`--descriptor-file -`）输入，不落盘、不写进配置、不读凭据文件；`SURGE_API_KEY` 只用于认证。
@@ -40,21 +40,21 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 模块只推到用户自有的 `LucaLin233/Proxy` 源：推送前完整读 `luno-ops/references/github.md`，凭据不进 argv；Git 推送只在总控及 GitHub 分支的秘密来源窄例外条件满足时执行。推送和发布分别核授权，以远端回读为准，CDN 延迟不算成功。
 
-分节编辑之前，完整读 `references/http-sections.md`，并按 `references/platform-compatibility.md` 核对平台、版本和协议；官方支持分节编辑不代表本端已经实现。整节替换会触发校验和 reload，要按 §3 再单独确认；先合成验证不等于授权修改活动配置。
+分节编辑之前，完整读 `references/http-api.md`〔分支 http-sections〕，并按 `references/command-reference.md`〔分支 platform-compatibility〕 核对平台、版本和协议；官方支持分节编辑不代表本端已经实现。整节替换会触发校验和 reload，要按 §3 再单独确认；先合成验证不等于授权修改活动配置。
 
 ## 5. CLI
 
-`/usr/local/bin/surge-cli` 是 `scripts/surge_cli.py` 这个自建的 Python 3 桥，**不是官方 Mac 二进制**。默认连同机的 Controller；`SURGE_CLI_REMOTE` 或 `--remote` 只在显式指定时使用，用户没指定就不连外部主机。涉及传输、凭据或 `--check` 时，先完整读 `references/controller-cli.md`。
+`/usr/local/bin/surge-cli` 是 `scripts/surge_cli.py` 这个自建的 Python 3 桥，**不是官方 Mac 二进制**。默认连同机的 Controller；`SURGE_CLI_REMOTE` 或 `--remote` 只在显式指定时使用，用户没指定就不连外部主机。涉及传输、凭据或 `--check` 时，先完整读 `references/command-reference.md`〔分支 controller-cli〕。
 
 优先用 `--raw`，它输出的是**客户端脱敏后的 JSON，不是服务端原文**（包内其他地方说的「原始」都按这个理解）。
 
-查命令选择、语法或 key-path 时，先完整读 `references/command-reference.md`，再按任务读取其中触发的专业资源。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
+查命令选择、语法或 key-path 时，先完整读 `references/command-reference.md`〔分支 command-reference〕，再按任务读取其中触发的专业资源。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
 
-涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/diagnostics.md`。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
+涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/command-reference.md`〔分支 diagnostics〕。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
 
 ## 6. HTTP API 回退
 
-Controller 不可用，或需要 `/v1/*` 端点、Prometheus 指标时，先完整读 `references/http-api.md`（含远程明文的风险），再用 `scripts/surge_ios.py`。核对端点和认证（`X-Key`）；默认连同机，`SURGE_HTTP_API_BASE` 指向活动实例或可信局域网时，都要用户指定。危险操作按 §3 再确认。测试还没写进 Profile 的节点用 `scripts/test_policy_descriptor.py`，它不改配置，凭据按 §3 处理。
+Controller 不可用，或需要 `/v1/*` 端点、Prometheus 指标时，先完整读 `references/http-api.md`〔分支 http-api〕（含远程明文的风险），再用 `scripts/surge_ios.py`。核对端点和认证（`X-Key`）；默认连同机，`SURGE_HTTP_API_BASE` 指向活动实例或可信局域网时，都要用户指定。危险操作按 §3 再确认。测试还没写进 Profile 的节点用 `scripts/test_policy_descriptor.py`，它不改配置，凭据按 §3 处理。
 
 ## 7. 交付
 

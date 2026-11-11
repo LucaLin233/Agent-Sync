@@ -7,7 +7,7 @@
   （env／printenv／cat／SELECT * 等）只能出现在禁止语境里。
 
 两类都只核离线夹具与模板文本，不证明自由 Shell 已被机械限制；读取侧关口仍由执行者按
-`luno-core/references/safety.md`〈秘密面〉与各模板遵守。标记 `ZMARK` 为合成低熵串。
+`luno-core/references/execution.md`〈秘密面〉与各模板遵守。标记 `ZMARK` 为合成低熵串。
 """
 import importlib.util
 import json
@@ -38,8 +38,14 @@ TEMPLATE_FILES = {
     'ops-runtime': OPS / 'references/service-runtime.md',
     'hub-instance': HUB / 'references/lobehub-instance.md',
     'hub-entry': HUB / 'references/lobehub.md',
-    'minis-config': MINIS / 'references/minis-configuration.md',
-    'sync-workflow': ROOT / 'skills/luno-core/references/sync-workflow.md',
+    'minis-config': MINIS / 'references/minis.md',
+    'sync-workflow': ROOT / 'skills/luno-core/references/sync.md',
+}
+TEMPLATE_BRANCHES = {
+    OPS / 'references/service-runtime.md': 'service-runtime',
+    HUB / 'references/lobehub.md': 'lobehub',
+    MINIS / 'references/minis.md': 'minis-configuration',
+    ROOT / 'skills/luno-core/references/sync.md': 'sync-workflow',
 }
 OPS_RUNTIME, HUB_INSTANCE, HUB_ENTRY = (TEMPLATE_FILES[k] for k in ('ops-runtime', 'hub-instance', 'hub-entry'))
 # 模板必须真的给出这些声明范围形态（缺锚点 ⇒ 禁止原语检查会空转）
@@ -66,7 +72,12 @@ BACKTICK = re.compile(r'`([^`\n]+)`')
 
 def read(path):
     assert path.is_file(), '模板不存在：%s' % path
-    return path.read_text(encoding='utf-8')
+    text = path.read_text(encoding='utf-8')
+    if path not in TEMPLATE_BRANCHES: return text
+    name = TEMPLATE_BRANCHES[path]
+    start, stop = '<!-- BEGIN ' + name + ' -->\n', '<!-- END ' + name + ' -->\n'
+    assert text.count(start) == text.count(stop) == 1, '模板分支缺失或重复'
+    return text.split(start, 1)[1].split(stop, 1)[0]
 
 
 class ProjectionRedactionTest(unittest.TestCase):
