@@ -1,8 +1,5 @@
 #!/bin/sh
-# Default: prepare only; no active files are changed.
+# Compatibility entry for read-only provenance inspection; no implicit prepare/apply.
 set -eu
 SELF_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
-if [ "$#" -eq 0 ]; then
-  exec python3 "$SELF_DIR/update_upstream.py" prepare
-fi
-exec python3 "$SELF_DIR/update_upstream.py" "$@"
+exec python3 -B "$SELF_DIR/update_upstream.py" "$@"

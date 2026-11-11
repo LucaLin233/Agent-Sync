@@ -316,7 +316,8 @@
         "skills/luno-surge/scripts/package_release.py",
         "skills/luno-surge/scripts/update_upstream.py",
         "skills/luno-surge/LICENSE.openminis.txt",
-        "skills/luno-surge/LICENSE.openminis-ios-dev.txt"
+        "skills/luno-surge/LICENSE.openminis-ios-dev.txt",
+        "skills/luno-surge/references/plugin-authoring.md"
       ],
       "ends": {
         "repo": {
@@ -334,14 +335,6 @@
           "fields": "content,name,description",
           "key": "surge.zip"
         }
-      },
-      "officialPackageResources": {
-        "note": "部署时从官方包按 upstream-manifest.json 的 raw_sha256 取件装入本端技能，公开仓库不含这 3 份参考原件；agents/openai.yaml 是本地有意改写，属自有文件",
-        "paths": [
-          "skills/luno-surge/references/plugin-authoring.md",
-          "skills/luno-surge/references/upstream-SKILL.md",
-          "skills/luno-surge/references/upstream-command-reference.md"
-        ]
       }
     }
   ]

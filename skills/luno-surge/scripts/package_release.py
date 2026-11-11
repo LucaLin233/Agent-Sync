@@ -9,7 +9,7 @@ paths inside the Skill directory are rejected). Entries sit at the ZIP root, the
 file, so scanned bytes are archived bytes. `tools/deploy_skill.py` reuses both.
 """
 from __future__ import annotations
-import hashlib, io, os, re, stat, sys, zipfile
+import hashlib, io, json, os, re, stat, sys, zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +20,9 @@ OUTPUT=Path(sys.argv[1]).expanduser() if len(sys.argv)>1 else DEFAULT
 EXCLUDED_PARTS={"__pycache__",".git",".DS_Store","logs","log","secrets","secret","private",".ssh"}
 EXCLUDED_SUFFIXES={".pyc",".pyo",".session",".sqlite",".db",".log",".key",".pem",".conf"}
 EXCLUDED_NAMES={"password","credentials",".env","secrets.env","secrets","id_rsa","id_ed25519","known_hosts",".netrc",".git-credentials"}
+FORBIDDEN_RESOURCES={"references/upstream-SKILL.md", "references/upstream-command-reference.md", "assets/logo.png"}
+OFFICIAL_SOURCE_KEYS={"SKILL.md", "references/command-reference.md",
+                      "references/plugin-authoring.md", "agents/openai.yaml", "assets/logo.png"}
 SECRET_PATTERNS=[
     re.compile(rb"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"),
     re.compile(rb"(?i)(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{20,}"),
@@ -77,10 +80,31 @@ def collect(root):
 
 def build(entries):
     """确定性布局构建 ZIP bytes；每个文件只读一次，同一份 bytes 先扫描再归档。"""
+    # Cache only the manifest: scan and archive exactly these same bytes, read once.
+    manifest_name="references/upstream-manifest.json"
+    manifest_entries=[path for rel,path in entries if rel==manifest_name]
+    if len(manifest_entries)!=1:
+        raise ReleaseError("Invalid provenance manifest")
+    try:
+        manifest_data=Path(manifest_entries[0]).read_bytes()
+        manifest=json.loads(manifest_data.decode("utf-8"))
+        raw=manifest["raw_sha256"]
+        if (not isinstance(raw,dict) or set(raw)!=OFFICIAL_SOURCE_KEYS or not all(
+                isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value)
+                for value in raw.values())):
+            raise ValueError("hash table")
+        raw_hashes=set(raw.values())
+    except (OSError,ValueError,KeyError,TypeError,UnicodeError):
+        raise ReleaseError("Invalid provenance manifest") from None
+    # Known whole-file detection is not a general copyright/license classifier.
     buf=io.BytesIO()
     with zipfile.ZipFile(buf,"w",zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
         for rel,path in entries:
-            data=Path(path).read_bytes()
+            if rel in FORBIDDEN_RESOURCES:
+                raise ReleaseError(f"Official resource is not distributable: {rel}")
+            data=manifest_data if rel==manifest_name else Path(path).read_bytes()
+            if digest(data) in raw_hashes:
+                raise ReleaseError(f"Known whole official file is not distributable: {rel}")
             for pattern in SECRET_PATTERNS:
                 if pattern.search(data):
                     raise SecretError(f"Potential secret found in {rel}")

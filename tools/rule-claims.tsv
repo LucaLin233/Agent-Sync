@@ -43,14 +43,7 @@ skills/luno-surge/SKILL.md	references/SOURCE.md	资源条件	资源加载边（s
 skills/luno-surge/SKILL.md	references/platform-compatibility.md	资源必需	资源加载边（surge·协议门槛与版本表）
 skills/luno-surge/SKILL.md	references/diagnostics.md	资源条件	资源加载边（surge·诊断工作流）
 skills/luno-surge/SKILL.md	references/command-reference.md	资源条件	资源加载边（surge·命令参考）
-skills/luno-surge/SKILL.md	references/plugin-authoring.md	资源条件	资源加载边（surge·插件开发；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/command-reference.md	资源条件	资源加载边（surge SOURCE·命令参考）
-skills/luno-surge/references/SOURCE.md	references/plugin-authoring.md	资源条件	资源加载边（surge SOURCE·插件开发指南；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/upstream-SKILL.md	资源条件	资源加载边（surge SOURCE·上游快照；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/controller-cli.md	资源条件	资源加载边（surge SOURCE·客户端与凭据）
-skills/luno-surge/references/SOURCE.md	references/http-api.md	资源条件	资源加载边（surge SOURCE·HTTP API）
-skills/luno-surge/references/SOURCE.md	references/diagnostics.md	资源条件	资源加载边（surge SOURCE·诊断）
-skills/luno-surge/references/SOURCE.md	references/platform-compatibility.md	资源条件	资源加载边（surge SOURCE·协议门槛与版本表）
+skills/luno-surge/SKILL.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
 skills/luno-surge/references/diagnostics.md	references/platform-compatibility.md	资源条件	资源加载边（surge 诊断→平台兼容）
 skills/luno-core/references/sync.md	references/skill-authoring.md	资源条件	资源加载边（sync·技能编写与校验）
 skills/luno-core/references/skill-authoring.md	references/agent-document-writing.md	资源条件	资源加载边（sync 技能编写→书写判据）
@@ -63,16 +56,12 @@ skills/luno-platform/references/cchp-workflows.md	references/cchp-interfaces.md	
 skills/luno-platform/references/cchp.md	references/cchp-coverage-rules.md	资源条件	资源加载边（cchp 入口·覆盖规则）
 skills/luno-platform/references/cchp-interfaces.md	references/cchp-coverage-rules.md	资源条件	资源加载边（interfaces→覆盖规则）
 skills/luno-platform/references/cchp-coverage-rules.md	references/cchp-interfaces.md	资源条件	资源加载边（覆盖规则→实际调用输出或接口契约）
-skills/luno-surge/SKILL.md	references/upstream-command-reference.md	资源条件	资源加载边（surge·官方命令原件；部署时从官方包取件，仓库不含）
-skills/luno-surge/SKILL.md	references/upstream-SKILL.md	资源条件	资源加载边（surge·上游对照；部署时从官方包取件，仓库不含）
-skills/luno-surge/references/SOURCE.md	references/upstream-command-reference.md	资源条件	资源加载边（surge SOURCE·官方命令原件；部署时从官方包取件，仓库不含）
 skills/luno-surge/references/command-reference.md	references/controller-cli.md	资源条件	资源加载边（surge 覆盖层→客户端）
 skills/luno-surge/references/command-reference.md	references/diagnostics.md	资源条件	资源加载边（surge 覆盖层→诊断）
 skills/luno-surge/references/command-reference.md	references/platform-compatibility.md	资源条件	资源加载边（surge 覆盖层→平台判据）
 skills/luno-surge/references/command-reference.md	references/http-api.md	资源条件	资源加载边（surge 覆盖层→安全分节写入）
 skills/luno-surge/references/platform-compatibility.md	references/http-api.md	资源条件	资源加载边（surge 平台判据→安全分节写入）
 skills/luno-surge/references/http-api.md	references/platform-compatibility.md	资源条件	资源加载边（surge HTTP→平台版本权益判据）
-skills/luno-surge/SKILL.md	references/upstream-manifest.json	资源条件	资源加载边（surge·manifest版本与哈希）
 skills/luno-surge/references/SOURCE.md	references/upstream-manifest.json	资源条件	资源加载边（surge SOURCE·manifest版本与哈希）
 
 # skill-slim-20261107：待审新增资源边（应用前与现有编号/守卫契约核对）
@@ -191,7 +180,6 @@ skills/luno-authoring/references/coding.md	luno-core/references/sync.md	资源�
 skills/luno-surge/references/SOURCE.md	luno-core/references/safety.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/SOURCE.md	luno-core/references/sync.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/SOURCE.md	luno-ops/references/github.md	资源条件	命中正文触发完整读取；范围以该分支为准
-skills/luno-surge/references/command-reference.md	luno-surge/references/upstream-command-reference.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/http-api.md	references/http-descriptor.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/http-api.md	references/http-metrics.md	资源条件	命中正文触发完整读取；范围以该分支为准
 skills/luno-surge/references/http-api.md	references/http-sections.md	资源条件	命中正文触发完整读取；范围以该分支为准
@@ -203,3 +191,14 @@ subagents/FORGE.md	luno-core/references/review.md	资源条件	命中正文触�
 skills/luno-platform/SKILL.md	luno-platform/references/lobehub.md	资源条件	正文指定触发完整读取；不得省略共同前置
 skills/luno-platform/SKILL.md	references/cchp-interfaces.md	资源条件	正文指定触发完整读取；不得省略共同前置
 skills/luno-platform/SKILL.md	references/lobehub-instance.md	资源条件	正文指定触发完整读取；不得省略共同前置
+skills/luno-surge/references/SOURCE.md	references/official-sources.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/command-reference.md	references/SOURCE.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/command-reference.md	references/http-sections.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/command-reference.md	references/official-sources.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/command-reference.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/command-reference.md	references/upstream-manifest.json	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/platform-compatibility.md	references/plugin-authoring.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/plugin-authoring.md	references/SOURCE.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/plugin-authoring.md	references/controller-cli.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/plugin-authoring.md	references/platform-compatibility.md	资源条件	资源加载边（Surge 自编运行资料；按正文触发）
+skills/luno-surge/references/plugin-authoring.md	references/upstream-manifest.json	资源条件	资源加载边（Surge 自编运行资料；按正文触发）

@@ -15,16 +15,10 @@ REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加�
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 FORMS = {'必需加载','条件加载','资源必需','资源条件'}
-HEX64 = re.compile(r'[0-9a-f]{64}\Z')
-# 只由部署取件装入的 luno-surge 官方参考原件：仓库路径 → manifest raw_sha256 的包内键
-# （与 luno-surge/references/SOURCE.md〈取件与部署〉同源）。仓库内允许缺这些文件。
-OFFICIAL_OBJECT = 'luno-surge'
-OFFICIAL_ORIGINALS = {
-    'skills/luno-surge/references/upstream-SKILL.md': 'SKILL.md',
-    'skills/luno-surge/references/upstream-command-reference.md': 'references/command-reference.md',
-    'skills/luno-surge/references/plugin-authoring.md': 'references/plugin-authoring.md',
-}
-INVENTORY_MANIFEST = 'skills/luno-surge/references/upstream-manifest.json'
+# Whole official files are not runtime resources; plugin-authoring.md is now self-authored.
+RETIRED_RESOURCES = ('skills/luno-surge/references/upstream-SKILL.md',
+                     'skills/luno-surge/references/upstream-command-reference.md',
+                     'skills/luno-surge/assets/logo.png')
 # __OBLIGATIONS__
 OBLIGATIONS = (('skills/luno-platform/SKILL.md', '## 实例与端点'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/SKILL.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis-runtime-context.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/safety.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
 
@@ -32,63 +26,20 @@ class Guard:
     def __init__(self, root):
         self.root = root.resolve()
         self.hard = []; self.incomplete = []; self.soft = []
-        self._official = None
-        self._official_ok = False
-        self._declared = False
 
-    def official(self):
-        """可豁免缺件的官方原件路径集合（run() 每次确定调用，结果缓存一次）。
-
-        只认 luno-surge 对象登记的 OFFICIAL_ORIGINALS 路径，且 manifest 须有对应哈希；
-        登记形态不合一律硬错误。没有任何登记时缺件只判未核（rc=3），不冒充通过。
-        由官方缺件分支惰性触发会让原件在位时整段跳过，故 run() 无条件调用。
-        """
-        if self._official is not None:
-            return self._official
+    def distribution(self):
+        """No source-fetch exceptions remain; normal resources must be present."""
         try:
             doc = json.loads((self.root / 'tools/sync-targets.json').read_text(encoding='utf-8'))
         except (OSError, ValueError, TypeError):
-            doc = None  # 登记表不可读已由 identities() 判未核
-        try:
-            manifest = json.loads((self.root / INVENTORY_MANIFEST).read_text(encoding='utf-8'))
-            raw = manifest.get('raw_sha256') if isinstance(manifest, dict) else None
-        except (OSError, ValueError, TypeError):
-            raw = None
-            self.problem('官方原件 manifest 不可读')
-        if not isinstance(raw, dict) or set(OFFICIAL_ORIGINALS.values()) - set(raw):
-            self.problem('官方原件 manifest 缺参考原件哈希')
-            raw = raw if isinstance(raw, dict) else {}
-        for key in OFFICIAL_ORIGINALS.values():
-            if not HEX64.match(str(raw.get(key, ''))):
-                self.problem('官方原件 manifest 哈希形态')
-        objects = doc.get('objects') if isinstance(doc, dict) else None
-        if doc is not None and not isinstance(objects, list):
-            self.problem('官方原件登记结构')
-        declared = set()
-        for o in objects if isinstance(objects, list) else ():
-            if not isinstance(o, dict) or 'officialPackageResources' not in o:
-                continue
-            self._declared = True
-            blk = o['officialPackageResources']
-            if not isinstance(blk, dict) or not isinstance(blk.get('paths'), list):
-                self.problem('官方原件登记形态'); continue
-            if o.get('id') != OFFICIAL_OBJECT and blk['paths']:
-                self.problem('官方原件豁免对象非法'); continue
-            for q in blk['paths']:
-                if not isinstance(q, str) or q not in OFFICIAL_ORIGINALS:
-                    self.problem('官方原件豁免路径非法'); continue
-                if q in declared:
-                    self.problem('官方原件豁免路径重复'); continue
-                declared.add(q)
-        if self._declared and set(OFFICIAL_ORIGINALS) - declared:
-            self.problem('官方原件豁免登记缺项')
-        self._official = declared
-        self._official_ok = self._declared and not self.hard
-        return declared
-
-    def official_ok(self):
-        self.official()
-        return self._official_ok
+            return  # identities() reports an unreadable registry as incomplete.
+        for obj in doc.get('objects', []) if isinstance(doc, dict) and isinstance(doc.get('objects'), list) else []:
+            if isinstance(obj, dict) and 'officialPackageResources' in obj:
+                self.problem('官方取件登记已退休')
+        for rel in RETIRED_RESOURCES:
+            path = self.path(rel)
+            if path is not None and path.exists():
+                self.problem('禁止分发完整官方资源')
 
     def problem(self, kind, *, incomplete=False):
         (self.incomplete if incomplete else self.hard).append(kind)
@@ -120,12 +71,11 @@ class Guard:
         return q
 
     def resource(self, src, target):
-        """技能内资源须存在；仅已登记的官方原件可缺。"""
+        """技能内必需资源均须在仓库内存在，不再豁免官方缺件。"""
         rel = 'skills/'+target if CROSS_RESOURCE_RE.fullmatch(target) else skill_root(src)+'/'+target
         path = self.path(rel)
         if path is not None and not path.is_file():
-            if not self.official_ok(): self.problem('资源引用断链未核', incomplete=True)
-            elif rel not in self.official(): self.problem('资源引用断链')
+            self.problem('资源引用断链')
 
     def sources(self):
         out = {}
@@ -272,8 +222,7 @@ class Guard:
             if not any(x.strip() for x in lines[i:j]): self.problem('义务块为空')
 
     def run(self):
-        # 官方声明每次必核：缺件豁免只放宽“文件不存在”，不因原件在位而跳过登记/manifest 形态校验
-        self.official()
+        self.distribution()
         bodies=self.sources();self.claims(bodies);self.identities();self.obligations(bodies)
         for k in self.hard: print('[结构错误] '+k)
         for k in self.incomplete: print('[检查不完整] '+k)

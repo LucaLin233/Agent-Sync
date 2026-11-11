@@ -4,7 +4,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 python3 -B - "$ROOT" <<'PYEOF'
-import contextlib, hashlib, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile
+import contextlib, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 ROOT=Path(sys.argv[1])
 spec=importlib.util.spec_from_file_location('guard',ROOT/'tools/check-rules.py')
@@ -29,11 +29,8 @@ def fresh():
     for f in ('rule-claims.tsv','sync-targets.json'):shutil.copyfile(ROOT/'tools'/f,p/'tools'/f)
     return p
 
-def case(label,want,category,setup=lambda p:None,official=None):
+def case(label,want,category,setup=lambda p:None):
     p=fresh()
-    if official is not None:
-        n=prepare_official(p,official)
-        check('夹具官方原件%s'%('齐备 3 件' if official else '缺失 0 件'),n==(3 if official else 0),'实际 %d 件'%n)
     setup(p)
     out=io.StringIO();guard=G.Guard(p)
     with contextlib.redirect_stdout(out):rc=guard.run()
@@ -165,50 +162,23 @@ for src,head in ROOT_OBS:
     case('平台入口义务缺失 '+head,1,'义务块缺失或重复',
          lambda p,src=src,head=head:edit(p,src,lambda s:s.replace(head,head+'-removed',1)))
 
-# ── 官方原件：只对 luno-surge 的登记原件、且 manifest 有合法哈希；齐备／缺失两状态同判 ──
-def prepare_official(p,present):
-    """在夹具副本内显式构造官方原件状态，返回实际在位件数。
-
-    齐备态优先用已在位原件并核 manifest 哈希；公开 CI 无原件时写合成内容
-    （仅验证结构形态，不认证官方身份），只把夹具 manifest 的 raw_sha256 改成该合成内容
-    的真实 sha256。缺失态只删夹具内 3 件，不动仓库原件。被改项：仅夹具副本。
-    """
-    ref=p/'skills/luno-surge/references';mf=ref/'upstream-manifest.json'
-    man=json.loads(mf.read_text(encoding='utf-8'));synthetic=False
-    for rel,key in G.OFFICIAL_ORIGINALS.items():
-        f=p/rel
-        if not present:
-            if f.is_file():f.unlink()
-        elif f.is_file():
-            assert hashlib.sha256(f.read_bytes()).hexdigest()==man['raw_sha256'][key],'在位原件与 manifest 哈希不符：'+rel
-        else:
-            f.write_text('# 合成官方原件夹具（仅验证结构形态，不认证官方身份）\n'+key+'\n',encoding='utf-8')
-            man['raw_sha256'][key]=hashlib.sha256(f.read_bytes()).hexdigest();synthetic=True
-    if synthetic:mf.write_text(json.dumps(man,indent=2)+'\n',encoding='utf-8')
-    return sum(1 for rel in G.OFFICIAL_ORIGINALS if (p/rel).is_file())
-
-def exempt(surge,mutate):
-    def setup(p):
-        def fn(d):
-            o=next(x for x in d['objects'] if (x['id']==G.OFFICIAL_OBJECT)==surge)
-            mutate(o.setdefault('officialPackageResources',{'paths':[]}))
-        registry(p,fn)
-    return setup
-OTHER_PATH='skills/luno-core/references/x.md'
-FIRST_OFFICIAL=next(iter(G.OFFICIAL_ORIGINALS))
-def bad_hash(p):
-    f=p/G.INVENTORY_MANIFEST;d=json.loads(f.read_text(encoding='utf-8'))
-    d['raw_sha256'][next(iter(G.OFFICIAL_ORIGINALS.values()))]='z'*64
-    f.write_text(json.dumps(d),encoding='utf-8')
-BAD_OFFICIAL=[('非官方路径塞进 surge 豁免','官方原件豁免路径非法',exempt(True,lambda b:b['paths'].append(OTHER_PATH))),
-              ('其他对象带豁免','官方原件豁免对象非法',exempt(False,lambda b:b['paths'].append(OTHER_PATH))),
-              ('豁免登记缺项','官方原件豁免登记缺项',exempt(True,lambda b:b['paths'].remove(FIRST_OFFICIAL))),
-              ('豁免登记形态坏','官方原件登记形态',exempt(True,lambda b:b.update(paths=FIRST_OFFICIAL))),
-              ('manifest 哈希形态坏','官方原件 manifest 哈希形态',bad_hash)]
-for state in (True,False):
-    for label,category,setup in BAD_OFFICIAL:
-        case('官方原件%s｜%s'%('齐备' if state else '缺失',label),1,category,setup,official=state)
-    case('官方原件%s｜合法登记'%('齐备' if state else '缺失'),0,'无问题',official=state)
+# ── 自编资源：缺件不再豁免，旧取件登记一律拒绝 ──
+def legacy_fetch(p):
+    def mutate(doc):
+        obj=next(o for o in doc['objects'] if o['id']=='luno-surge')
+        obj['officialPackageResources']={'paths':[]}
+    registry(p,mutate)
+case('旧取件登记即使为空也拒绝',1,'官方取件登记已退休',legacy_fetch)
+case('自编插件指南缺失不获豁免',1,'资源引用断链',
+     lambda p:(p/'skills/luno-surge/references/plugin-authoring.md').unlink())
+# Independent requirement oracle: never derive forbidden fixtures from the guard.
+for rel in ('skills/luno-surge/references/upstream-SKILL.md',
+            'skills/luno-surge/references/upstream-command-reference.md',
+            'skills/luno-surge/assets/logo.png'):
+    def inject(p,rel=rel):
+        target=p/rel;target.parent.mkdir(parents=True,exist_ok=True)
+        target.write_bytes(b'synthetic retired official resource')
+    case('退役官方资源进入运行树 '+rel,1,'禁止分发完整官方资源',inject)
 
 # ── frontmatter 剥离 ──
 for text,want in (('---\n---\n正文\n---\n尾部','正文\n---\n尾部'),
