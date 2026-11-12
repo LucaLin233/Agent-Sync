@@ -103,7 +103,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ### 审查取材
 
-**anthropics/knowledge-work-plugins@`d3ee81913e5e179273313345847a2a4f42449bd2`**（2026-09-11）：`engineering/skills/code-review/SKILL.md` → `references/code-review.md`。精选改写了上游的四维清单和输出要素；架构维、依赖纪律、结构整改和诚实与分歧是自撰或扩写的；GitHub 长版没有整体采用。许可 Apache-2.0，原字节随包为 `LICENSE.code-review.txt`（11607 B，sha256 `a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26`）。在线可取性未复核。
+**anthropics/knowledge-work-plugins@`d3ee81913e5e179273313345847a2a4f42449bd2`**（2026-09-11）：`engineering/skills/code-review/SKILL.md` → `references/code-review.md`。精选改写了上游的四维清单和输出要素；架构维、依赖纪律、结构整改和诚实与分歧是自撰或扩写的；GitHub 长版没有整体采用。2026-11-12 起通用检查面改为指向 Google 代码审查指南，四维清单正文只剩〈代码双轴与 CI〉中“安全、性能、正确性和可维护性的覆盖仍要做”一句。许可 Apache-2.0，原字节随包为 `LICENSE.code-review.txt`（11607 B，sha256 `a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26`）。在线可取性未复核。
 
 - 2026-10-16 许可补证：从旧私有 `LucaLin233/Agent` 的 `ee75bb6` 取回原 `code-review` 市场发布物，1302 B，sha256 `3612de8f2c897f98ad20a46f5e0c9f8c6f160873b1e7f44def0bb2ff96ee3451`。实际吸收的四维清单原文 649 B，sha256 `adac810be9904bfb1e479b5bfc547b475ce4f6abab0e7ab3a3952090182bd6b5`，与[固定上游提交的同一段](https://github.com/anthropics/knowledge-work-plugins/blob/d3ee81913e5e179273313345847a2a4f42449bd2/engineering/skills/code-review/SKILL.md)逐字节相等。该提交的[完整 LICENSE](https://github.com/anthropics/knowledge-work-plugins/blob/d3ee81913e5e179273313345847a2a4f42449bd2/LICENSE) 为 Apache-2.0；目标提交根目录的 NOTICE 实读为 404。
 - 这次补证只覆盖当前采用片段的可追溯许可；原市场整包的许可仍未决，不声称已核。
