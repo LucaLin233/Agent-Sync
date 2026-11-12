@@ -10,18 +10,19 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LOAD_RE = re.compile(r'(先加载|先完整加载|另加载|必须加载|必须完整加载|一律加载|按需加载|条件加载)\s*`?(luno-[a-z0-9-]+)(?![a-z0-9/-])`?')
+LOAD_RE = re.compile(r'(先加载|先完整加载|另加载|必须加载|必须完整加载|一律加载|按需加载|条件加载)\s*`?(luno-[a-z0-9-]+|cchp)(?![a-z0-9/-])`?')
 REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加载','一律加载'}
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
-# 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故最小内置这 6 条（原 rule-claims.tsv 的必需加载行）。
+# 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
 REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/LENS.md', 'luno-core'),
                   ('subagents/FORGE.md', 'luno-core'),
                   ('subagents/minis-general-fallback.md', 'luno-core'),
                   ('prompt/LUNO.md', 'luno-memory'),
-                  ('skills/luno-core/references/execution.md', 'luno-core'))
+                  ('skills/luno-core/references/execution.md', 'luno-core'),
+                  ('skills/luno-platform/references/cchp.md', 'cchp'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')

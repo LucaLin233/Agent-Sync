@@ -6,7 +6,7 @@ paths inside the Skill directory are rejected). Entries sit at the ZIP root, the
 `lh skill install` consumes; no `surge/` prefix.
 
 `collect(root)` filters entries, `build(entries)` returns archive bytes with one read per
-file, so scanned bytes are archived bytes. `tools/deploy_skill.py` reuses both.
+file, so scanned bytes are archived bytes. The standalone release archive uses both.
 """
 from __future__ import annotations
 import hashlib, io, json, os, re, stat, sys, zipfile

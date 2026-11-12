@@ -143,7 +143,9 @@
           "id": "skl_ZOfk8YUmIHHK",
           "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-core",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
     },
     {
       "id": "luno-ops",
@@ -171,7 +173,9 @@
           "id": "skl_rwV1Jo4OtDUC",
           "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-ops",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
     },
     {
       "id": "luno-authoring",
@@ -199,7 +203,9 @@
           "id": "skl_4RxZPYI52gQ3",
           "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-authoring",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
     },
     {
       "id": "luno-memory",
@@ -224,7 +230,9 @@
           "id": "skl_DPGuJSBiiKKp",
           "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-memory",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
     },
     {
       "id": "luno-platform",
@@ -233,11 +241,7 @@
       "resources": [
         "skills/luno-platform/LICENSE.openminis.txt",
         "skills/luno-platform/LICENSE.upstream.txt",
-        "skills/luno-platform/references/cchp-coverage-rules.md",
         "skills/luno-platform/references/cchp.md",
-        "skills/luno-platform/references/cchp-source.md",
-        "skills/luno-platform/references/cchp-workflow-org.md",
-        "skills/luno-platform/references/cchp-workflow-providers.md",
         "skills/luno-platform/references/lobehub.md",
         "skills/luno-platform/references/lobehub-instance.md",
         "skills/luno-platform/references/lobehub-knowledge.md",
@@ -258,7 +262,9 @@
           "id": "skl_rz3RoxsUKelk",
           "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
     },
     {
       "id": "luno-surge",
@@ -296,10 +302,47 @@
           "present": true,
           "kind": "skill",
           "id": "skl_1yKBFkPYoTGd",
-          "fields": "content,name,description",
-          "key": "surge-ca269bdf3861.zip"
+          "fields": "content,name,description"
         }
-      }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-surge",
+      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+    },
+    {
+      "id": "cchp",
+      "type": "skill",
+      "source": "skills/cchp/SKILL.md",
+      "resources": [
+        "skills/cchp/LICENSE.upstream.txt",
+        "skills/cchp/references/auth.md",
+        "skills/cchp/references/errors.md",
+        "skills/cchp/references/output-contract.md",
+        "skills/cchp/references/pagination.md",
+        "skills/cchp/references/workflows.md"
+      ],
+      "ends": {
+        "repo": {
+          "present": true
+        },
+        "minis": {
+          "present": false
+        },
+        "lobehub": {
+          "present": false
+        }
+      },
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/cchp",
+      "plannedEnds": {
+        "minis": {
+          "kind": "file",
+          "path": "/var/minis/skills/cchp/SKILL.md"
+        },
+        "lobehub": {
+          "kind": "skill",
+          "fields": "content,name,description"
+        }
+      },
+      "note": "官方技能采用已批准；两运行端待首次安装和回读后登记 present 与实际 ID，不预填线上成功。"
     }
   ]
 }
