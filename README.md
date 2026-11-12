@@ -52,9 +52,10 @@ git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths | s
 - 署名检查的测试（`identity` 组）不进 `full`，改动署名检查器、它的测试或〈Git 提交署名〉规则时由选路触发；没有 gpg 的机器上，涉及真实签名的用例会跳过。
 - 只改正文、没有命中专项时只跑 smoke，不能把它当作各专项都已通过。结构通过不证明行为没有弱化；改加载边或资源边要在同一批更新 `tools/rule-claims.tsv`。
 - 测试在白名单环境里运行：独占的 HOME 和 TMPDIR，调用方的其他环境变量不进入，stdin 固定为 `/dev/null`。
+- CI（`.github/workflows/tests.yml`）在每个 PR 和 main 上跑 `full` 与 `identity` 组；CI 通过不代替按选路在本端补跑的专项。
 
 结构守卫 `tools/check-rules.py` 的退出码固定为 **0 = 无问题，1 = 结构错误（阻断），2 = 仅提示，3 = 检查不完整（阻断）**。`tools/sync-all.sh` 按 0 和 2 放行（rc=2 的提示保留输出但不阻断）；`tests/run-tests.sh` 把任何非零（含 rc=2）都记为 FAIL，也就是测试门禁要求零提示。两者口径不同是有意的，`tests/test-check-rules.sh` 回归固定这四种状态。`tools/sync-all.sh` 只跑结构守卫和包内校验，不访问生效端。
 
 测试的准入和成本纪律见 `skills/luno-core/references/test-authoring.md`；技能结构校验直接调用 `skills/luno-core/scripts/quick_validate.py`。
 
-共读资源按指针指定的完整原分支读取，原触发和共同前置不变；读法写在 `luno-core` 入口〈加载〉，`tools/check-rules.py` 核对每个分支指针都能找到锚点和 BEGIN/END 定界。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。
+共读资源按指针指定的完整原分支读取，原触发和共同前置不变；读法写在 `luno-core` 入口〈加载〉，`tools/check-rules.py` 核对每个分支指针都能找到锚点和 BEGIN/END 定界。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。

@@ -1,0 +1,22 @@
+# 仓库测试：PR 和 main 上跑 full 与 identity（Linux 上合计约 10 s）。
+# pull_request 运行 PR 自身的代码，只给 contents: read，不用任何秘密。
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4 固定完整 SHA，与 commit-identities.yml 相同；升级须重新核对。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - name: full
+        run: sh tests/run-tests.sh full
+      - name: identity
+        run: sh tests/run-tests.sh group identity
