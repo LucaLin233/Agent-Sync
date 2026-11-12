@@ -16,6 +16,8 @@ jobs:
     steps:
       # actions/checkout v4 固定完整 SHA，与 commit-identities.yml 相同；升级须重新核对。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
       - name: full
         run: sh tests/run-tests.sh full
       - name: identity
