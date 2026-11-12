@@ -140,12 +140,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_ZOfk8YUmIHHK",
+          "id": "skl_80yT7HBovdhm",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-core",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "luno-ops",
@@ -170,12 +170,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_rwV1Jo4OtDUC",
+          "id": "skl_GFH4VX36mLmY",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-ops",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "luno-authoring",
@@ -200,12 +200,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_4RxZPYI52gQ3",
+          "id": "skl_gRPt1BruQ3lS",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-authoring",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "luno-memory",
@@ -227,12 +227,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_DPGuJSBiiKKp",
+          "id": "skl_9oPvAqJubP2H",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-memory",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "luno-platform",
@@ -259,12 +259,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_rz3RoxsUKelk",
+          "id": "skl_Yp9xWuhzdFMo",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "luno-surge",
@@ -301,12 +301,12 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_1yKBFkPYoTGd",
+          "id": "skl_XtScVglneLa6",
           "fields": "content,name,description"
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-surge",
-      "note": "LobeHub ID 为迁移前登记；删除重装后回读实际新 ID 并更新。GitHub identifier 按 owner-repo-末段目录名生成，安装前核实际大小写及来源。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
       "id": "cchp",
@@ -325,24 +325,19 @@
           "present": true
         },
         "minis": {
-          "present": false
-        },
-        "lobehub": {
-          "present": false
-        }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/cchp",
-      "plannedEnds": {
-        "minis": {
+          "present": true,
           "kind": "file",
           "path": "/var/minis/skills/cchp/SKILL.md"
         },
         "lobehub": {
+          "present": true,
           "kind": "skill",
+          "id": "skl_lDZbl4IutUAZ",
           "fields": "content,name,description"
         }
       },
-      "note": "官方技能采用已批准；两运行端待首次安装和回读后登记 present 与实际 ID，不预填线上成功。"
+      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/cchp",
+      "note": "官方 CCH-HQ/cchp-cli skills/cchp 原样入仓；2026-11-12 两端首装并回读，LobeHub ID 为实际回读值。"
     }
   ]
 }
