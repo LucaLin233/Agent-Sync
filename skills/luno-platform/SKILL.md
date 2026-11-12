@@ -4,11 +4,11 @@ description: CCHP控制面（用量、请求、provider/key、覆写规则、LLM
 ---
 # LUNO｜平台配置与运行时
 
-CCHP控制面完整读 `references/cchp.md`〔分支 cchp〕；Minis配置/运行时完整读 `references/minis.md`〔分支 minis〕；已部署LobeHub 2.x CE完整读 `references/lobehub.md`〔分支 lobehub〕。跨产品取并集。以下各项仅适用于标明的产品，不跨用能力、入口、实例或凭据。
+CCHP控制面完整读 `references/cchp.md`；Minis配置/运行时完整读 `references/minis.md`〔分支 minis〕；已部署LobeHub 2.x CE完整读 `references/lobehub.md`〔分支 lobehub〕。跨产品取并集。以下各项仅适用于标明的产品，不跨用能力、入口、实例或凭据。
 
 ## 实例与端点
 
-管理面用 `CCHP_GATEWAY_URL` + `CCHP_TOKEN`，模型数据面用 `CCHP_BASE_URL` + LLM token，两者都必须是本次获准、已注入的变量，**两个面不得混用**。CLI 的 server 必须指向管理面（变量用法和反例见 `references/cchp.md`〔分支 cchp-interfaces〕〈实例端点与凭据〉）。缺哪个入口或凭据，就停止依赖它的请求、命令和结论，并报告变量名；不回退旧地址、不猜子域、不换实例或环境。离线分析和另一个入口的已授权操作可以继续。
+管理面用 `CCHP_GATEWAY_URL` + `CCHP_TOKEN`，模型数据面用 `CCHP_BASE_URL` + LLM token，两者都必须是本次获准、已注入的变量，**两个面不得混用**。CLI 的 server 必须指向管理面（本端变量映射与认证限制见 `references/cchp.md`〈安全与认证〉）。缺哪个入口或凭据，就停止依赖它的请求、命令和结论，并报告变量名；不回退旧地址、不猜子域、不换实例或环境。离线分析和另一个入口的已授权操作可以继续。
 
 ## Minis执行能力
 

@@ -19,7 +19,8 @@
 | luno-ops | 自编＋精选改写 | `LICENSE.openclaw.txt` |
 | luno-memory | 自编＋精选改写 | `LICENSE.matt-pocock.txt` |
 | luno-authoring（并入原 luno-coding、luno-writing） | 自编＋精选改写 | `LICENSE.davila7.txt`、`LICENSE.matt-pocock.txt`、`LICENSE.obra-superpowers.txt` |
-| luno-platform（并入原 luno-cchp、luno-lobehub、luno-minis） | 自编＋精选改写（Minis 部分）＋第三方改编（CCHP 部分，含精选改写） | `LICENSE.openminis.txt`、`LICENSE.upstream.txt` |
+| luno-platform（并入原 luno-cchp、luno-lobehub、luno-minis） | 本端约定＋精选改写（含 CCHP 历史余段） | `LICENSE.openminis.txt`、`LICENSE.upstream.txt` |
+| cchp | 官方技能原样 vendored，另补随包许可 | `LICENSE.upstream.txt` |
 | luno-surge | 自编运行资料＋历史来源证据＋精选改写 | `LICENSE.openminis.txt`、`LICENSE.openminis-ios-dev.txt` |
 
 已移除和已退役的来源见文末〈已移除与退役的来源〉。
@@ -146,25 +147,25 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - `codex-on-ish/SKILL.md` → Codex/iSH TLS 排障一段。许可按 2026-10-25 的 MIT 裁定。
 - `apple-reminders/SKILL.md` 第 94–103 行 → 原生 `apple-*` 条款之后关于原生查询完整性的一段。许可依据根 `LICENSE`（MIT，`Copyright (c) 2026 OpenMinis`）。
 
-### CCHP
+### CCHP 本端层
 
-上游是 GitHub `CCH-HQ/cchp-cli`，包含 `cchp` CLI 和内置的 Agent Skill。
+`references/cchp.md` 只保留本端认证/输出边界、组织写入约定、恢复及链路核验、带版本的实例经验；官方已覆盖的 CLI 说明、业务示例、输出、错误和分页不再维护中文副本。原 `cchp-source.md`、`cchp-workflow-org.md`、`cchp-workflow-providers.md`、`cchp-coverage-rules.md` 退役，历史取材证据可从 β 前 main 提交 `217ff083cf536cf9f946ffc9a233bc748dffc44b` 恢复。本端层保留历史精选改写的 MIT 版权通知及 `LICENSE.upstream.txt`，不因精简删除必要许可。本端层必需加载官方 cchp，不覆盖官方正文，官方凭据回退不适用于本端。
 
-- **取材基线**：`d9da5760a8d2f6ce689c01b98b6c96540513045d`（2026-10-25，CLI v0.1.3，spec v1.0.12）。只有采纳更新且包内正文随之改动时才更新基线；只核对而未采纳时不改基线。
-- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`，原文随包为 `skills/luno-platform/LICENSE.upstream.txt`。上游 MIT 原文和版权行随包分发，中文改写也可以按 MIT 再分发。
-- **取材文件**（上游路径）：`skills/cchp/SKILL.md`、`skills/cchp/references/auth.md`、`skills/cchp/references/errors.md`、`skills/cchp/references/output-contract.md`、`skills/cchp/references/pagination.md`、`skills/cchp/references/workflows.md`、`docs/agent-guide.md`、`docs/output-contract.md`、`docs/safety-model.md`、`LICENSE`。
-- 契约另以 CLI 内置的 spec、schema、命令元数据、指南和实例只读结果核对，动作前仍要核对当次的版本和契约。本机的非生效副本只用于对照锁定的基线，不代替最新上游，也不覆盖正文。
+## cchp
 
-| 本地文件（相对 `skills/luno-platform/`） | 主要上游来源 | 处理 |
-|---|---|---|
-| `SKILL.md`〈实例与端点〉、`references/cchp.md`〔分支 cchp〕 | `skills/cchp/SKILL.md`、`docs/agent-guide.md` | 保留「发现 → schema → 调用」、门禁和停止条件；补本端位置、版本、认证和授权边界 |
-| `references/cchp.md`〔分支 cchp-interfaces〕 | auth、errors、output-contract、pagination 及 docs 中的契约与安全文档 | 合并认证、直连、错误、分页、流式与下载、重试契约；删去面向人的入门叙述；列表形状、操作字段和分页只在命中操作时按当前内置 spec 核对，不缓存旧表 |
-| `references/cchp.md`〔分支 cchp〕〈业务分支〉、`references/cchp.md`〔分支 cchp-workflow-writes〕、`references/cchp-workflow-providers.md`、`references/cchp-workflow-org.md` | `skills/cchp/references/workflows.md` | 保留业务骨架，补范围、变更前后和恢复等通用约束；实例数字不落值，以当次实测为准 |
-| `references/cchp-coverage-rules.md` | `skills/cchp/references/workflows.md` | 迁入本地 request-overrides 的完整分支，保留精选改写和实例验证边界 |
-
-未纳入入门流程、Restish 隔离和本地凭据存储；安装只保留获准安装器的版本、目录、校验和入口验收，不纳入 Homebrew 或源码构建。上游的凭据回退不适用于本端（见 `luno-platform/references/cchp.md`〈认证边界〉）；`--allow-write`、`--confirm` 和上游新增的命令都不扩大授权。
-
-**追新**：按 `skills/luno-platform/references/cchp-source.md`，不自动跟版；比较期间不改未采纳基线。用取材基线对锁定默认分支 HEAD 及技能目录末次提交，全部取材文件（含 docs、LICENSE）逐个比哈希、变化项 diff；404 不等于未变，结合 compare 的 added/removed/renamed 区分新增、删除或改名，取不齐报缺证。即使文件未变，也核 CHANGELOG、最新 release、CLI/spec 契约：门禁、退出码、输出、分页、错误、认证、安全与脱敏、参数/schema、默认值、重试/超时、流式/下载任一变化均属契约变化，不能以实现、安装或人机界面变化排除。只有文件 diff 为空且 CHANGELOG/release 未见上述语义变化，才可判无需跟版。需跟版先列上表本地小节、旧新语义及实例兼容性，再按 `luno-core/references/sync.md`〔分支 sync-workflow〕及当次授权实施；包变后重算部署哈希并回读。核对不授权写入或部署，上游新增命令无本端授权场景不补步骤。
+- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，固定采用提交 `d9da5760a8d2f6ce689c01b98b6c96540513045d`；2026-11-12 匿名 clone 核对默认分支 main HEAD 仍为该提交，未发生基线推进。
+- **取材范围**：上游 `skills/cchp/` 的全部 6 个文件，原字节落到本仓库 `skills/cchp/`；不翻译、不合并、不改正文/frontmatter。额外把上游根 `LICENSE` 原字节加入 `skills/cchp/LICENSE.upstream.txt`，不复制 CLI 二进制、spec、docs、构建/安装脚本或其他目录。
+- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`；完整版权与 MIT 条款随包分发，根 LICENSE 不替代它。
+- **两端来源**：Minis 按审定仓库版本逐文件安装到 `/var/minis/skills/cchp/`，并核 App 登记及新会话元数据；LobeHub 用 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/cchp` 安装，正文按 body_contract 核验，安装裁掉的尾 LF 须补回。运行端 ID 和状态只在实际安装回读后更新，不在制稿阶段虚填。
+- **追新**：只从官方 GitHub 默认分支核 HEAD、逐文件末次提交、正文及 LICENSE diff；经授权采纳与审查后更新 vendored 字节和本登记，不自动跟版。安装 main URL 不能锁 SHA，部署前后核分支 HEAD 与已审提交，并逐文件回读，分支推进或内容不符就停止相关对象。
+- **原始文件 SHA-256**（2026-11-12，固定提交）：
+  - `skills/cchp/LICENSE.upstream.txt`：`481c79a8e1493001832cfb2e417e2a698f7f0b0d3b3351a10fa0750e53046cb2`
+  - `skills/cchp/SKILL.md`：`b5be23e8377bb71a275245c025047fbf9ab4e3435793e8641f3005d67a7149b6`
+  - `skills/cchp/references/auth.md`：`0db41d2c9142d8b63e30a0933d257233634e4bd5c0ddcf94356fdfea514af053`
+  - `skills/cchp/references/errors.md`：`8cca46803de493de7ac75f24be098d7a5e236900a786474529627da68c9a60dc`
+  - `skills/cchp/references/output-contract.md`：`10bf216fa42ff8ed87aa137898039c72328af10b20279e5f90ea1d0fb0c8d296`
+  - `skills/cchp/references/pagination.md`：`a49814cd2246eeb69c8f85df2e4b3c37b2a39b7ca833d08892bdc80687760229`
+  - `skills/cchp/references/workflows.md`：`30a15014d3dfdd53f40bc8380f2c101d2cddb53ef0ae925c9d3b86a2cf942e4c`
 
 ## luno-authoring
 
