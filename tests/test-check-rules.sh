@@ -142,6 +142,12 @@ def cross_symlink(p):
     append(p,'subagents/LENS.md','\n`'+CROSS+'`\n')
 case('跨包资源经symlink',1,'资源引用逃逸',cross_symlink)
 
+# ── 合并资源的分支指针 ──
+case('分支指针指向不存在的分支',1,'分支指针失效',
+     lambda p:edit(p,ENTRY,lambda s:s.replace('〔分支 execution〕','〔分支 absent〕',1)))
+case('被指向的分支缺 END 定界',1,'分支指针失效',
+     lambda p:edit(p,'skills/luno-core/references/execution.md',lambda s:s.replace('<!-- END safety -->','',1)))
+
 # ── 身份登记 ──
 case('身份登记不可读',3,'身份登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{bad'))
 case('身份登记为空',3,'身份登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{"objects":[]}'))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""结构守卫：加载/资源边登记、单份身份、references 路径、义务块存在性。
+"""结构守卫：加载/资源边登记、单份身份、references 路径、分支指针、义务块存在性。
 只读当前树，不访问生效端，不检查正文措辞；rc=0 不证明规则无弱化。
 退出码：0 无问题，1 结构错误，2 仅提示，3 检查不完整。
 """
@@ -15,6 +15,9 @@ REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加�
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 FORMS = {'必需加载','条件加载','资源必需','资源条件'}
+# 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
+BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
+BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
 # Whole official files are not runtime resources; plugin-authoring.md is now self-authored.
 RETIRED_RESOURCES = ('skills/luno-surge/references/upstream-SKILL.md',
                      'skills/luno-surge/references/upstream-command-reference.md',
@@ -209,6 +212,17 @@ class Guard:
                     if key in owners and owners[key]!=name: self.problem('平台身份多占')
                     owners[key]=name
 
+    def branches(self,bodies):
+        for src,body in bodies.items():
+            targets=[('skills/'+f if CROSS_RESOURCE_RE.fullmatch(f) else skill_root(src)+'/'+f,b)
+                     for f,b in BRANCH_PTR_RE.findall(body)]
+            targets+=[(str(Path(src).parent/f),b) for f,b in BRANCH_LINK_RE.findall(body)]
+            for rel,name in targets:
+                text=bodies.get(rel,'')
+                begin,end=text.find('<!-- BEGIN %s -->'%name),text.find('<!-- END %s -->'%name)
+                if '<a id="branch-%s"></a>'%name not in text or begin<0 or end<begin:
+                    self.problem('分支指针失效')
+
     def obligations(self,bodies):
         for src,heading in OBLIGATIONS:
             body=bodies.get(src)
@@ -223,7 +237,7 @@ class Guard:
 
     def run(self):
         self.distribution()
-        bodies=self.sources();self.claims(bodies);self.identities();self.obligations(bodies)
+        bodies=self.sources();self.claims(bodies);self.identities();self.branches(bodies);self.obligations(bodies)
         for k in self.hard: print('[结构错误] '+k)
         for k in self.incomplete: print('[检查不完整] '+k)
         for k in self.soft: print('[提示] '+k)
