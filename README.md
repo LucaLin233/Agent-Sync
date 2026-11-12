@@ -57,4 +57,4 @@ git diff --name-only -z --diff-filter=d | sh tests/run-tests.sh select-paths | s
 
 测试的准入和成本纪律见 `skills/luno-core/references/test-authoring.md`；技能结构校验直接调用 `skills/luno-core/scripts/quick_validate.py`。
 
-共读资源按指针指定的完整原分支读取，原触发和共同前置不变。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。
+共读资源按指针指定的完整原分支读取，原触发和共同前置不变；读法写在 `luno-core` 入口〈加载〉，`tools/check-rules.py` 核对每个分支指针都能找到锚点和 BEGIN/END 定界。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。路径迁移见 skills-sources.md 的共读资源迁移表；六个技能身份和许可附件保持不变。
