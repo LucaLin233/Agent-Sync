@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "对象身份与落点的唯一活真源。present 仅表示受管存在性，不表示已部署或验收；写前按明确 ID 回读，冲突即停。不再自动互校或全量同名发现。 本候选把review与sync合并到core任务分支；原两对象退休，端上迁移未执行。仅适用于本候选终态，不表示现役登记已变。",
+  "note": "对象身份与落点的唯一活真源。present 仅表示受管存在性，不表示已部署或验收；写前按明确 ID 回读，冲突即停。不再自动互校或全量同名发现。",
   "contract": {
     "spec": "tools/body_contract.py",
     "implementation": "tools/body_contract.py",
