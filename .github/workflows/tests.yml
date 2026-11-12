@@ -19,6 +19,16 @@ jobs:
         with:
           persist-credentials: false
       - name: full
+        id: full
         run: sh tests/run-tests.sh full
+      - name: TLS failure detail
+        if: ${{ failure() && steps.full.outcome == 'failure' }}
+        run: |
+          work=$(mktemp -d "${TMPDIR:-/tmp}/run-tests-XXXXXX")
+          trap 'rm -rf "$work"' EXIT
+          mkdir "$work/home" "$work/tmp"
+          cd tests
+          env -i PATH="$PATH" HOME="$work/home" TMPDIR="$work/tmp" LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONIOENCODING=utf-8 PYTHONDONTWRITEBYTECODE=1 TZ=UTC python3 -B -m unittest -v test-surge-scripts.SectionWriteTest.test_t6_tls_trusted_ca_and_hostname_mismatch </dev/null
       - name: identity
+        if: ${{ !cancelled() && (steps.full.outcome == 'success' || steps.full.outcome == 'failure') }}
         run: sh tests/run-tests.sh group identity
