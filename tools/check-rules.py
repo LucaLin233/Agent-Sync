@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""结构守卫：加载/资源边登记、单份身份、references 路径、分支指针、义务块存在性。
+"""结构守卫：加载/资源边（从正文与资源登记现读）、单份身份、references 路径、分支指针、义务块存在性。
 只读当前树，不访问生效端，不检查正文措辞；rc=0 不证明规则无弱化。
 退出码：0 无问题，1 结构错误，2 仅提示，3 检查不完整。
 """
@@ -14,7 +14,14 @@ LOAD_RE = re.compile(r'(先加载|先完整加载|另加载|必须加载|必须�
 REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加载','一律加载'}
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
-FORMS = {'必需加载','条件加载','资源必需','资源条件'}
+REGISTRY = 'tools/sync-targets.json'
+# 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故最小内置这 6 条（原 rule-claims.tsv 的必需加载行）。
+REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
+                  ('subagents/LENS.md', 'luno-core'),
+                  ('subagents/FORGE.md', 'luno-core'),
+                  ('subagents/minis-general-fallback.md', 'luno-core'),
+                  ('prompt/LUNO.md', 'luno-memory'),
+                  ('skills/luno-core/references/execution.md', 'luno-core'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
@@ -99,57 +106,53 @@ class Guard:
         if not out: self.problem('扫描范围为空',incomplete=True)
         return out
 
-    def claims(self, bodies):
-        raw=self.read('tools/rule-claims.tsv')
-        if raw is None: return set()
-        rows=set()
-        for line in raw.splitlines():
-            if not line.strip() or line.startswith('#'): continue
-            f=line.split('\t')
-            if len(f)!=4 or not all(x.strip() for x in f):
-                self.problem('条款登记字段',incomplete=True); continue
-            src,target,form,label=f
-            if form not in FORMS:
-                self.problem('加载形态',incomplete=True);continue
-            key=(src,target,form)
-            if key in rows: self.problem('重复登记');continue
-            rows.add(key)
-            if src not in bodies:
-                self.problem('加载边来源缺失',incomplete=True);continue
-            if form.startswith('资源'):
-                cross = bool(CROSS_RESOURCE_RE.fullmatch(target))
-                if not target.startswith('references/') and not cross:
-                    self.problem('资源加载边形态');continue
-                if not own_skill(src) and not cross:
-                    self.problem('资源加载边来源');continue
-                if target not in RESOURCE_RE.findall(bodies[src]):
-                    self.soft.append('条款真源漂移')
-                self.resource(src,target)
-            else:
-                hits=[m for m in LOAD_RE.finditer(bodies[src]) if m[2]==target]
-                if not hits: self.problem('加载边未出现', incomplete=True)
-                if hits and not any((m[1] in REQUIRED_VERBS)==(form=='必需加载') for m in hits):
-                    self.problem('加载形态')
-                if not (self.root/'skills'/target/'SKILL.md').is_file():
-                    self.problem('加载目标缺失')
-        if not rows: self.problem('条款登记为空',incomplete=True)
+    def resources(self):
+        """技能包资源清单的唯一真源：登记即部署与分发面，故从登记现读。"""
+        raw=self.read(REGISTRY)
+        try: doc=json.loads(raw) if raw is not None else None
+        except (ValueError,TypeError): doc=None
+        out={}
+        if isinstance(doc,dict) and isinstance(doc.get('objects'),list):
+            for o in doc['objects']:
+                if not isinstance(o,dict) or o.get('type')!='skill': continue
+                src=o.get('source');res=o.get('resources')
+                if not isinstance(src,str) or not isinstance(res,list): continue
+                out[Path(src).parent.name]={r for r in res if isinstance(r,str)}
+        if not out: self.problem('资源登记不可用',incomplete=True); return None
+        return out
+
+    def edges(self, bodies, reg):
+        """加载边、资源边与包内文件全部从正文和资源登记现读，不再有独立边登记表。"""
         load_count = resource_count = 0
         for src,body in bodies.items():
             for m in LOAD_RE.finditer(body):
                 load_count += 1
-                form='必需加载' if m[1] in REQUIRED_VERBS else '条件加载'
-                if (src,m[2],form) not in rows:
-                    self.problem('加载登记',incomplete=True)
-            if own_skill(src) or any(CROSS_RESOURCE_RE.fullmatch(t) for t in RESOURCE_RE.findall(body)):
-                for target in RESOURCE_RE.findall(body):
-                    if not own_skill(src) and not CROSS_RESOURCE_RE.fullmatch(target): continue
-                    resource_count += 1
-                    self.resource(src,target)
-                    if not any((src,target,f) in rows for f in ('资源必需','资源条件')):
-                        self.problem('资源加载边',incomplete=True)
+                if not (self.root/'skills'/m[2]/'SKILL.md').is_file():
+                    self.problem('加载目标缺失')
+            for target in RESOURCE_RE.findall(body):
+                cross = bool(CROSS_RESOURCE_RE.fullmatch(target))
+                if not own_skill(src) and not cross: continue
+                resource_count += 1
+                rel = 'skills/'+target if cross else skill_root(src)+'/'+target
+                self.resource(src,target)
+                if reg is not None and rel not in reg.get(rel.split('/')[1], ()):
+                    self.problem('资源未登记')
+            for target,skill in REQUIRED_LOADS:
+                if target!=src: continue
+                if not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
+                    self.problem('必需加载降级')
         if not load_count: self.problem("0 条加载语句被核对", incomplete=True)
         if not resource_count: self.problem("0 条资源路径被核对", incomplete=True)
-        return rows
+        for name,res in (reg or {}).items():
+            pkg=self.root/'skills'/name
+            for dp,dirs,files in os.walk(pkg,followlinks=False):
+                for fn in files:
+                    rel=(Path(dp)/fn).relative_to(self.root).as_posix()
+                    if rel!='skills/'+name+'/SKILL.md' and rel not in res:
+                        self.problem('包内文件未登记')
+            for r in sorted(res):
+                p=self.path(r)
+                if p is not None and not p.is_file(): self.problem('登记的包资源缺失')
 
     def identities(self):
         raw=self.read('tools/sync-targets.json')
@@ -219,8 +222,10 @@ class Guard:
             targets+=[(str(Path(src).parent/f),b) for f,b in BRANCH_LINK_RE.findall(body)]
             for rel,name in targets:
                 text=bodies.get(rel,'')
-                begin,end=text.find('<!-- BEGIN %s -->'%name),text.find('<!-- END %s -->'%name)
-                if '<a id="branch-%s"></a>'%name not in text or begin<0 or end<begin:
+                span='<!-- BEGIN %s -->'%name, '<!-- END %s -->'%name
+                # 分支须有锚点，且 BEGIN/END 各出现一次并成对（BEGIN 在 END 之前）。
+                if ('<a id="branch-%s"></a>'%name not in text or text.count(span[0])!=1
+                        or text.count(span[1])!=1 or text.find(span[0])>text.find(span[1])):
                     self.problem('分支指针失效')
 
     def obligations(self,bodies):
@@ -237,7 +242,8 @@ class Guard:
 
     def run(self):
         self.distribution()
-        bodies=self.sources();self.claims(bodies);self.identities();self.branches(bodies);self.obligations(bodies)
+        bodies=self.sources();reg=self.resources();self.edges(bodies,reg)
+        self.identities();self.branches(bodies);self.obligations(bodies)
         for k in self.hard: print('[结构错误] '+k)
         for k in self.incomplete: print('[检查不完整] '+k)
         for k in self.soft: print('[提示] '+k)

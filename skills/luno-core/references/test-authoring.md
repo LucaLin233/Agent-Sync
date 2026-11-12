@@ -33,4 +33,4 @@
 
 ## 登记
 
-新增或退休本类按需资源时，同步 `README.md` 的资源说明、`skills/luno-core/references/sync.md`〔分支 sync〕 的触发句、`tools/rule-claims.tsv` 的加载边和资源边，以及 `tools/sync-targets.json` 的资源清单。只改用例内容、不改变入口或常跑集时，不需要改技能正文。
+新增或退休本类按需资源时，同步 `README.md` 的资源说明、`skills/luno-core/references/sync.md`〔分支 sync〕 的触发句，以及 `tools/sync-targets.json` 的资源清单。只改用例内容、不改变入口或常跑集时，不需要改技能正文。
