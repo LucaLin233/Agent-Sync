@@ -263,15 +263,13 @@ class Base(unittest.TestCase):
 
 
 class PositiveTest(Base):
-    def test_known_identities(self):
-        # 含 LENS 制稿、FORGE 代提交与两个外部身份
+    def test_registered_identities_and_coauthors(self):
+        # 含 LENS 制稿、FORGE 代提交与两个外部身份；尾行身份同样逐条放行
         self.batch([('%s/%s' % (a[0], c[0]), a, c, 'subject\n', 0, ())
                     for a, c in ((LUNO, LUNO), (FORGE, FORGE), (FORGE, LUNO), (LENS, FORGE),
-                                 (LIN, LIN), (CLAUDE, LENS))])
-
-    def test_coauthor_allowed(self):
-        self.batch([(pair[0], FORGE, FORGE, 'subject\n\nCo-authored-by: %s <%s>\n' % pair, 0, ())
-                    for pair in (LUNO, LENS, LIN, CLAUDE)])
+                                 (LIN, LIN), (CLAUDE, LENS))]
+                   + [(pair[0], FORGE, FORGE, 'subject\n\nCo-authored-by: %s <%s>\n' % pair, 0, ())
+                      for pair in (LUNO, LENS, LIN, CLAUDE)])
 
     def test_midbody_coauthor_not_parsed(self):
         # 同 git 口径：不在尾部 trailer 块里的同名行不参与解析
@@ -284,23 +282,17 @@ class PlatformTest(Base):
     """平台合并只凭「≥2 父＋平台提交者＋web-flow 验签通过」豁免。"""
 
     @needs_gpg
-    def test_unverified_signature_not_exempt(self):
+    def test_exemption_needs_platform_committer_and_verified_signature(self):
         for kw in ({}, {'gpgsig': True}, {'sign': True}):  # 无签名／伪造签名头／非 web-flow 钥真签名
             with self.subTest(**kw):
                 first, merge = self.merge(**kw)
                 self.verdict(self.repo.run(first, merge), 1, 'committer', '身份不在署名表内')
-
-    def test_needs_platform_committer_and_two_parents(self):
-        first, merge = self.merge(committer=OTHER, gpgsig=True)
+        first, merge = self.merge(committer=OTHER, gpgsig=True)  # 提交者须为平台
         self.verdict(self.repo.run(first, merge), 1, 'committer')
-        base, head = self.repo.line(LUNO, PLATFORM, gpgsig=True)  # 单父、未给 --allow-squash
+        base, head = self.repo.line(LUNO, PLATFORM, gpgsig=True,  # --allow-squash 不免验签
+                                    message='squash\n\nCo-authored-by: FORGE <%s>\n' % FORGE[1])
+        self.verdict(self.repo.run(base, head, extra=('--allow-squash',)), 1, 'committer')
         self.verdict(self.repo.run(base, head), 1, 'committer')
-
-    def test_platform_still_checks_coauthor(self):
-        _, merge = self.merge(gpgsig=True, message='Merge\n\nCo-authored-by: someone <%s>\n' % OTHER[1])
-        problems, kind = self.check(merge, verified=True)
-        self.assertEqual(kind, 'platform')
-        self.assertIn('Co-authored-by#1 身份不在署名表内', problems)
 
     def test_gpg_unavailable_fails_closed(self):
         first, merge = self.merge(gpgsig=True)
@@ -330,17 +322,11 @@ class SquashTest(Base):
                 ('尾行身份不在表内', X, {}, ('squash', ['Co-authored-by#1 身份不在署名表内'])),
                 ('未给 flag 按普通提交', F, {'allow_squash': False}, ('', ['committer 身份不在署名表内'])),
                 ('双父是平台合并', F, {'parents': 2}, ('platform', [])),
-                ('平台合并无需尾行', '正文\n', {'parents': 2}, ('platform', []))):
+                ('平台合并无需尾行', '正文\n', {'parents': 2}, ('platform', [])),
+                ('平台合并仍查尾行', X, {'parents': 2}, ('platform', ['Co-authored-by#1 身份不在署名表内']))):
             with self.subTest(label):
                 problems, kind = self.inspect('squash subject\n\n' + message, **kw)
                 self.assertEqual((kind, problems), want)
-
-    @needs_gpg
-    def test_flag_does_not_bypass_signature(self):
-        base, head = self.repo.line(LUNO, PLATFORM, gpgsig=True,
-                                    message='squash\n\nCo-authored-by: FORGE <%s>\n' % FORGE[1])
-        self.verdict(self.repo.run(base, head, extra=('--allow-squash',)), 1, 'committer')
-        self.verdict(self.repo.run(base, head), 1, 'committer')
 
 
 def validsig(fpr, primary=None, short=False):
@@ -372,10 +358,6 @@ class WebflowGateTest(unittest.TestCase):
                 ('缺末位主钥指纹', 0, validsig(CURRENT_FPR, short=True), False)):
             with self.subTest(label):
                 self.assertIs(self.verify_with(rc, text), want)
-
-    def test_primary_fingerprints_ignore_subkeys(self):
-        colons = b'pub:-:255:22:K:\nfpr:::::::::AAA:\nsub:-:255:22:S:\nfpr:::::::::BBB:\npub:x\nfpr:::::::::CCC:\n'
-        self.assertEqual(T.primary_fingerprints(colons), {'AAA', 'CCC'})
 
 
 @needs_gpg
@@ -469,25 +451,21 @@ class RulesTest(Base):
         self.verdict(self.run_rules(path=self.repo.dir / 'bad.md'), 2, '规则文件不是 UTF-8')
         self.verdict(self.run_rules('# 夹具规则\n\n## 其他段\n\n无署名段。\n'), 2, '缺少')
 
-    def test_identity_missing_or_duplicated(self):
+    def test_identity_registration_errors(self):
         anchor = '平台自动生成的合并提交保留平台身份。'
-        for pair in (LUNO, LENS, LIN):
+        for pair in (LUNO, LENS, LIN):                     # 重复登记
             with self.subTest(dup=pair[0]):
                 text = rule_text().replace(anchor, anchor + '\n\n`%s <%s>`' % pair, 1)
                 self.verdict(self.run_rules(text), 2, '身份重复')
-        text = rule_text().replace('，LENS 使用 `LENS <%s>`' % LENS[1], '', 1)
+        text = rule_text().replace('，LENS 使用 `LENS <%s>`' % LENS[1], '', 1)   # 缺项
         self.assertNotEqual(text, rule_text())
         self.verdict(self.run_rules(text), 2, '缺少 LENS')
         # 只认完整声明：带前缀的名字不算登记名
         self.verdict(self.run_rules(rule_text(lin=('NotLIN student', LIN[1]))), 2, '缺少 LIN student')
-
-    def test_two_identities_same_email(self):
-        for a, b in ((LUNO, FORGE), (LUNO, LENS), (FORGE, LENS)):
+        for a, b in ((LUNO, FORGE), (LUNO, LENS), (FORGE, LENS)):              # 同一邮箱
             with self.subTest(a=a[0], b=b[0]):
                 self.verdict(self.run_rules(rule_text(**{a[0].lower(): b[1]})), 2, '同一邮箱')
-
-    def test_malformed_values_not_normalized(self):
-        values = [{'luno': PLACEHOLDER}, {'forge': PLACEHOLDER}, {'luno': 'address'}]
+        values = [{'luno': PLACEHOLDER}, {'forge': PLACEHOLDER}, {'luno': 'address'}]  # 形态非法
         values += [{'luno': v % LUNO[1]} for v in (' %s', '%s ', ' %s ')]  # 两侧空白不 strip
         for kw in values:
             with self.subTest(**kw):

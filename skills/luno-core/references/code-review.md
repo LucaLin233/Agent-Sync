@@ -1,6 +1,6 @@
 # 代码审查检查清单
 
-本文件含改写自 `anthropics/knowledge-work-plugins` 与 `anthropics/claude-plugins-official` 的内容（Apache-2.0，已修改；许可见 `../LICENSE.code-review.txt`、`../LICENSE.anthropic-plugins.txt`）。
+本文件含改写自 `anthropics/knowledge-work-plugins` 与 `anthropics/claude-plugins-official` 的内容（Apache-2.0，已修改；许可见 `../LICENSE.code-review.txt`、`../LICENSE.apache-2.0.txt`）。
 
 这是代码审查的必查清单。通用流程、授权、分级和输出按 `references/review.md`〔分支 review〕，这里只补代码专属的检查和输出；实施侧纪律（最小改动、沿用风格、只清自己引入的孤儿代码、先复现后修复、重构保持行为、结果证据）按 `luno-authoring/references/coding.md`〔分支 coding〕 核对，不在这里重复。
 

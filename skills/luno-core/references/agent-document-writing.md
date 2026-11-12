@@ -45,7 +45,7 @@
 <!-- BEGIN skill-authoring -->
 # 技能编写与结构校验（精选）
 
-本文件含改写自 `openai/skills` 的 skill-creator 内容（Apache-2.0，已修改；许可见 `../LICENSE.skill-authoring.txt`）。通用书写启发式（披露与共置、删减判据、指针措辞）见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；本机的发布规则（登记刷新、跨端同步、平台安装与授权）见 `luno-platform/references/minis.md`〔分支 minis〕、`luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/lobehub.md`〔分支 lobehub〕。
+本文件含改写自 `openai/skills` 的 skill-creator 内容（Apache-2.0，已修改；许可见 `../LICENSE.apache-2.0.txt`）。通用书写启发式（披露与共置、删减判据、指针措辞）见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；本机的发布规则（登记刷新、跨端同步、平台安装与授权）见 `luno-platform/references/minis.md`〔分支 minis〕、`luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
 ## 自由度选择
 按对输出的**约束强度**选档，判据＝「同一目标有多少条可接受路径」：
@@ -84,6 +84,6 @@ frontmatter 按 YAML 写；标准必填/可选字段与 `name`/`description` 限
 - **记录方差**：同一输入多跑几次并记录波动，先确认差异大于方差再当作效果。
 - **区分两类判据**：**客观断言**（文件是否生成、退出码、必填字段是否齐备）与**人工质量判断**分别记录；只检查「文件存在」不构成正确性验证。
 
-来源登记：openai/skills 的 Apache-2.0 精选改写（已修改），固定提交、取材路径与日期见仓库 skills-sources.md；完整许可见 ../LICENSE.skill-authoring.txt。
+来源登记：openai/skills 的 Apache-2.0 精选改写（已修改），固定提交、取材路径与日期见仓库 skills-sources.md；完整许可见 ../LICENSE.apache-2.0.txt。
 <!-- END skill-authoring -->
 

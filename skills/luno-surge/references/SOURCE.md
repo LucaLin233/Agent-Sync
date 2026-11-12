@@ -46,6 +46,42 @@
 
 CoreDevice/RSD 同机回环内容精选改写自 `OpenMinis/MinisSkills@164395f193a56e3507ca98415383c7c16780da00`，2026-10-25 本地核对；不是 Surge 官方更新，在线可取性和当前设备行为未复核。版权为 Copyright (c) 2026 OpenMinis、Copyright (c) 2026 OpenMinis contributors。依既有本地决定按 MIT 处理，根 LICENSE 与 README 标 Apache-2.0 的冲突仍保留；完整通知随包保留 `LICENSE.openminis.txt`、`LICENSE.openminis-ios-dev.txt`，详细范围见仓库 skills-sources.md。本地决定不作法律适用结论，也不扩大分发权。
 
+## luno-surge 输出脱敏的保证边界
+
+本节不是来源记录，暂时没有更合适的位置，所以单列于此。它是历史判据，不是对自由 Shell 的强制保证。边界于 2026-09-16 确立，实现与覆盖范围于 2026-10-11 变更。
+
+**2026-09-16 的覆盖范围**：
+
+- 带键名的认证字段（`authorization`、`proxy-authorization`、`auth`、`authz`，键可带引号）分三种情形处理。① 引号值按引号配对，双引号和单引号各有自己的字符类与转义，键与值之间允许换行缩进，因此覆盖多行 JSON 和双引号内含单引号的情况。② 带方案词（`Bearer`、`Basic`、`Digest`、`Negotiate`、`NTLM`、`aws4-hmac-sha256`）时抹除该字段整行。③ 其余裸值以逗号、分号或换行为界，不以 `}`、`]` 为界，否则 `Authorization: SYNTH}SECRET` 会在闭合符处截断，泄漏尾部；值以抹除标记开头时，只保留标记和其后的结构闭合符，其余残余丢弃。
+- 敏感键（`password`、`passwd`、`pwd`、`psk`、`private_key`、`token`、`api_key`、`x_key`、`secret`、`credential`）的引号值、裸值和平面数组值，以及已知 token 前缀（`sk`、`ghp`、`github_pat`、`xox*`）。
+- `user` 和 `username` 也在抹除范围内。2026-09-16 的判定是：字段名不能证明其值永远不敏感，移除它们属于收窄保护，必须由用户明确确认后才能放宽，确认前维持默认抹除。
+
+**2026-09-16 的不覆盖范围**，不得据此宣称完整脱敏：
+
+- 没有键名的裸方案词，例如 `x Bearer <值> end`。这是刻意为之，避免误抹普通英文 `basic configuration failed`。
+- 嵌套在数组或对象里的敏感键，例如 `{"token":[["x"]]}`。2026-10-11 起，JSON 文档（任意布局）中的这类情况已被覆盖；非 JSON 文本形态仍不覆盖。
+- Unicode 转义的键名，例如 `{"to\u006ben":"x"}`。
+- 整体编码或 Base64 载荷。
+
+因此脱敏输出不等于可以对外发布的安全日志。作为诊断输出前仍需人工检查，对外分享前还要另行核对。
+
+**2026-10-11 的变更**（2026-10-11 记录时尚未部署或平台验收）：
+
+- 实现收敛为共享模块 `scripts/_privacy.py`，由 `surge_cli.py`、`surge_ios.py`、`test_policy_descriptor.py` 共用。`surge_cli.py` 此前完全没有脱敏，成功 JSON、错误、`profile diff` 和 `--check` 的返回都原样输出；此次在全部输出边界接入了脱敏。
+- 新增覆盖：前缀驼峰键（如 `proxyPassword`）、复数键（如 `tokens`）、认证键（`Authorization`、`proxy-authorization`、`auth`、`authz` 及其前缀驼峰变体）的结构化整值替换、Profile 代理行（如 `PROXY-A = https, host, 443, user, <PASS>`，含中文或 Unicode 节点名）、内层转义的 JSON 串，以及 JSON 文档（任意布局）中嵌套容器的整值替换。紧凑布局走结构化重排，其他布局按 JSON 字符串 token 就地脱敏并保留原布局。
+- 仍不覆盖：没有键名的裸方案词、Unicode 转义键名、整体编码或 Base64 载荷，以及 JSON 嵌在普通文本中时的嵌套容器。
+- 有据例外：`surge_cli.py` 的 `--help` 和 `help <cmd>` 走不脱敏的路径。它们输出编译期的帮助字面量，含变量名 `SURGE_API_KEY`，脱敏会把变量名改写成 `<redacted>`；其中不含运行时数据。
+- Profile 代理行的凭据字段位置表按协议常识和包内示例实现，没有与官方手册核对（离线取不到）；类型表只列位置明确的协议，以免误抹策略组行。
+
+**输出契约**（2026-09-16 确立，使用方必须遵守）：
+
+1. 裸认证行的整段都视为敏感值。冒号或等号之后的整段内容都是该字段的值，不是「凭据加诊断字段」，所以 `Authorization: <值> status=502` 里的 `status=502` 会一并丢弃。空格不是诊断字段的分隔符，写成 `key=value` 也没有例外（`Authorization: <值> status:502` 同样整段丢弃）。诊断字段只能改为独立的结构化字段或独立的行（如另起一行 `status=502`），不得与认证值同行混排。
+2. 值只限同一行。换行即该字段结束，下一行是独立内容。因此冒号后直接换行的续行凭据 `Authorization:\n<裸凭据>` 不在覆盖范围内，生产者不得输出这种裸续行凭据；而 `Authorization:\nstatus=502` 这样下一行是普通内容的，按独立内容原样保留。
+3. 逗号和分号只是第 ③ 种情形（其余裸值）的终止符，其后的内容视为独立字段而保留，所以契约禁止在这一情形里用 `,` 或 `;` 在值中承载凭据（`Authorization: <标记>,SECRET` 不在覆盖范围内）。第 ② 种带方案词的字段整行抹除，不适用本条：`Authorization: Bearer <值>,status=502` 里的 `status=502` 同样会被抹掉，同行的诊断信息须移到独立行或独立的结构化字段。
+4. 多行结构化值与「同一行」规则不冲突。规则 2 约束的是裸值；`{"auth":\n"值"}` 这种键与值之间换行缩进的引号值属于第 ① 种情形，正常脱敏。
+5. 生产者不满足上述任一条时，必须先解析和规范化认证字段再调用脱敏，或者拒绝输出有歧义的段落。
+
+
 ## 本地帮助证据
 
 仓库桥脚本 SHA-256 为 `0ff3ef70080190856e435f57957afa14a995dbed6ffffbe91ddf99729b9bdd72`。2026-11-10 核过 Minis 当时安装的上一版（`4e58a2411a6af6ef271a1f68fcb749cfd0a9daee5f29e8a520fe2e3e1fb20732`，与当前仓库版只差 reload 帮助补了自动完整重启一句）：在清空凭据环境并禁止写入/网络的审计下，--help、help 和全部静态 HELP 键均可本地读取；plugin、capture-filter 的 help 返回主帮助而非目标契约。该结果不证明远端实例支持任何命令；部署后核端上字节等于上述哈希，升级后须重核。只保留帮助未覆盖的领域事实、安全风险、平台约束及复杂语义；不复制可靠帮助已有的参数说明。

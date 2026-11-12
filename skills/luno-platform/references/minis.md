@@ -40,22 +40,22 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 ## 配置接口
 
-- **以 CLI 自述为准**：`minis-config` 的字段形态和路径写法、写入确认、审计回滚以及数组的 `--filter` 和分页语义，以当前的 `--help`、`list-topics`、`topic-help <topic>`（含 AUDIT、FIELD I/O）为准；同一会话、版本和主题已经完整读过的不重读，未知或版本变化时补读。必要时才整体列举；筛选和分页只缩小记录集，不能代替字段投影。
-- **App 与 CLI 的分工**：技能和子代理只在平台实际支持的字段和动作上，App 页面与 CLI 等效，按用户方便选择，改完以回读为准；支持面以 `list-topics`/`topic-help` 为准。只有 App 能做的：新增子代理，技能元数据（描述、排序）及其刷新。技能正文可以直接改文件，但改文件不刷新元数据（见〈技能登记〉）。`minis-config` 没有 skills 字段。
-- **`set-batch`**：`value_json` 必须是 JSON **文本**（多一层编码）。批量中任何一项失败，整批都会报 `partial_write_failed`，而且**同批已成功的项也可能没落盘**；失败后先逐项回读确认差异，只重写缺失的项。
+- **先读帮助**：字段、路径、支持面、确认与回滚按当前 `minis-config --help`、`list-topics` 和 `topic-help <相关主题>`（含 FIELD I/O、AUDIT）；同一会话、版本和主题已读的不重读，未知或版本变化时补读。筛选和分页不能代替非秘密字段投影。
+- **App 补位**：新增子代理、技能元数据及其刷新走 App；技能正文改文件不刷新登记（见〈技能登记〉）。
+- **`set-batch` 的未明示边界**：`value_json` 是 JSON **文本**，须多一层编码。既有本机观测中，任一项失败会报 `partial_write_failed`，且**同批已成功的项也可能没落盘**；失败后先逐项回读，只重写缺失项。
 - **环境变量**在 App 设置页维护；按变量名引用，缺失就说明并给出创建入口，不换来源。凭据类只读存在性和长度，取值不经过对话。
 
 ## 子代理与模型
 
-- 子代理条目在 App UI 配置。内置的通用子代理在 `subagents.general.instructions`（roster 显示为 `builtin.general`）。instructions 的字符上限按条目查 `minis-config topic-help subagents`，不在条目间外推。
-- 子代理的工具和上下文能力按当前手册和实际运行面核对，不外推到两端；派发按 `luno-core/references/review.md`〔分支 delegation〕，身份和采纳按 `luno-core/references/review.md`〔分支 review〕。retry 或 resume 之后尤其要核对任务、实际角色和模型组；`minis-sessions-cli status` 只能作为可见字段的证据，缺必要元数据就标「通道身份未验证」，不用角色自述补齐。
+- roster 的 `builtin.general` 对应 `subagents.general.instructions`；字段与各条目上限按 `minis-config topic-help subagents`，不在条目间外推。
+- 子代理的工具和上下文能力按当前手册和实际运行面核对，不外推到两端；派发按 `luno-core/references/review.md`〔分支 delegation〕，身份和采纳按 `luno-core/references/review.md`〔分支 review〕。
 - **生效窗口**由分组的 `contextLimitTokens` 决定，**分组优先于模型条目**的 `contextWindowOverride`/`contextWindowTokens`；关掉「Limit Context Window」会回落到条目值，再打开后**要回读当前分组的生效值**，不用历史观测代替。
 - 模型不可用时，按分组的解析结果和报错判断，分清「配置已保存」「分组已绑定」「调用实际成功」三件事。
 
 ## SOUL 与提示词
 
 - `soul.body` 是生效值；与文件视图 `SOUL.md` 不一致时，先判定当前生效的版本，不自行挑一份覆盖其他。
-- **写入**：按 `minis-config --help`〈FIELD I/O〉用 `set soul.body --file`，文件内容必须是 **JSON 字符串**（`json.dumps(body, ensure_ascii=False)`），不是裸文本。长度上限见 `minis-config topic-help soul`，改写常驻正文要核对这个预算；字节口径按 `body_contract.body_bytes`。
+- **正文值**：`soul.body` 必须按 `minis-config --help`〈FIELD I/O〉编码成 JSON **字符串**，不能把裸文本交给 `--file`。长度预算查 `topic-help soul`；字节提取口径按 `body_contract.body_bytes`。
 - 改写 `SOUL.md` 要保留 frontmatter，正文按 `body_contract.body_bytes` 提取，重组时不额外追加换行。文件正文、`soul.body` 和仓库正文按 UTF-8 字节判等，不 strip，不归一换行。
 
 ## 记忆与生效真源
@@ -112,7 +112,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 ## 上下文行为
 
 - 上下文卸载、压缩和占位符以当前手册 `concepts/minis-url-scheme.md`〈Offloads〉和本次的实际提示为准；不沿用旧的 32K/64K/128K 阈值、压缩轮数或 token 估算倍率。当前行为未知就标「待验证」，不凭字符数估算余量；开启诊断日志仍需配置修改授权。
-- offloads 只读工具给出的确切路径，不猜文件名。因编码或二进制拒读不代表文件不存在；只对获准且确认不含秘密的文本，在确认编码后用管道转成 UTF-8 读取。
+- **工具结果自动卸载**是执行者无法关闭的平台行为（机制见上述手册）：派单和执行时用字段投影、截断或计数控制单次输出，避免触发。发生后只报告工具给出的确切路径，未经另行授权不读不删；不算受派方主动越权，不需逐次记入事故。获准回读时不猜文件名；编码或二进制拒读不代表不存在，只对确认不含秘密的文本，在确认编码后用管道转成 UTF-8 读取。秘密输出禁令不因自动卸载而豁免。
 - 回读会话的参数和字段上限见手册 `cli/minis-sessions-cli.md`（含 `--full`、`--tools`；`messages --tools --full` 读取已存储的 shell 输入，不保证恢复完整元数据）。`messages --id` 必须用完整 UUID：2026-10-25 本机用 8 位前缀时返回成功但消息为空，不能据此判断没有消息。长结果要当轮按授权归档，没有授权就报告缺口；检索或回读父会话和其他会话须当次授权，默认不提供父会话转录。
 - 规则文本本身不会报告余量，所以只在事件和阶段边界触发交接，不做「快满了」的预警。
 - 涉及记忆日志的自动注入、截断或容量，或据此评估日志的压缩、折行和整理时，先读 `references/minis.md`〔分支 minis-memory〕。

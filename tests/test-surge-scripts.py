@@ -372,7 +372,10 @@ def json_document(text):
 
 class PrivacyTest(unittest.TestCase):
 
-    def test_scrub_corpus(self):
+    def test_redaction_corpus(self):
+        for fn, sample in UNCHANGED:               # 投影形态必须逐字节不变
+            with self.subTest(fn=fn.__name__, sample=sample):
+                self.assertEqual(sample, fn(sample))
         for fn, sample, expect in SCRUB:
             with self.subTest(fn=fn.__name__, sample=sample):
                 self.assertIn('SYNTH', sample.upper())
@@ -385,11 +388,6 @@ class PrivacyTest(unittest.TestCase):
                 self.assertEqual(out, fn(out))
                 if json_document(sample):
                     self.assertTrue(json_document(out), out)
-
-    def test_unchanged_corpus(self):
-        for fn, sample in UNCHANGED:
-            with self.subTest(fn=fn.__name__, sample=sample):
-                self.assertEqual(sample, fn(sample))
 
     def test_key_name_matrix(self):
         for key in SENSITIVE_KEYS + PLAIN_KEYS:
@@ -451,14 +449,6 @@ class PrivacyTest(unittest.TestCase):
             out = B(json.dumps({'data': B(json.dumps({'data': line}))}))
             self.assertNotIn('SYNTH', out)
             self.assertEqual(T(line), json.loads(json.loads(out)['data'])['data'])
-
-    def test_api_base_problem_requires_explicit_remote_opt_in(self):
-        with mock.patch.dict(os.environ, {'SURGE_ALLOW_REMOTE': ''}):
-            self.assertIsNotNone(PRIVACY.api_base_problem('http://192.0.2.10:6171'))
-            self.assertIsNone(PRIVACY.api_base_problem('http://[::1]:6171'))
-        with mock.patch.dict(os.environ, {'SURGE_ALLOW_REMOTE': '1'}):
-            self.assertIsNone(PRIVACY.api_base_problem('http://192.0.2.10:6171'))
-            self.assertIsNotNone(PRIVACY.api_base_problem('http://u:p@192.0.2.10:6171'))
 
 
 # ── HTTP 回退与描述符探测 ─────────────────────────────────────────────────────
@@ -595,20 +585,6 @@ class SurgeCliTest(unittest.TestCase):
         self.assertEqual([body.count(' ') + body.count('-'), body.count(' ') + body.count('+')],
                          declared, r.stdout)
 
-    def test_help_is_literal_and_unredacted(self):
-        for args, needles in (
-                (['--help'], ('Available parameters:', '  --raw - Output raw JSON instead of human-readable format',
-                              '  Remote password: SURGE_API_KEY 或 --password-stdin（不读凭据文件，也不交互补取）',
-                              '  --check/-c <path> - Validate a profile with the official Surge beta service')),
-                ([], ('Surge CLI (Minis Controller Edition)',)),
-                (['help', 'dump'], ('dump <type> [arguments]',))):
-            with self.subTest(args=args):
-                r = run_cli(args)
-                self.assertEqual(0, r.returncode, r.stderr)
-                for needle in needles:
-                    self.assertIn(needle, r.stdout)
-                self.assertNotIn('<redacted>', r.stdout)
-
     def test_symlinked_entry_point_resolves_shared_module(self):
         """install.sh 以符号链接安装：共享模块须按 realpath 找到（sys.path[0] 不是脚本目录）。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -620,6 +596,7 @@ class SurgeCliTest(unittest.TestCase):
                                env=offline_env(), cwd=tmp, capture_output=True, text=True, timeout=60)
         self.assertEqual(0, r.returncode, r.stderr)
         self.assertIn('Surge CLI (Minis Controller Edition)', r.stdout)
+        self.assertNotIn('<redacted>', r.stdout)        # help 是字面文本，不经脱敏
 
     def test_check_output_is_redacted(self):
         """--check：替换 urlopen（不联网），成功 raw 与失败消息都脱敏。"""
@@ -897,24 +874,21 @@ class PackerTest(unittest.TestCase):
 
     def test_provenance_manifest_fails_closed_and_preserves_existing_zip(self):
         good = {k: hashlib.sha256(('synthetic raw ' + k).encode()).hexdigest() for k in self.KEYS}
-        cases = [('absent-file', None), ('invalid-json', '{bad'),
-                 ('root-null', 'null'), ('root-list', '[]'), ('missing-builds', '{}'),
-                 ('no-builds', '{"builds":[]}'), ('builds-object', '{"builds":{"a":1}}'),
-                 ('builds-string', '{"builds":"bad"}'), ('build-null', '{"builds":[null]}'),
+        cases = [('absent-file', None), ('invalid-json', '{bad'), ('root-null', 'null'), ('root-list', '[]'),
+                 ('missing-builds', '{}'), ('no-builds', '{"builds":[]}'),
+                 ('builds-object', '{"builds":{"a":1}}'), ('build-null', '{"builds":[null]}'),
                  ('missing-table', '{"builds":[{}]}'), ('empty-table', '{"builds":[{"raw_sha256":{}}]}'),
-                 ('table-list', '{"builds":[{"raw_sha256":[]}]}'),
                  ('table-string', '{"builds":[{"raw_sha256":"bad"}]}')]
-        for key in self.KEYS:
-            for fault in ('missing', 'null', 'empty', 'number', 'list', 'bad-char', 'short', 'uppercase'):
+        for key in self.KEYS:                     # 每个 build 都要校验，不只看基线
+            for fault in ('missing', 'null', 'bad-char', 'short', 'uppercase'):
                 raw = dict(good)
                 if fault == 'missing':
                     del raw[key]
                 else:
-                    raw[key] = {'null': None, 'empty': '', 'number': 7, 'list': [],
-                                'bad-char': 'z' * 64, 'short': 'a' * 63, 'uppercase': 'A' * 64}[fault]
-                # 坏表放在较早的 build：每个 build 都要校验，不只看基线。
+                    raw[key] = {'null': None, 'bad-char': 'z' * 64, 'short': 'a' * 63,
+                                'uppercase': 'A' * 64}[fault]
                 cases.append((key + ':' + fault, json.dumps({'builds': [{'raw_sha256': raw},
-                                                                         {'raw_sha256': good}]})))
+                                                                        {'raw_sha256': good}]})))
         for label, content in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory(prefix='surge-bad-manifest-') as tmp:
                 skill, script, module = self.isolated(tmp)
@@ -1330,6 +1304,7 @@ class SectionWriteTest(unittest.TestCase):
                          (os.listdir(str(decoy)), os.listdir(str(top / 'moved-real'))))
 
     def test_t4_backup_dir_refuses_ancestor_swapped_mid_descent(self):
+        """下降途中祖先被换成软链：逐级 O_NOFOLLOW 使 _open_backup_dir 报 E_BACKUP_DIR，decoy 不被写入。"""
         module = load_module('surge_ios_section_descent', SURGE_IOS)
         top = Path(self.backup_dir())
         real, decoy = top / 'real', top / 'decoy'

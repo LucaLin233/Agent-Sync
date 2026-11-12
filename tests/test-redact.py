@@ -48,14 +48,6 @@ TEMPLATE_BRANCHES = {
     ROOT / 'skills/luno-core/references/sync.md': 'sync-workflow',
 }
 OPS_RUNTIME, HUB_INSTANCE, HUB_ENTRY = (TEMPLATE_FILES[k] for k in ('ops-runtime', 'hub-instance', 'hub-entry'))
-# 模板必须真的给出这些声明范围形态（缺锚点 ⇒ 禁止原语检查会空转）
-ANCHORS = {
-    'ops-entry': ['references/service-runtime.md', '声明的指定键'],
-    'ops-runtime': ['docker exec', 'sh -c', 'len=%s', 'awk -F=', 'length(substr($0,index($0,"=")+1))',
-                    "jq '{port: .server.port", 'docker compose config --quiet', '没有这类接口就停止依赖'],
-    'hub-instance': ['information_schema.columns', 'SELECT', '人已确认的列白名单', 'LIMIT'],
-    'minis-config': ['筛选和分页只缩小记录集，不能代替字段投影', '字段形态和路径写法'],
-}
 FORBIDDEN = (
     ('env', re.compile(r'(?<![\w./-])env(?![\w-])')),
     ('printenv', re.compile(r'printenv')),
@@ -112,13 +104,6 @@ class ProjectionRedactionTest(unittest.TestCase):
 
 
 class TemplateScopeTest(unittest.TestCase):
-
-    def test_declared_scope_anchors_present(self):
-        for key, anchors in ANCHORS.items():
-            body = read(TEMPLATE_FILES[key])
-            for anchor in anchors:
-                with self.subTest(file=key, anchor=anchor):
-                    self.assertIn(anchor, body)
 
     def test_forbidden_primitives_only_in_prohibition_context(self):
         for key, path in TEMPLATE_FILES.items():

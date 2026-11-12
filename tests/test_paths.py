@@ -9,7 +9,7 @@ import json
 import sys
 
 PATHS_RULES = (
-    (('tools/check-rules.py', 'tools/rule-claims.tsv', 'tools/sync-targets.json',
+    (('tools/check-rules.py', 'tools/sync-targets.json',
       'tests/test-check-rules.sh'),
      ('group', 'gate'), '结构守卫或边登记 → gate'),
     (('tools/deploy_skill.py', 'tools/body_contract.py', 'tools/resource_http.py',
