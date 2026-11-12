@@ -21,8 +21,8 @@
 
 ## 依据
 
-- **CLI 先查执行设备帮助**：使用 `lh` 前，在实际执行设备上确认 CLI 版本并读取目标子命令的 `--help`，需要更完整说明时再读 `lh man <命令路径>`。帮助已有的语法、参数、退出码和解释不抄进技能；帮助不足时，再查匹配 CLI 版本和目标实例版本的官方原文。服务端功能、变量和开关查上游仓库对应实例版本 tag 的 `docs/**`（或 lobehub.com/docs）；CLI 源码须匹配 CLI 版本，不以服务端 tag 代替。本技能只保留帮助缺失的本地规则、实例坐标和有版本边界的经验。
-- 公开的 API 参考没有覆盖 `/trpc/lambda/<router>.<procedure>`，用法见 `references/lobehub.md`〔分支 lobehub-access〕；网关地址、令牌和 JWKS 的分工见对应版本文档 `self-hosting/platform/docker-compose.mdx`〈Agent Gateway〉。
+- **CLI**：使用 `lh` 前，在实际执行设备上确认 CLI 版本并读取目标子命令的 `--help`，需要更完整的说明再读 `lh man <命令路径>`；帮助不足时查与 CLI 版本匹配的上游 `apps/cli/`（README 和源码），不以服务端 tag 代替。
+- **服务端**：功能、环境变量和开关查与实例版本同 tag 的上游文档 `https://github.com/lobehub/lobehub/tree/<tag>/docs`，本技能里的 `self-hosting/…`、`usage/…` 路径都相对这里；抓取用 raw.githubusercontent.com 的同路径，lobehub.com/docs 拒绝自动抓取（2026-11-12 实测）。公开的 API 参考没有覆盖 `/trpc/lambda/<router>.<procedure>`，用法见 `references/lobehub.md`〔分支 lobehub-access〕。
 
 ## 方法
 
@@ -34,7 +34,7 @@
 
 - **读技能**：按字段只读回读技能正文和元数据，本地非秘密投影示例为 `lh skill view <id> --json content,name,description`；这三个字段是此读取的白名单，不授权读取其他字段。资源和细则见 `references/lobehub.md`〔分支 lobehub-skills〕。
 - **权限与渠道**：按当前版本、部署形态和对象作用域核对权限，不把通用 Workspace 角色表直接套到 CE，也不凭角色名推定 Skill 或连接器的编辑权；渠道的全局 Allowed Users 优先于 DM/Group 策略。
-- **功能缺失**：用户说某功能「没反应」，先看角色和 `FEATURE_FLAGS`（不支持 `all`），再怀疑实例层。
+- **功能缺失**：用户说某功能「没反应」，先看角色和 `FEATURE_FLAGS`（语法见 `self-hosting/advanced/feature-flags.mdx`），再怀疑实例层。
 
 ## 授权与底线
 
@@ -51,10 +51,10 @@
 
 ## CLI
 
-- 官方 CLI `@lobehub/cli`（`lh`）是自动化入口；调用前核对实际执行设备、CLI 与目标实例的版本和服务端支持，不以命令存在证明服务端可用。实例入口与缺失处置见本技能入口的〈LobeHub入口〉；不得用登录态补入口或自动登录、换实例。
+- 官方 CLI `@lobehub/cli`（`lh`）是自动化入口；调用前核对实际执行设备、CLI 与目标实例的版本和服务端支持，不以命令存在证明服务端可用。实例入口与缺失处置按本技能入口的〈LobeHub入口〉。
 - **版本证据**：npm 的 `latest` 不等于已装的版本；观测到的版本不等于最低支持版本，单个版本的端到端验证不能确定最低支持边界。
 - **诊断**：选用诊断模式前核对副作用与输出字段，深度检查和修复须有对应授权；离线诊断不等于没有写入或敏感输出。
-- **运行结果**：脚本按当前帮助的退出状态分支，并保留外层等待期限；不能用状态成功冒充完整取回结果。传输、续接、降级和退出路径未行为实测。
+- **运行结果**：脚本按当前帮助的退出状态分支，并保留外层等待期限；不能用状态成功冒充完整取回结果。
 - **会话与权限**：调用会触发运行的命令前核对目标和运行授权，成员权限变更另核授权。多路复用的跟随不能直接外推到 CE 链路，要核对服务端协议和网关能力。
 - **定位与检索**：JSON 里的 `url` 和已存地址对象的 `appUrl` 仍按字段白名单取。检索限定当次获准的对象和时间窗，旧实例缺过滤接口也不放宽。消息检索的截断警告在 stderr 里，JSON 成功不代表结果完整，截断时在授权内收窄范围复查；这项历史记录未复测当前行为。
 
