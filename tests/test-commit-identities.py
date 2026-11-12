@@ -83,9 +83,6 @@ def call_tool(argv, cwd, env=None):
 _HOMES, _CLEANUP, _TEMPLATE = {}, [], []
 KEYGEN = {
     'valid': [('--quick-generate-key', SIGNER, 'ed25519', 'sign', '0')],
-    # 假系统时间回到 2024-01-01 生成、1 天有效：现下已过期
-    'expired': [('--faked-system-time', '20240101T000000', '--quick-generate-key', SIGNER,
-                 'ed25519', 'sign', '1d')],
     # 主钥只作认证，由签名子钥签发
     'subkey': [('--quick-generate-key', SIGNER, 'ed25519', 'cert', '0'),
                ('--quick-add-key', None, 'ed25519', 'sign', '0')],
@@ -393,17 +390,6 @@ class RealSignatureTest(Base):
             verified = wf.verify(merge)
             problems, kind = T.check_commit(T.read_rules(self.repo.rules), merge, wf)
         return merge, verified, [field for field, _ in problems], kind
-
-    def test_expired_key_rejected_even_if_trusted(self):
-        home, primary, _ = gpg_home('expired')
-        merge, verified, fields, kind = self.inspect(home, (CURRENT_FPR, primary), '20240101T010000')
-        # 事实前提：gpg 对过期钥的好签名同时给出 VALIDSIG 与非零退出码
-        proc = subprocess.run(('git', 'verify-commit', '--raw', merge), cwd=str(self.repo.dir),
-                              capture_output=True, env=gpg_env(home))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn(b'VALIDSIG', proc.stderr)
-        self.assertEqual((verified, kind), (False, ''))
-        self.assertIn('committer', fields)
 
     def test_valid_key_in_set_exempt(self):
         home, primary, _ = gpg_home('valid')

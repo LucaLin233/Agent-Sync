@@ -22,33 +22,5 @@ jobs:
         id: full
         run: sh tests/run-tests.sh full
       - name: identity
-        id: identity
         if: ${{ !cancelled() && (steps.full.outcome == 'success' || steps.full.outcome == 'failure') }}
         run: sh tests/run-tests.sh group identity
-      # 临时诊断；定位完成后移除。
-      - name: TLS and identity failure detail
-        if: ${{ !cancelled() && (steps.full.outcome == 'failure' || steps.identity.outcome == 'failure') }}
-        shell: bash
-        run: |
-          work=$(mktemp -d "${TMPDIR:-/tmp}/run-tests-XXXXXX" 2>/dev/null) || exit 1
-          trap 'rm -rf "$work" 2>/dev/null || exit 1' EXIT
-          mkdir "$work/home" "$work/tmp" 2>/dev/null || exit 1
-          set -o pipefail; cd tests 2>/dev/null || exit 1
-          env -i PATH="$PATH" HOME="$work/home" TMPDIR="$work/tmp" LANG=C.UTF-8 LC_ALL=C.UTF-8 PYTHONIOENCODING=utf-8 PYTHONDONTWRITEBYTECODE=1 TZ=UTC python3 -B -c '
-          import ssl, sys, unittest, urllib.error
-          print("PYTHON_VERSION=%d.%d.%d" % sys.version_info[:3], flush=True)
-          print("OPENSSL_VERSION=" + ssl.OPENSSL_VERSION.split()[1], flush=True)
-          def trace(frame, event, arg):
-              if event == "exception" and frame.f_code.co_name == "section_http" and frame.f_code.co_filename.endswith("/surge_ios.py"):
-                  error = arg[1]
-                  if isinstance(error, urllib.error.URLError): error = error.reason
-                  if isinstance(error, ssl.SSLCertVerificationError) and isinstance(error.verify_code, int):
-                      print("TLS_VERIFY_CODE=%d" % error.verify_code, file=sys.__stderr__, flush=True)
-              return trace
-          sys.settrace(trace)
-          unittest.main(module=None)
-          ' test-surge-scripts.SectionWriteTest.test_t6_tls_trusted_ca_and_hostname_mismatch test-commit-identities.RealSignatureTest.test_expired_key_rejected_even_if_trusted </dev/null 2>&1 | sed -nE \
-            -e 's/^TLS_VERIFY_CODE=([0-9]+)$/TLS_VERIFY_CODE=\1/p' \
-            -e 's/^PYTHON_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$/PYTHON_VERSION=\1/p' \
-            -e 's/^OPENSSL_VERSION=([0-9]+\.[0-9]+\.[0-9]+[a-z]?)$/OPENSSL_VERSION=\1/p' \
-            -e 's/^[[:space:]]*File "[^"[:cntrl:]]*\/(test-surge-scripts|test-commit-identities)\.py", line ([0-9]+).*$/\1.py line \2/p'
