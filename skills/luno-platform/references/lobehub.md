@@ -14,7 +14,8 @@
 
 - Agent 与模型配置、调用模型的归属，或启用任何技能类工具：`references/lobehub.md`〔分支 lobehub-agents〕。
 - Skill、连接器和 Custom MCP，技能的创建、安装、资源更新和启用排障：`references/lobehub.md`〔分支 lobehub-skills〕。
-- 知识库、文档、文件分块、embedding、检索和平台记忆：`references/lobehub-knowledge.md`。
+- 知识库、文档、文件分块、embedding 和检索：`references/lobehub-knowledge.md`〔分支 knowledge〕。
+- 平台记忆的操作、规划或审查：先完整读取 `references/memory-common.md`〔分支 memory-common〕 及其命中分支，再完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。
 - 实例部署、基线、升级恢复、密钥与鉴权、数据库扩展、S3、Redis、检索后端、卷与暴露面、执行位置与负载、异步任务和实例故障：`references/lobehub-instance.md`。
 - 使用或评估 CLI/HTTP、批量与自动化、设备端凭据环境：`references/lobehub.md`〔分支 lobehub-access〕。只读加载规则本身不触发。
 

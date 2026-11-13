@@ -20,9 +20,9 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/LENS.md', 'luno-core'),
                   ('subagents/FORGE.md', 'luno-core'),
                   ('subagents/minis-general-fallback.md', 'luno-core'),
-                  ('prompt/LUNO.md', 'luno-memory'),
+                  ('prompt/LUNO.md', 'luno-platform'),
                   ('skills/luno-core/references/execution.md', 'luno-core'),
-                  ('skills/luno-platform/references/cchp.md', 'cchp'))
+                  ('skills/luno-platform/references/cchp.md', 'references/cchp-upstream/ENTRY.md'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
@@ -31,7 +31,7 @@ RETIRED_RESOURCES = ('skills/luno-surge/references/upstream-SKILL.md',
                      'skills/luno-surge/references/upstream-command-reference.md',
                      'skills/luno-surge/assets/logo.png')
 # __OBLIGATIONS__
-OBLIGATIONS = (('skills/luno-platform/SKILL.md', '## 实例与端点'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/SKILL.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-memory/SKILL.md', '## 资源与触发'))
+OBLIGATIONS = (('skills/luno-platform/SKILL.md', '## 实例与端点'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/SKILL.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
 
 class Guard:
     def __init__(self, root):
@@ -125,6 +125,7 @@ class Guard:
     def edges(self, bodies, reg):
         """加载边、资源边与包内文件全部从正文和资源登记现读，不再有独立边登记表。"""
         load_count = resource_count = 0
+        path_required_missing = 0
         for src,body in bodies.items():
             for m in LOAD_RE.finditer(body):
                 load_count += 1
@@ -140,10 +141,17 @@ class Guard:
                     self.problem('资源未登记')
             for target,skill in REQUIRED_LOADS:
                 if target!=src: continue
-                if not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
+                if '/' in skill:
+                    # 路径形态的必需读取本身就依赖资源路径：一条资源路径都没核到时它必然缺失，
+                    # 与「0 条资源路径被核对」同源，归入不完整而不是结构错误。
+                    if not re.search(r'(?:先完整读取|必须完整读取)\s*`'+re.escape(skill)+r'`', body):
+                        path_required_missing += 1
+                elif not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
                     self.problem('必需加载降级')
         if not load_count: self.problem("0 条加载语句被核对", incomplete=True)
         if not resource_count: self.problem("0 条资源路径被核对", incomplete=True)
+        else:
+            for _ in range(path_required_missing): self.problem('必需加载降级')
         for name,res in (reg or {}).items():
             pkg=self.root/'skills'/name
             for dp,dirs,files in os.walk(pkg,followlinks=False):

@@ -208,43 +208,26 @@
       "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
     },
     {
-      "id": "luno-memory",
-      "type": "skill",
-      "source": "skills/luno-memory/SKILL.md",
-      "resources": [
-        "skills/luno-memory/references/maintenance.md",
-        "skills/luno-memory/LICENSE.matt-pocock.txt"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/luno-memory/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_9oPvAqJubP2H",
-          "fields": "content,name,description"
-        }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-memory",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
-    },
-    {
       "id": "luno-platform",
       "type": "skill",
       "source": "skills/luno-platform/SKILL.md",
       "resources": [
+        "skills/luno-platform/LICENSE.matt-pocock.txt",
         "skills/luno-platform/LICENSE.openminis.txt",
         "skills/luno-platform/LICENSE.upstream.txt",
+        "skills/luno-platform/references/cchp-upstream/ENTRY.md",
+        "skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt",
+        "skills/luno-platform/references/cchp-upstream/references/auth.md",
+        "skills/luno-platform/references/cchp-upstream/references/errors.md",
+        "skills/luno-platform/references/cchp-upstream/references/output-contract.md",
+        "skills/luno-platform/references/cchp-upstream/references/pagination.md",
+        "skills/luno-platform/references/cchp-upstream/references/workflows.md",
         "skills/luno-platform/references/cchp.md",
-        "skills/luno-platform/references/lobehub.md",
         "skills/luno-platform/references/lobehub-instance.md",
         "skills/luno-platform/references/lobehub-knowledge.md",
+        "skills/luno-platform/references/lobehub.md",
+        "skills/luno-platform/references/memory-common.md",
+        "skills/luno-platform/references/minis-memory.md",
         "skills/luno-platform/references/minis.md"
       ],
       "ends": {
@@ -264,7 +247,7 @@
         }
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
+      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。 本候选新增 memory-common/minis-memory 两份记忆资源，LobeHub 记忆保留在 lobehub-knowledge 的命中分支，另承接 CCHP 上游包；不表示已部署或独立对象已删除。"
     },
     {
       "id": "luno-surge",
@@ -307,37 +290,6 @@
       },
       "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-surge",
       "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
-    },
-    {
-      "id": "cchp",
-      "type": "skill",
-      "source": "skills/cchp/SKILL.md",
-      "resources": [
-        "skills/cchp/LICENSE.upstream.txt",
-        "skills/cchp/references/auth.md",
-        "skills/cchp/references/errors.md",
-        "skills/cchp/references/output-contract.md",
-        "skills/cchp/references/pagination.md",
-        "skills/cchp/references/workflows.md"
-      ],
-      "ends": {
-        "repo": {
-          "present": true
-        },
-        "minis": {
-          "present": true,
-          "kind": "file",
-          "path": "/var/minis/skills/cchp/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_lDZbl4IutUAZ",
-          "fields": "content,name,description"
-        }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/cchp",
-      "note": "官方 CCH-HQ/cchp-cli skills/cchp 原样入仓；2026-11-12 两端首装并回读，LobeHub ID 为实际回读值。"
     }
   ]
 }

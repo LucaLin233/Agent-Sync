@@ -1,3 +1,7 @@
+分支：knowledge、lobehub-memory。读法见 luno-core 入口〈加载〉。
+
+<a id="branch-knowledge"></a>
+<!-- BEGIN knowledge -->
 # 知识库与平台记忆
 
 ## 知识库
@@ -16,9 +20,14 @@
 - `document.queryDocuments` 的输入支持 `current` 和 `pageSize`（上限 100），但不支持 `knowledgeBaseId` 过滤（v2.3.2 路由源码，未行为实测）；不能把全局分页结果当作指定知识库的完整枚举，须使用匹配版本的知识库范围读取入口。
 - **写后读有最终一致性延迟**：写完立刻复读可能还是旧内容，判等要留时间窗口。
 
+<!-- END knowledge -->
+
+<a id="branch-lobehub-memory"></a>
+<!-- BEGIN lobehub-memory -->
 ## 平台记忆
 
 - 记忆由内置工具 `lobe-user-memory`（五类 add*Memory 和 searchUserMemory）以及平台的话题提取写入实例库 `user_memories` 和关联表。v2.3.1 的迁移 0193/0195 加入了结构化记忆表与生命周期、实体和 dossier 关联列，五层分类不等于完整的 schema；查库前先核对当前元数据，不沿用固定的列清单。话题提取的记录按 `metadata.source`、`metadata.sourceId`、`metadata.messageIds` 追溯来源，读取时仍要限定已确认的嵌套子字段（v2.3.1 迁移源码记录，2026-11-03，现版本未核，迁移和展示未实测）。
 - `memory_category` 是自由的主题文本；`captured_at` 是对话时间，写入时间看 `created_at`。记忆入口和可用层级按执行设备各子命令的帮助分别核对，不能把单一创建入口的层级限制外推到其他子命令。
-- 平台记忆只来自本平台的对话提取或 agent 基于当前对话主动写入；不导入外部记忆副本，知识库文档不参与生成。各端记忆分工见 `luno-memory`。
+- 平台记忆只来自本平台的对话提取或 agent 基于当前对话主动写入；不导入外部记忆副本，知识库文档不参与生成。各端记忆分工见 `references/memory-common.md`〔分支 memory-common〕。
 - **记忆工具是否可用，不看 agent 的 `plugins` 数组**：`lobe-user-memory` 属于默认工具集和 chat 模式白名单，实际开关是 `agent.chatConfig?.memory?.enabled ?? (userSettings.memory?.enabled !== false)`，`lh agent view` 不显示这个字段（历史源码记录，原版本和日期未记录，2.3.1 未核）。
+<!-- END lobehub-memory -->
