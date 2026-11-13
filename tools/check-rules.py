@@ -125,6 +125,7 @@ class Guard:
     def edges(self, bodies, reg):
         """加载边、资源边与包内文件全部从正文和资源登记现读，不再有独立边登记表。"""
         load_count = resource_count = 0
+        path_required_missing = 0
         for src,body in bodies.items():
             for m in LOAD_RE.finditer(body):
                 load_count += 1
@@ -141,13 +142,16 @@ class Guard:
             for target,skill in REQUIRED_LOADS:
                 if target!=src: continue
                 if '/' in skill:
-                    required = re.search(r'(?:先完整读取|必须完整读取)\s*`'+re.escape(skill)+r'`', body)
-                else:
-                    required = any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body))
-                if not required:
+                    # 路径形态的必需读取本身就依赖资源路径：一条资源路径都没核到时它必然缺失，
+                    # 与「0 条资源路径被核对」同源，归入不完整而不是结构错误。
+                    if not re.search(r'(?:先完整读取|必须完整读取)\s*`'+re.escape(skill)+r'`', body):
+                        path_required_missing += 1
+                elif not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
                     self.problem('必需加载降级')
         if not load_count: self.problem("0 条加载语句被核对", incomplete=True)
         if not resource_count: self.problem("0 条资源路径被核对", incomplete=True)
+        else:
+            for _ in range(path_required_missing): self.problem('必需加载降级')
         for name,res in (reg or {}).items():
             pkg=self.root/'skills'/name
             for dp,dirs,files in os.walk(pkg,followlinks=False):
