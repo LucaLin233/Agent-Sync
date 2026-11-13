@@ -15,7 +15,7 @@ LUNO 提示词、技能与子代理的版本化资产。Minis/LobeHub 是运行�
 
 LobeHub 技能按同步流程使用 `lh skill install` 从已合并的 GitHub `tree/main/skills/<name>` 按需重装；main 可变，不支持用 SHA 固定，安装前后核提交。平时原位重装，有资源退役才备份后删除重装；删除后 ID 会变，须补回安装丢失的正文末尾 LF，并逐字段、逐资源回读。旧 R2 包暂留作恢复材料，不再使用仓库自研部署链；恢复不能承诺保住旧 ID。
 
-官方 CCHP 技能原样 vendored 在 `skills/cchp/`（含 MIT 全文），两端从同一审定仓库版本安装；`luno-platform/references/cchp.md` 仅保留本端边界、组织约定和实例经验。来源与采用版本见 `skills-sources.md`。新增技能的运行端登记在首次安装回读后补齐，候选不表示已经安装。
+官方 CCHP 技能原样 vendored 在 `skills/luno-platform/references/cchp-upstream/`（入口文件为 ENTRY.md）（含 MIT 全文），两端从同一审定仓库版本安装；`luno-platform/references/cchp.md` 仅保留本端边界、组织约定和实例经验。来源与采用版本见 `skills-sources.md`。新增技能的运行端登记在首次安装回读后补齐，候选不表示已经安装。
 
 ## 秘密与公开边界
 
@@ -26,3 +26,5 @@ LobeHub 技能按同步流程使用 `lh skill install` 从已合并的 GitHub `t
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。
 
 批次结果只记当批 PR，历史以 git 为准；公开快照未导入旧私有 `LucaLin233/Agent` 历史。合并及共读资源迁移见提交 `484de55052413ef2004d5e588d5a0540bcf88826` 及后续历史，加载读法以 `luno-core` 为准。
+
+记忆规则并入 luno-platform：memory-common、minis-memory 分别负责跨端共同义务及 Minis 专属机制；LobeHub 平台记忆仍在既有 references/lobehub-knowledge.md 的 lobehub-memory 分支，知识库任务只读 knowledge 分支；各端记忆数据自持，不作跨端同步。独立 cchp、luno-memory 的退役须按登记、真实前态备份和逐端回读完成，不以仓库目录移除冒充已部署。

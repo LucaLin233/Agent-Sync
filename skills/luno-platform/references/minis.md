@@ -1,4 +1,4 @@
-分支：minis、minis-configuration、minis-runtime、minis-runtime-context、minis-runtime-device、minis-memory。读法见 luno-core 入口〈加载〉。
+分支：minis、minis-configuration、minis-runtime、minis-runtime-context、minis-runtime-device。读法见 luno-core 入口〈加载〉。
 
 <a id="branch-minis"></a>
 <!-- BEGIN minis -->
@@ -24,7 +24,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 - **使用 Minis 文件编辑工具前**，以及上下文卸载与压缩、会话结果截断、跨会话目录与挂载、隐私掩码、独立 Shell 进程、后台调度、工具连接异常：`references/minis.md`〔分支 minis-runtime〕。命中以下情形时另完整读对应分支：
   - 上下文卸载、压缩、offloads、会话结果截断、会话原文回读，以及记忆注入、截断或容量相关判断前；跨会话目录、挂载、用户文件定位或跨话题交接前：`references/minis.md`〔分支 minis-runtime-context〕。其中需要记忆规则时继续按该资源加载，不凭旧阈值推断。
   - 本机能力、独立 Shell 进程、原生命令、分页覆盖、后台服务与调度、Bonjour、debug、文件或进程异常、Codex/iSH TLS 的操作、建议或判断前：`references/minis.md`〔分支 minis-runtime-device〕。`references/minis.md`〔分支 minis-runtime〕 的编辑与隐私掩码规则和工具异常规则仍适用；不因分支化省略安全、授权或写后回读。
-- 记忆写入或整理后的条目格式体检、压缩前后的标识保全校验，记忆日志的自动注入、截断与容量评估：`references/minis.md`〔分支 minis-memory〕。
+- 记忆写入或整理后的条目格式体检、压缩前后的标识保全校验，记忆日志的自动注入、截断与容量评估：`references/minis-memory.md`〔分支 minis-memory-injection〕。
 - 归档会话、判断会话归属，或用 `minis-sessions-cli update --group` 改派之前：`references/minis.md`〔分支 minis-configuration〕〈会话归组〉。
 
 ## 输出
@@ -60,7 +60,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 ## 记忆与生效真源
 
-- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`。需要每轮注入的偏好和约定可以放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户的明示修改，只承载本端约定，不作跨端真源。记忆的边界、更正和诚实边界见 `luno-memory`；注入窗口和容量见本技能的记忆资源。
+- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`。需要每轮注入的偏好和约定可以放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户的明示修改，只承载本端约定，不作跨端真源。记忆的边界、更正和诚实边界见 `references/memory-common.md`〔分支 memory-common〕；注入窗口和容量见本技能的记忆资源。
 - **跨端规则的生效真源在 Minis**：技能正文 `/var/minis/skills/<name>/SKILL.md`，常驻提示词 `soul.body`（文件视图 `SOUL.md`）。候选只在隔离的仓库副本里编辑，写生效端之前必须按 `luno-core/references/sync.md`〔分支 sync〕 的同步流程执行。
 
 ## 技能登记
@@ -115,7 +115,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 - **工具结果自动卸载**是执行者无法关闭的平台行为（机制见上述手册）：派单和执行时用字段投影、截断或计数控制单次输出，避免触发。发生后只报告工具给出的确切路径，未经另行授权不读不删；不算受派方主动越权，不需逐次记入事故。获准回读时不猜文件名；编码或二进制拒读不代表不存在，只对确认不含秘密的文本，在确认编码后用管道转成 UTF-8 读取。秘密输出禁令不因自动卸载而豁免。
 - 回读会话的参数和字段上限见手册 `cli/minis-sessions-cli.md`（含 `--full`、`--tools`；`messages --tools --full` 读取已存储的 shell 输入，不保证恢复完整元数据）。`messages --id` 必须用完整 UUID：2026-10-25 本机用 8 位前缀时返回成功但消息为空，不能据此判断没有消息。长结果要当轮按授权归档，没有授权就报告缺口；检索或回读父会话和其他会话须当次授权，默认不提供父会话转录。
 - 规则文本本身不会报告余量，所以只在事件和阶段边界触发交接，不做「快满了」的预警。
-- 涉及记忆日志的自动注入、截断或容量，或据此评估日志的压缩、折行和整理时，先读 `references/minis.md`〔分支 minis-memory〕。
+- 涉及记忆日志的自动注入、截断或容量，或据此评估日志的压缩、折行和整理时，先读 `references/minis-memory.md`〔分支 minis-memory-injection〕。
 
 ## 目录与挂载
 
@@ -142,23 +142,3 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 来源与许可：OpenMinis/MinisSkills，MIT 精选改写；Copyright (c) 2026 OpenMinis；2026-10-25 本地决定按 MIT 处理，README 的 Apache-2.0 标注冲突保留，不作法律适用结论或扩大分发授权。完整许可随包见 ../LICENSE.openminis.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END minis-runtime-device -->
-
-<a id="branch-minis-memory"></a>
-<!-- BEGIN minis-memory -->
-# Minis 记忆：条目校验与日志注入
-
-本资源的工具和命令只在 Minis 端可用。
-
-## 条目校验工具
-
-- **格式体检** `/var/minis/shared/memory-tools/verify-memory-format.py`（只读）：按条目检查条目数、关键词行、时间戳、词数和字节预算，退出码 1 表示有硬失败。写入或整理记忆后跑一次，用来查漏；`--strict-terms` 是回补专用的严格档（要求关键词在正文原样出现，比规则更严），不要用它评判既有条目。它是事后查漏工具，不是写入的强制入口，不能据此说格式已被强制。
-- **压缩门禁** `/var/minis/shared/memory-tools/entry-guard.py`（只读）：压缩某条记忆前后，用 `--old <压缩前副本> --new <当前文件>` 逐条比对可检索的标识有没有丢（哈希、提交号、job id、`skl_*`、路径、文件名、容量、常量名），并检查条目数和关键词行。硬失败（非 0）就不能说压缩无损。子代理的自述不代替父级核对：父级核对对象哈希、命令、退出码和原始结果，证据不足或对象变了才重跑。
-
-## 日志自动注入（2026-09-19 本机实测，App 版本未记录）
-
-- **规则**：记忆开启时，按文件日期取当天和前两天的日志，每份截取前 199 个物理行（不按 mtime、字符或 token 截取）。第 200 行起不注入，跨越截断线的条目可能不完整。注入的字符量约为各文件所取行数乘以平均每行字符数之和，token 数还取决于文本和 tokenizer。
-- **目标**：每日日志 ≤199 物理行是完整注入的目标；每日约 25,000 B 是文本规模的观察目标。两者分别核算，都不是写入工具的硬限，也不是跨端规则（行数含标题、时间戳和空行）。单条 2 KiB 的软预算见 `luno-memory`。
-- **接近或超标时**：检查重复、完整条目和截断边界；不为了达标删事实、补空行、机械折行、拆散条件或擅自整理历史。无法兼顾时保留必要的事实，报告超标和可能的截断，不声称完整注入。授权内折短长行可以减少字符，但可能把原文推到截断线之外，不保证关键结论和条件完整；折行宽度按当次的目标和边界决定，不自动批量重排历史。
-- **重核**：App 更新、开关变化或观察结果改变时，要重新核实，并在记忆开启的新会话里验证注入，不能用当前会话或文件回读代替。
-<!-- END minis-memory -->
-

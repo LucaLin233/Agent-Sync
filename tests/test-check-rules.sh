@@ -80,7 +80,7 @@ case('frontmatter 内的加载语句不算加载边',0,'无问题',
 case('资源登记不可用',3,'资源登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{bad'))
 
 # ── 加载边（正文即真源，不再有独立登记表）──
-LOAD='\n- 写入前条件加载 `luno-memory`。\n'
+LOAD='\n- 写入前条件加载 `luno-authoring`。\n'
 case('新增条件加载边直接通过',0,'无问题',lambda p:append(p,SYNC,LOAD))
 case('加载目标缺失',1,'加载目标缺失',lambda p:append(p,SYNC,'\n- 写入前另加载 `luno-absent`。\n'))
 case('必需加载被降级为条件加载',1,'必需加载降级',
@@ -91,6 +91,12 @@ def no_loads(p):
         t=f.read_text(encoding='utf-8');u=G.LOAD_RE.sub('加载说明',t)
         if u!=t:f.write_text(u,encoding='utf-8')
 case('加载语句核对为空（同时报必需加载降级）',1,'0 条加载语句被核对',no_loads)
+
+# 包内上游入口迁移后，仍须检测必需读取被弱化。
+case('CCHP 上游入口必需读取降级',1,'必需加载降级',
+     lambda p:edit(p,'skills/luno-platform/references/cchp.md',
+                   lambda s:s.replace('先完整读取 `references/cchp-upstream/ENTRY.md`',
+                                      '按需读取 `references/cchp-upstream/ENTRY.md`')))
 
 # ── 资源边 ──
 def new_resource(p,registered):
