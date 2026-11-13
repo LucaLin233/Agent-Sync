@@ -156,7 +156,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - **官方来源**：https://github.com/CCH-HQ/cchp-cli ，固定采用提交 `d9da5760a8d2f6ce689c01b98b6c96540513045d`；2026-11-12 匿名 clone 核对默认分支 main HEAD 仍为该提交，未发生基线推进。
 - **取材范围**：上游 `skills/cchp/` 的全部 6 个文件，原字节落到本仓库 `skills/luno-platform/references/cchp-upstream/`，仅将入口文件名 SKILL.md 改为 ENTRY.md；不翻译、不合并、不改正文/frontmatter。额外把上游根 `LICENSE` 原字节加入 `skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt`，不复制 CLI 二进制、spec、docs、构建/安装脚本或其他目录。
 - **许可**：MIT，`Copyright (c) 2026 the cchp contributors`；完整版权与 MIT 条款随包分发，根 LICENSE 不替代它。
-- **两端来源**：Minis 按审定仓库版本逐文件更新 `/var/minis/skills/luno-platform/`，并核 App 登记及新会话元数据；LobeHub 用 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform` 安装，正文按 body_contract 核验，安装裁掉的尾 LF 须补回。独立 cchp 的退役须备份真实前态并按授权逐端回读；运行端 ID 和状态只在实际安装回读后更新，不在制稿阶段虚填。
+- **两端来源**：Minis 按审定仓库版本逐文件更新 `/var/minis/skills/luno-platform/`，并核 App 登记及新会话元数据；LobeHub 用 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform` 安装，正文按 body_contract 核验，安装裁掉的尾 LF 须补回。独立 cchp 的退役已按当时规则备份真实前态并按授权逐端回读（历史记录，不是现行备份义务）；运行端 ID 和状态只在实际安装回读后更新，不在制稿阶段虚填。
 - **追新**：只从官方 GitHub 默认分支核 HEAD、逐文件末次提交、正文及 LICENSE diff；经授权采纳与审查后更新 vendored 字节和本登记，不自动跟版。安装 main URL 不能锁 SHA，部署前后核分支 HEAD 与已审提交，并逐文件回读，分支推进或内容不符就停止相关对象。
 - **原始文件 SHA-256**（2026-11-12，固定提交）：
   - `skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt`：`481c79a8e1493001832cfb2e417e2a698f7f0b0d3b3351a10fa0750e53046cb2`
