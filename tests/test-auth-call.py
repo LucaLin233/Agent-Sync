@@ -70,6 +70,16 @@ class Tests(unittest.TestCase):
                 out, op = self.call(obj)
                 self.assertEqual(out['resource'], obj)
                 self.assertEqual(op.calls[0].get_method(), 'GET')
+                req = op.calls[0]
+                self.assertEqual(req.get_header('X-api-key'), TOKEN)
+                target = A.urllib.parse.urlsplit(req.full_url)
+                self.assertEqual((target.scheme, target.netloc, target.path),
+                                 ('https', 'hub.test', '/trpc/lambda/agentSkills.readResource'))
+                query = A.urllib.parse.parse_qs(target.query, strict_parsing=True)
+                self.assertEqual(set(query), {"input"})
+                self.assertEqual(len(query["input"]), 1)
+                self.assertEqual(json.loads(query["input"][0]),
+                                 {"json": {"id": "skill", "path": "a.md"}})
                 self.assertNotIn(TOKEN, op.calls[0].full_url)
 
     def test_pr_query_and_credentials(self):
@@ -83,6 +93,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(out['pullRequest'], PR)
         self.assertEqual(names, ['GH_TOKEN'])
         req = op.calls[0]
+        self.assertEqual(req.get_header("Authorization"), "bearer " + TOKEN)
         self.assertEqual(req.full_url, A.GRAPHQL_URL)
         self.assertEqual(req.get_method(), 'POST')
         self.assertEqual(json.loads(req.data)['variables'], dict(owner='owner', name='repo', number=7))
