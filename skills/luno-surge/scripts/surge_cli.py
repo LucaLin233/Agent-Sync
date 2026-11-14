@@ -22,11 +22,11 @@ Usage: surge-cli <command> [arguments]
 
 Command groups:
   Status       status, summary, version
-  Routing      mode, global-policy, policy-group, rule match, rule temp
-  Profile      profile, module, feature, managed-profile, external-resource
+  Routing      mode, global-policy, policy-group, policy-avoid, rule match, rule temp
+  Profile      profile, module, feature, managed-profile, external-resource, capture-filter
   Network      dns, geoip, http probe, test, diagnostics, flush dns
-  Inspection   dump, watch, log, logbook, proxy-runtime-status
-  Automation   script, script-log, benchmark
+  Inspection   dump, watch, log, logbook, proxy-runtime-status, capture-session
+  Automation   script, script-log, benchmark, plugin (macOS online only)
   Gateway      device, vmnet, security ban
   Control      reload, restart-engine, switch-profile, kill, stop, unattended-upgrade
   Environment  environment, set, set-log-level
@@ -55,11 +55,16 @@ HELP = {
 "version":"Usage: version\n\nShow Surge, Core, Controller protocol, system, and device versions.",
 "mode":"Usage: mode [get | set <rule|direct|proxy>]\n\nShow or change the outbound mode.",
 "global-policy":"Usage: global-policy [get | set <policy>]\n\nShow or change the global proxy policy.",
+"policy-avoid":"Usage:\n  policy-avoid list\n  policy-avoid add <policy>\n  policy-avoid remove <policy>\n  policy-avoid clear\n\nAutomatic groups avoid these policies while another member is available. add/remove/clear change policy selection and require the separate confirmation specified by the skill. Check platform/protocol and current instance support before execution.",
 "policy-group":"Usage:\n  policy-group list\n  policy-group get <group>\n  policy-group set <group> <policy|auto>",
 "rule":"Usage: rule <match|explain> <host|url> [port] [key=value ...]\n       rule temp <list | add | remove | set-policy | flush>\n\nEvaluate active rules or manage temporary rules.",
 "rule temp":"Usage:\n  rule temp list\n  rule temp add <rule>\n  rule temp remove <rule>\n  rule temp set-policy <rule> <policy>\n  rule temp flush",
-"profile":"Usage: profile <list | current | diff | check <name> | switch <name>>",
-"module":"Usage: module <list | enable <name...> | disable <name...>>",
+"profile":"Usage: profile <list | current | diff | check <name> | switch <name> | section <list | get <name>>>\n\nprofile list/check are macOS-only. Section list/get may expose configuration secrets; read only the authorized scope. Use help profile section for details. profile section set is rejected by this bridge before connection, credential lookup or file reading, including --raw.",
+"profile section":"Usage:\n  profile section list\n  profile section get <name>\n\nRead section metadata or content; content may contain secrets. Check platform/protocol and authorized fields before execution. profile section set is not implemented and is rejected before connection, credential lookup or file reading, including --raw. Do not use another command to bypass this refusal; redacted section content must not be written back.",
+"module":"Usage: module <list | show <name> | enable <name...> | disable <name...>>\n\nshow includes module headers and text, which may contain secrets. enable/disable can schedule profile reload; apply the skill's authorization and reload confirmation rules. Check platform/protocol and current instance support before execution.",
+"capture-filter":"Usage:\n  capture-filter list\n  capture-filter get <in-memory|on-disk>\n  capture-filter set <in-memory|on-disk> <option=value>...\n\nOptions: http-only, hide-crash-reporter, hide-apple, hide-udp (on|off); type (off|with-keywords|without-keywords|pattern); keywords; add-keyword, remove-keyword, enable-keyword, disable-keyword.\nOptions are applied in order; an invalid option leaves the filter unchanged. An empty keywords value clears the list; use add-keyword for an entry containing a comma.\nFilters change recording scope, not network reachability. Check platform/protocol and authorization before execution; recorded requests may contain secrets.",
+"capture-session":"Usage:\n  capture-session list [include-size]\n  capture-session dump <session> [offset=N] [limit=N] [filter=TEXT]\n  capture-session data <session> <key> <request|response> [offset=N] [length=N]\n\nRead saved HTTP Capture sessions. Address sessions by name and requests by key, not request id. include-size reads every file; request/response bodies and metadata may contain secrets. Read only the authorized scope. This help does not start or stop capture; verify current instance support before execution.",
+"plugin":"Usage: plugin <list|info|parameters|load-unpacked|configure|enable|disable|select|uninstall> [arguments]\n\nOnline Controller commands are macOS-only. This help lists command names, not verified per-command argument syntax; read current official Mac help before supplying arguments, and stop if unavailable. list/info values may contain secrets; read the parameters schema before configuration. configure may execute plugin validation; uninstall deletes persistent storage and needs deletion authorization.\nplugin validate, plugin pack and lsp are official macOS local tools, not implemented by this bridge. plugin install is not available.",
 "feature":"Usage: feature <list | get <name> | set <name> <on|off>>\n\nFeatures: mitm, rewrite, scripting, capture, packet-capture, cellular-mode.",
 "dns":"Usage:\n  dns lookup <domain> [interface=<bsd-name>]\n  dns trace <domain> [interface=<bsd-name>]",
 "geoip":"Usage: geoip <ip-address>",

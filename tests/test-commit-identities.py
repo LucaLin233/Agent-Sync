@@ -49,6 +49,9 @@ def rule_text(luno=LUNO[1], forge=FORGE[1], lens=LENS[1], lin=LIN):
     return ('# 夹具规则\n\n## Git 提交署名\n\n'
             'Git提交按实际编写者设置 Author：LUNO 使用 `LUNO <%s>`，FORGE 使用 `FORGE <%s>`，LENS 使用 `LENS <%s>`。'
             '并登记 `%s <%s>`、`%s <%s>`。\n'
+            '受限自动名称族声明为 `Claude(?:[ -][A-Za-z0-9]+(?:[ .-][A-Za-z0-9]+)*)? <noreply@anthropic.com>`、'
+            '`Codex(?:[ -][A-Za-z0-9]+(?:[ .-][A-Za-z0-9]+)*)? <noreply@openai.com>`、'
+            '`GPT(?:[ -][A-Za-z0-9]+(?:[ .-][A-Za-z0-9]+)*)? <noreply@openai.com>`。\n'
             '平台自动生成的合并提交保留平台身份。\n\n## 其他段\n\n不相关正文。\n'
             % ((luno, forge, lens) + lin + CLAUDE))
 
@@ -278,6 +281,35 @@ class PositiveTest(Base):
         self.verdict(self.repo.run(base, head), 0, '通过')
 
 
+FAMILIES = (('Claude Next 99.1', 'noreply@anthropic.com'),
+           ('Codex-Next-99.1', 'noreply@openai.com'),
+           ('GPT-99.1', 'noreply@openai.com'))
+
+
+class FamilyTest(Base):
+    """受限名称族的语法夹具（不是已发布型号事实）：不逐型号登记即可准入三个字段。"""
+
+    def test_future_names_pass_author_committer_and_coauthor(self):
+        cases = []
+        for name, mail in FAMILIES:
+            pair = (name, mail)
+            cases.append((name + ' author', pair, pair, 'subject\n', 0, ()))
+            cases.append((name + ' committer', pair, pair, 'subject\n', 0, ()))
+            cases.append((name + ' coauthor', FORGE, FORGE,
+                          'subject\n\nCo-authored-by: %s <%s>\n' % pair, 0, ()))
+        self.batch(cases)
+
+    def test_names_outside_the_three_families_are_rejected(self):
+        anthropic, openai = 'noreply@anthropic.com', 'noreply@openai.com'
+        bad = (('NotClaude', anthropic), ('ClaudeX', anthropic), ('Claude-', anthropic),
+               ('Claude  Next', anthropic), ('Claude_Next', anthropic),
+               ('claude Next', anthropic), (' Claude Next', anthropic),
+               ('Claude Next ', anthropic), ('Claude Next', openai),
+               ('GPT-99.1', anthropic), ('LENS', anthropic))
+        self.batch([(name, (name, mail), OTHER, 'subject\n', 1,
+                     ('author', '身份不在署名表内')) for name, mail in bad])
+
+
 class PlatformTest(Base):
     """平台合并只凭「≥2 父＋平台提交者＋web-flow 验签通过」豁免。"""
 
@@ -504,6 +536,19 @@ class EnvironmentTest(Base):
                         str(dest)), capture_output=True, check=True)
         proc = call_tool(['--base', base, '--head', head, '--rules', str(self.repo.rules)], dest)
         self.verdict(proc, 2, '浅克隆')
+
+
+class FamilyRulesTest(RulesTest):
+    def test_missing_duplicate_or_malformed_families_fail_closed(self):
+        gpt = '`GPT(?:[ -][A-Za-z0-9]+(?:[ .-][A-Za-z0-9]+)*)? <noreply@openai.com>`'
+        self.assertIn(gpt, rule_text())
+        self.verdict(self.run_rules(rule_text().replace(gpt, '', 1)), 2, '缺少 GPT')
+        self.verdict(self.run_rules(rule_text().replace(gpt, gpt + '、`Claude Next(?:[ -]X)? <noreply@anthropic.com>`', 1)),
+                     2, '名称族重复')
+        self.verdict(self.run_rules(rule_text().replace('平台自动生成的合并提交保留平台身份。', '`Gemini(?:[ -]Next)? <noreply@example.invalid>`。\n\n平台自动生成的合并提交保留平台身份。', 1)),
+                     2, '未纳入')
+        self.verdict(self.run_rules(rule_text().replace('noreply@openai.com', 'noreply', 1)),
+                     2, '名称族邮箱')
 
 
 if __name__ == '__main__':

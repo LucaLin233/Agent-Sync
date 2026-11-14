@@ -2,9 +2,10 @@
 """提交署名机械检查：<base>..<head> 每个提交的 author／committer／Co-authored-by 须按字节
 （大小写敏感）等于规则文件〈Git 提交署名〉段登记的身份之一。
 
-- 身份只取自规则文件：整行标题 `## Git 提交署名` 下反引号内的完整声明 `Name <email>`，
-  名字须逐字节等于 NAMES 之一（新增姓名须与规则同批改），其他声明忽略。段或登记名缺失、
-  重复、同邮箱、邮箱形态非法（占位、两侧空白）→ rc=2，不回退到环境变量、git config 或上一提交。
+- 身份只取自规则文件：整行标题 `## Git 提交署名` 下反引号内的完整声明 `Name <email>`。
+  人工/角色身份逐字节精确匹配；另三条受限名称族声明（名称位置为正则）按原始名称 ASCII 字节
+  区分大小写完整匹配，只承接 Claude／Codex／GPT 三族及各自固定公开邮箱，不逐型号登记。
+  段、必需精确项或三族声明缺失/重复、邮箱非法、模式不可编译、非法同邮箱 → rc=2，不回退。
 - 平台合并（≥2 父）与 squash（恰 1 父，仅 --allow-squash，供 push 到 main 使用）只在 committer
   为 `GitHub <noreply@github.com>` 且 web-flow 签名验证通过时跳过 author／committer 校验；
   Co-authored-by 仍逐条核对，squash 还须至少一条。验签只用随仓库的公钥与临时 GNUPGHOME，
@@ -29,7 +30,9 @@ from pathlib import Path
 # 身份规则单真源；〈Git 提交署名〉段迁到别的文件时改这一行（并同步 tests/test_paths.py 的 identity 选路）。
 DEFAULT_RULES = 'skills/luno-core/references/review.md'
 SECTION_TITLE = 'Git 提交署名'
-NAMES = (b'LUNO', b'FORGE', b'LENS', b'Claude Opus 5.5', b'LIN student')
+# 必需精确项（人工/角色及保留的旧身份）；AI 型号只走规则里的受限名称族，不在此硬编码。
+EXACT_NAMES = (b'LUNO', b'FORGE', b'LENS', b'Claude Opus 5.5', b'LIN student')
+FAMILY_BASES = (b'Claude', b'Codex', b'GPT')
 IDENT_LINE = re.compile(rb'^(.*?) <([^<>]*)> (\d+) ([+-]\d{4})$')
 # 比 RFC 窄，拒绝方括号、空白等占位形态；域名可以无点（现役身份是不可路由的 `名@local`）。
 EMAIL = re.compile(
@@ -58,7 +61,7 @@ class Parser(argparse.ArgumentParser):
 
 
 def read_rules(path):
-    """→ {名: 邮箱}（bytes）。名字与邮箱都不 strip：名字带空白即不是登记名，邮箱带空白即形态非法。"""
+    """→ (精确表 {名: 邮箱}, 名称族 [(基名, 编译模式, 邮箱)])，全部 bytes，均不 strip。"""
     try:
         text = path.read_bytes().decode('utf-8')
     except OSError:
@@ -74,23 +77,64 @@ def read_rules(path):
         if line.lstrip().startswith('#'):
             break
         body.append(line)
-    rules = {}
+    exact, families = {}, []
     # 只取完整声明：`NotLIN student <…>` 不会被截成 `LIN student <…>`
     for m in re.finditer(r'`([^`<>\n]+) <([^`<>\n]*)>`', '\n'.join(body)):
         name, value = m.group(1).encode('utf-8'), m.group(2).encode('utf-8')
-        if name not in NAMES:
+        if b'(' in name or b'?' in name or b'|' in name:
+            base = next((b for b in FAMILY_BASES if name.startswith(b)), None)
+            if base is None:
+                raise Env('规则〈%s〉段出现未纳入的名称族声明' % SECTION_TITLE)
+            if any(f[0] == base for f in families):
+                raise Env('规则〈%s〉段 %s 名称族重复（不回退）' % (SECTION_TITLE, base.decode()))
+            if not EMAIL.match(value):
+                raise Env('规则〈%s〉段 %s 名称族邮箱形态非法（占位、带空白或非邮箱）'
+                          % (SECTION_TITLE, base.decode()))
+            try:
+                pattern = re.compile(name, re.ASCII)
+            except re.error:
+                raise Env('规则〈%s〉段 %s 名称族模式不可编译' % (SECTION_TITLE, base.decode()))
+            families.append((base, pattern, value))
             continue
-        if name in rules:
+        if name not in EXACT_NAMES:
+            continue
+        if name in exact:
             raise Env('规则〈%s〉段 %s 身份重复（不回退）' % (SECTION_TITLE, m.group(1)))
         if not EMAIL.match(value):
             raise Env('规则〈%s〉段 %s 身份形态非法（占位、带空白或非邮箱）' % (SECTION_TITLE, m.group(1)))
-        rules[name] = value
-    for name in NAMES:
-        if name not in rules:
+        exact[name] = value
+    for name in EXACT_NAMES:
+        if name not in exact:
             raise Env('规则〈%s〉段缺少 %s 身份（不回退）' % (SECTION_TITLE, name.decode('utf-8')))
-    if len(set(rules.values())) < len(rules):
-        raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）' % (SECTION_TITLE, len(rules)))
-    return rules
+    for base in FAMILY_BASES:
+        if not any(f[0] == base for f in families):
+            raise Env('规则〈%s〉段缺少 %s 名称族声明（不回退）' % (SECTION_TITLE, base.decode()))
+    # 同邮箱：角色/人工及族间都不放宽；只允许 Claude 旧精确身份与 Claude 族共用，
+    # 以及 Codex/GPT 两族共用登记的 OpenAI 邮箱。
+    fam_mail = {f[0]: f[2] for f in families}
+    if fam_mail[b'Codex'] != fam_mail[b'GPT']:
+        raise Env('规则〈%s〉段 Codex/GPT 名称族邮箱不一致（不回退）' % SECTION_TITLE)
+    seen = {}
+    for name, mail in exact.items():
+        if mail in seen:
+            raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）' % (SECTION_TITLE, len(exact)))
+        seen[mail] = name
+    for base, _pattern, mail in families:
+        shared_openai = base in (b'Codex', b'GPT') and mail == fam_mail[b'Codex']
+        if mail in seen and not shared_openai and not (
+                base == b'Claude' and seen[mail] == b'Claude Opus 5.5'):
+            raise Env('规则〈%s〉段 %s 名称族邮箱与其他身份相同（不回退）'
+                      % (SECTION_TITLE, base.decode()))
+        seen.setdefault(mail, base)
+    return exact, families
+
+
+def admitted(rules, name, email):
+    """Author、Committer、每条 Co-authored-by 共用的唯一准入判据。"""
+    exact, families = rules
+    if exact.get(name) == email:
+        return True
+    return any(pattern.fullmatch(name) and email == mail for _base, pattern, mail in families)
 
 
 def run(argv, env=None, **kw):
@@ -231,7 +275,7 @@ def check_commit(rules, sha, webflow, allow_squash=False):
             name, email = ident(items, key)
             if name is None:
                 problems.append((key.decode(), '身份行形态非法或缺失'))
-            elif rules.get(name) != email:
+            elif not admitted(rules, name, email):
                 problems.append((key.decode(), '身份不在署名表内'))
     author = ident(items, b'author')
     trailer = coauthors(raw.partition(b'\n\n')[2])
@@ -243,7 +287,7 @@ def check_commit(rules, sha, webflow, allow_squash=False):
         if not m or not m.group(1).strip():
             problems.append((label, '格式非 Name <email>'))
             continue
-        if rules.get(m.group(1)) != m.group(2):
+        if not admitted(rules, m.group(1), m.group(2)):
             problems.append((label, '身份不在署名表内'))
         # squash 的 Author 是 PR 内最后一个提交的作者，收口者逐个写尾行时必然与之重合
         if kind != 'squash' and (m.group(1), m.group(2)) == author:

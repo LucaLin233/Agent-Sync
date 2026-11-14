@@ -10,7 +10,7 @@
 
 基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。帮助证据的版本和范围见 `references/SOURCE.md`〈本地帮助证据〉。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
 
-本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识。plugin、capture-filter 帮助在已核桥上回落主帮助，capture-session 在桥里没有帮助条目，都没有该族的实际契约。
+本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法。capture-filter、capture-session、policy-avoid、profile section 和 module show 提供本地帮助；plugin 帮助仅列在线子命令及实现边界，个别参数仍须核当前官方 Mac 帮助，取不到就停止依赖参数的步骤。以下只补帮助未覆盖的知识，本地帮助不证明所连实例支持命令。
 
 本端 default 同机不授予远程连接权；IPv6 地址使用方括号加端口，参数含 CR/LF 会在本地拒绝。凭据只用入口允许的变量或 stdin，不采纳官方客户端的密码文件、其他凭据变量和交互提示。
 

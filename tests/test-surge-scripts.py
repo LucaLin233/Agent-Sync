@@ -39,7 +39,7 @@ SCRIPTS = SKILL / 'scripts'
 SURGE_IOS = SCRIPTS / 'surge_ios.py'
 POLICY_DESCRIPTOR = SCRIPTS / 'test_policy_descriptor.py'
 SURGE_CLI = SCRIPTS / 'surge_cli.py'
-PACKER = SCRIPTS / 'package_release.py'
+PACKER = ROOT / 'tools/package_release.py'
 API_KEY = 'test'                      # 哑值
 
 
@@ -635,6 +635,30 @@ class SurgeCliTest(unittest.TestCase):
         self.assertEqual((2, ''), (r.returncode, r.stdout))
         self.assertIn('Cannot read profile file', r.stderr)
 
+    def test_help_is_local_and_states_boundaries(self):
+        cases = {
+            'capture-filter': ('capture-filter set <in-memory|on-disk>', 'Options are applied in order'),
+            'capture-session': ('capture-session dump <session>', 'may contain secrets'),
+            'policy-avoid': ('policy-avoid add <policy>', 'require the separate confirmation'),
+            'plugin': ('macOS-only', 'plugin install is not available'),
+            'profile': ('profile section set is rejected', 'macOS-only'),
+            'profile section': ('profile section get <name>', 'rejected before connection'),
+            'module': ('module <list | show <name>', 'may contain secrets'),
+        }
+        for key, needles in cases.items():
+            with self.subTest(key):
+                controller = LocalController({'result': 'ok'})
+                self.addCleanup(controller.close)
+                r = run_cli(['help'] + key.split(), remote=controller.remote, stdin=API_KEY)
+                self.assertEqual(0, r.returncode, r.stderr)
+                for needle in needles:
+                    self.assertIn(needle, r.stdout)
+                self.assertEqual(([], []), (controller.passwords, controller.commands))
+                self.assertNotIn('Usage: surge-cli', r.stdout)
+        r = run_cli(['help', 'capture-filter'], process=True)   # 真实子进程：帮助不进网络路径
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertIn('capture-filter', r.stdout)
+
     def test_section_set_is_blocked_before_connecting(self):
         for args in (['profile', 'section', 'set', 'Rule', 'SYNTH-SET'],
                      ['--raw', 'Profile', 'SECTION', 'Set', 'Rule', 'SYNTH-SET'],
@@ -660,11 +684,12 @@ class PackerTest(unittest.TestCase):
             'agents/openai.yaml', 'assets/logo.png')
 
     def isolated(self, tmp):
-        """复制打包器进隔离技能目录（SOURCE 由脚本位置推导）。"""
-        skill = Path(tmp) / 'skill'
+        """按 repo/tools ＋ repo/skills/luno-surge 布局复制打包器（SOURCE 由脚本位置推导）。"""
+        base = Path(tmp) / 'repo'
+        skill = base / 'skills/luno-surge'
         (skill / 'references').mkdir(parents=True)
-        (skill / 'scripts').mkdir()
-        script = skill / 'scripts/package_release.py'
+        (base / 'tools').mkdir()
+        script = base / 'tools/package_release.py'
         shutil.copy2(str(PACKER), str(script))
         (skill / 'SKILL.md').write_text('---\nname: surge\n---\n\n夹具正文\n')
         (skill / 'references/one.md').write_text('one\n')
@@ -697,7 +722,7 @@ class PackerTest(unittest.TestCase):
                 (skill / rel).parent.mkdir(parents=True, exist_ok=True)
                 (skill / rel).write_text('excluded\n')
             self.assertEqual(['SKILL.md', 'references/one.md', 'references/two.md',
-                              'references/upstream-manifest.json', 'scripts/package_release.py'], [rel for rel, _ in module.collect(skill)])
+                              'references/upstream-manifest.json'], [rel for rel, _ in module.collect(skill)])
             for make, message in (
                     (lambda p: p.symlink_to('references/one.md'), 'Symlinks are not allowed in release packages: bad'),
                     (lambda p: os.mkfifo(str(p)), 'Non-regular entries are not allowed in release packages: bad')):

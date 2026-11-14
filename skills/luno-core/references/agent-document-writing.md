@@ -43,7 +43,7 @@
 <!-- BEGIN skill-authoring -->
 # 技能编写与结构校验
 
-通用写法（自由度、目录与 `scripts/`/`references/`/`assets/` 分工、渐进披露、`description` 写法）按 [Anthropic 技能编写最佳实践](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) 和 [Agent Skills 规范](https://agentskills.io/specification)；效果评测（with/without 对照、近失负例、留出集、多次运行看方差、客观断言与人工判断分开）按 [anthropics/skills 的 skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md)。改技能就是改行为，要有对照，不凭印象。书写启发式见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；发布、登记刷新和平台安装见 `luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
+通用写法（自由度、目录与 `scripts/`/`references/`/`assets/` 分工、渐进披露、`description` 写法）按 [Anthropic 技能编写最佳实践](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) 和 [Agent Skills 规范](https://agentskills.io/specification)；效果评测（with/without 对照、近失负例、留出集、多次运行看方差、客观断言与人工判断分开）按 [anthropics/skills 的 skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md)。改技能就是改行为，要有对照，不凭印象。效果评测须在运行前写明成功、失败的判据和观察输出；不得在看到结果后选择判据。书写启发式见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；发布、登记刷新和平台安装见 `luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
 - **受管范围**：下列约束只针对受管的自定义技能；平台内置技能不按此判定无效，也不改写、不纳入受管同步。受管技能的目录名必须等于 `name`。
 - **结构校验**：本地只用 `luno-core/scripts/quick_validate.py`（唯一实现），按本次变化的技能直接调用。它只查 frontmatter 的字段与限制、目录名与 `name` 相同、正文非空；**通过不等于可用**，正文质量、`description` 的触发、资源引用、链接与代码能否运行、许可是否齐备都不查。运行需要 Python 3 和 PyYAML；依赖或脚本缺失就停，不回退较弱判据，也不自动安装。
