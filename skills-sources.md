@@ -31,7 +31,7 @@
 
 许可为 MIT，版权行 `Copyright (c) 2026 Matt Pocock`；用到它的技能各自随包附 `LICENSE.matt-pocock.txt`。涉及三个固定提交：
 
-- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-authoring（原 luno-coding）、luno-core（原 luno-review）、luno-memory。
+- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-authoring（原 luno-coding）、luno-core（原 luno-review）、luno-platform 的记忆资源（原 luno-memory）。
 - `6fd947921b935b7e1e69293a200400f0fdd5c15f`：依据 2026-10-07 的记录。用于 luno-core（原 luno-sync）。
 - `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d`：2026-11-05（luno-core、luno-review、luno-writing）和 2026-11-06（luno-coding）核对时上游可取。
 
@@ -189,9 +189,9 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 原吸收来源已移除，见〈已移除与退役的来源〉。
 
-## luno-memory
+## luno-platform 记忆资源（原 luno-memory，#43 并入）
 
-**mattpocock/skills（2026-10 固定提交，见〈共用上游〉）**：`skills/engineering/retro/SKILL.md` → `references/maintenance.md`〔分支 maintenance〕 的固化落点条款，即机械可判定的编码规范违规，先核对既有检查是否实际接通。不采用「没有护栏即缺陷」，也不无条件新建检查器或门禁。
+**mattpocock/skills（2026-10 固定提交，见〈共用上游〉）**：`skills/engineering/retro/SKILL.md` → `luno-platform/references/memory-common.md`〔分支 maintenance〕 的固化落点条款，即机械可判定的编码规范违规，先核对既有检查是否实际接通。不采用「没有护栏即缺陷」，也不无条件新建检查器或门禁。
 
 ## luno-surge
 
@@ -215,7 +215,12 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## 追新核对
 
-通用核对方法见 `skills/luno-core/references/retrieval.md`〈来源维护（仅溯源、追新或再分发核对）〉及 `skills/luno-core/references/sync.md`〈真源与落点〉；CCHP 另按上述对象专属要求，Surge 按包内 SOURCE 的官方来源例外。
+通用判据见 `skills/luno-core/references/sync.md`〈真源与落点〉：只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff；CCHP 另按上述对象专属要求，Surge 按包内 SOURCE 的官方来源例外。补充做法：
+
+- 先查默认分支的 `/commits/HEAD`，再按路径查逐文件 commits；按固定提交复查日期时，在同一查询上加 `&sha=<固定提交>`。文件日期取 committer 日期，不用目录的最后更新日期代替。
+- `releases/latest` 返回 404 只说明没有 latest release，要再查同仓库的 `/releases?per_page=1`，不能把没有 tag 当作没有更新。
+- 取得新提交后，在该上游的独立克隆里执行 `git diff <固定提交> <新提交> -- <文件路径>`，核对正文和 LICENSE，不自动覆盖本地取舍。
+- 没有仓库的文档页，重取原 URL 并比对快照；取回日期不能当作发布日期。再分发许可未裁定时只改写接口事实，不转载正文或套用技能的 MIT。
 
 合并及共读资源迁移历史见提交 [`484de55052413ef2004d5e588d5a0540bcf88826`](https://github.com/LucaLin233/Agent-Sync/commit/484de55052413ef2004d5e588d5a0540bcf88826) 及后续 git 历史；现役路径以本文件和 `tools/sync-targets.json` 为准。
 
