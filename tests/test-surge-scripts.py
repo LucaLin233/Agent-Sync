@@ -645,16 +645,24 @@ class SurgeCliTest(unittest.TestCase):
             'profile section': ('profile section get <name>', 'rejected before connection'),
             'module': ('module <list | show <name>', 'may contain secrets'),
         }
+        module = load_module('surge_cli_help_boundary', SURGE_CLI)
         for key, needles in cases.items():
             with self.subTest(key):
-                controller = LocalController({'result': 'ok'})
-                self.addCleanup(controller.close)
-                r = run_cli(['help'] + key.split(), remote=controller.remote, stdin=API_KEY)
-                self.assertEqual(0, r.returncode, r.stderr)
+                stdout = io.StringIO()
+                with contextlib.ExitStack() as stack:
+                    # 任一取密、连接或真实文件读取接缝被触即失败：证明帮助先于它们
+                    for obj, attr in ((module, 'credential'), (module, 'Controller'),
+                                      (module.Path, 'open'), (module.urllib.request, 'urlopen')):
+                        stack.enter_context(mock.patch.object(
+                            obj, attr, side_effect=AssertionError('help crossed ' + attr)))
+                    stack.enter_context(mock.patch.object(
+                        sys, 'argv', [str(SURGE_CLI), 'help', *key.split()]))
+                    stack.enter_context(contextlib.redirect_stdout(stdout))
+                    module.main()
+                text = stdout.getvalue()
                 for needle in needles:
-                    self.assertIn(needle, r.stdout)
-                self.assertEqual(([], []), (controller.passwords, controller.commands))
-                self.assertNotIn('Usage: surge-cli', r.stdout)
+                    self.assertIn(needle, text)
+                self.assertNotIn('Usage: surge-cli', text)
         r = run_cli(['help', 'capture-filter'], process=True)   # 真实子进程：帮助不进网络路径
         self.assertEqual(0, r.returncode, r.stderr)
         self.assertIn('capture-filter', r.stdout)

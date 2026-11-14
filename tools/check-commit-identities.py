@@ -120,7 +120,8 @@ def read_rules(path):
             raise Env('规则〈%s〉段身份指向同一邮箱（%d 个身份，不回退）' % (SECTION_TITLE, len(exact)))
         seen[mail] = name
     for base, _pattern, mail in families:
-        shared_openai = base in (b'Codex', b'GPT') and mail == fam_mail[b'Codex']
+        shared_openai = (base in (b'Codex', b'GPT')
+                         and seen.get(mail) in (b'Codex', b'GPT'))
         if mail in seen and not shared_openai and not (
                 base == b'Claude' and seen[mail] == b'Claude Opus 5.5'):
             raise Env('规则〈%s〉段 %s 名称族邮箱与其他身份相同（不回退）'
@@ -132,7 +133,7 @@ def read_rules(path):
 def admitted(rules, name, email):
     """Author、Committer、每条 Co-authored-by 共用的唯一准入判据。"""
     exact, families = rules
-    if exact.get(name) == email:
+    if name != b'Claude Opus 5.5' and exact.get(name) == email:
         return True
     return any(pattern.fullmatch(name) and email == mail for _base, pattern, mail in families)
 

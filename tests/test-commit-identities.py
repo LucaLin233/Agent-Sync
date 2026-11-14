@@ -550,6 +550,23 @@ class FamilyRulesTest(RulesTest):
         self.verdict(self.run_rules(rule_text().replace('noreply@openai.com', 'noreply', 1)),
                      2, '名称族邮箱')
 
+    def test_role_cannot_take_the_openai_family_email(self):
+        # 角色/人工同邮箱限制不放宽：占用者不是 Codex/GPT 时必须 rc=2
+        self.verdict(self.run_rules(rule_text(luno='noreply@openai.com')),
+                     2, '邮箱与其他身份相同')
+
+    def test_legacy_exact_ai_cannot_bypass_family_constraints(self):
+        legacy = 'legacy@example.invalid'
+        text = rule_text().replace('`Claude Opus 5.5 <noreply@anthropic.com>`',
+                                   '`Claude Opus 5.5 <%s>`' % legacy, 1)
+        self.assertIn(legacy, text)
+        self.repo.rules.write_text(text, encoding='utf-8')
+        base, head = self.repo.line(CLAUDE, CLAUDE)          # 旧姓名配正确族邮箱仍准入
+        self.verdict(self.repo.run(base, head), 0, '通过')
+        for pair in (('Claude Opus 5.5', legacy),):          # 错邮箱不得凭精确表兜底
+            base, head = self.repo.line(pair, pair)
+            self.verdict(self.repo.run(base, head), 1, 'author', '身份不在署名表内')
+
 
 if __name__ == '__main__':
     unittest.main()
