@@ -81,7 +81,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - `https://docs.keenable.ai/api-reference/search.md`：日期参数 before 包含当天整日；query_time 的日期按 UTC 零点计，并受当时索引限制，不是历史原文。
 - `https://docs.keenable.ai/api-reference/fetch.md` 与 `https://api.keenable.ai/openapi.json`（0.1.24）：search 用 POST，fetch 用 GET 查询参数；live 默认为 false；prompt 是定向合成，不能代替事实验证；published_at 的类型存在冲突，没有写死。
 - `https://docs.keenable.ai/authentication.md` 与 `https://exa.ai/docs/admin/error-codes`：认证、额度与权限、401 和 429 的分流以及 Retry-After。
-- OnlyBoxes 的官方文档和实测结论在 `skills/luno-ops/references/execution-environment.md`〔分支 onlyboxes-baseline〕，这里不重复。
+- OnlyBoxes 的官方文档和实测结论在 `skills/luno-ops/references/execution-environment.md`〔分支 onlyboxes〕，这里不重复。
 
 **历史成品**：2026-11-01 `luno-core/references/retrieval.md` sha256 `4d5061133bce8061bc8e00e26dbb90e1adb7a0aef42e86e895fe1354074d7766`；当时 S1–S5 复查用各固定提交加此哈希，不用于现部署判等。
 
@@ -135,7 +135,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 - `references/service-runtime.md`〔分支 service-runtime〕 的服务排障节于 2026-11-06 依据官方文档（systemd 的 systemctl 与 journalctl、PM2、Docker Compose CLI、nginx 的运行控制与配置测试）独立重写；授权、确认和秘密投影条款是本技能的自有规则。它取代了已移除的 linux-service-triage 来源。
 - `references/cfst.md` 的固定用法和脚本由用户 2026-10-30 指定，脚本行为据 2026-10-31 静态核对，没有实际执行测速。
-- `references/execution-environment.md`〔分支 onlyboxes-baseline〕 自带 OnlyBoxes 官方文档链接、访问日期和实测证据层。
+- `references/execution-environment.md` 的 OnlyBoxes 内容是自有表述：官方文档链接和本端实测写在〔分支 onlyboxes〕，宿主风险结论写在〔分支 execution-environment〕的准入理由里。原〔分支 onlyboxes-baseline〕的取证细节（文档访问日期、宿主风险的逐项证据和加固建议）于 2026-11-12 移出运行包，只留在 Git 历史（`6756b5f` 及更早）。
 
 ## luno-platform
 

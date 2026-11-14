@@ -14,9 +14,13 @@
 
 <a id="branch-wordpress"></a>
 <!-- BEGIN wordpress -->
-- 接口在 `/wp-json/wp/v2/` 下，本资源只用 `posts`、`media`、`categories`、`tags` 四类。读写 Gutenberg 序列化正文时，取 `context=edit` 响应里的 `content.raw`；图片先经 `media` 上传，再用返回的 id 填 `featured_media`；分类与标签先查是否已存在，没有才建，提交时传 id 数组。响应码按类分：401 与 403 属认证或权限，400 属请求参数，404 属对象或端点不存在。接口不可用就不猜端点、不伪造写入。变量 `WP_URL`、`WP_USERNAME`、`WP_APPLICATION_PASSWORD`；缺失时停止相关认证，不换来源或执行环境。认证仅发往已确认目标站点，写入前以只读接口核验身份及所需权限。
-- 改前读原文与元数据并保留恢复点；保留 Gutenberg 块，不经整篇 Markdown/HTML 往返覆盖；多行代码用 `core/code`；只提交目标字段。
-- 新文章默认草稿。发布、定时发布或改已发布文章前，展示标题、目标状态与关键改动（slug、正文差异摘要、新增或删除区块）并再次确认（比 `luno-core` 同批授权更严的额外确认，整批已获批也要单独确认）；删除前说明不可逆影响并再次确认。未经要求不改作者、slug、状态、分类、标签、图片、评论、主题、插件、布局、设置或权限。
-- 写入后回读；预览或 API 成功不等于发布成功。报告标题、状态、目标字段、链接、回读结果与回滚状态。
+# WordPress 读写与发布
+
+端点、参数、`context` 和错误码以 [WordPress REST API Handbook](https://developer.wordpress.org/rest-api/reference/) 为准；接口不可用就不猜端点、不伪造写入。
+
+- **范围与认证**：只用 `/wp-json/wp/v2/` 下的 `posts`、`media`、`categories`、`tags`。变量为 `WP_URL`、`WP_USERNAME`、`WP_APPLICATION_PASSWORD`，缺了就停止相关认证，不换来源或执行环境；认证只发往已确认的目标站点，写入前用只读接口核验身份和所需权限。
+- **改正文**：改前读原文和元数据并保留恢复点。Gutenberg 正文读写 `context=edit` 响应里的 `content.raw`，保留块结构，不经整篇 Markdown/HTML 往返覆盖；多行代码用 `core/code`；只提交目标字段。图片先经 `media` 上传，再用返回的 id 填 `featured_media`；分类和标签先查已有的，没有才建，提交时传 id 数组。
+- **发布**：新文章默认草稿。发布、定时发布或改已发布文章前，展示标题、目标状态和关键改动（slug、正文差异摘要、新增或删除的区块），单独确认，整批已获批也一样；删除前说明不可逆影响并再次确认。未经要求不改作者、slug、状态、分类、标签、图片、评论、主题、插件、布局、设置或权限。
+- **回读**：写入后回读；预览或 API 成功不等于发布成功。报告标题、状态、目标字段、链接、回读结果和回滚状态。
 <!-- END wordpress -->
 
