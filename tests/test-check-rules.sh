@@ -20,7 +20,7 @@ def check(label,ok,detail=''):
     if ok:PASS+=1;print('PASS  '+label)
     else:FAIL+=1;print('FAIL  '+label+(('：'+detail) if detail else ''))
 
-# 守卫输入只复制一次（skills/prompt/subagents 与两张登记表）；每例记录夹具改动过的路径，
+# 守卫输入只复制一次（skills/prompt/subagents 与资源登记表）；每例记录夹具改动过的路径，
 # 跑完按仓库原件逐个还原或删除，下一例仍从原样副本开始（收尾逐字节核对副本）。
 CASE=TMP/'case'
 for top in ('skills','prompt','subagents'):shutil.copytree(ROOT/top,CASE/top,symlinks=True)
@@ -109,6 +109,14 @@ case('包内新增文件未登记',1,'包内文件未登记',
      lambda p:(p/'skills/luno-core/references/stray.md').write_text('x\n'))
 case('登记了不存在的包资源',1,'登记的包资源缺失',
      lambda p:register(p,'luno-core','skills/luno-core/references/ghost.md'))
+case('包资源登记不能跨出所属包',1,'包资源不属于本包',
+     lambda p:register(p,'luno-core','tools/sync-targets.json'))
+case('包资源登记形态损坏不能跳过',1,'包资源登记结构',
+     lambda p:skill_obj(p,lambda o:o.__setitem__('resources',None)))
+def unregistered_skill(p):
+    target=p/'skills/luno-new';target.mkdir()
+    (target/'SKILL.md').write_text('---\nname: luno-new\n---\n正文\n')
+case('新增技能入口必须登记',1,'技能源未登记',unregistered_skill)
 case('正文引用的资源不存在',1,'资源引用断链',lambda p:append(p,SYNC,'\n`references/absent.md`\n'))
 def no_resources(p):
     for f in scope_files(p):

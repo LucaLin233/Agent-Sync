@@ -117,9 +117,15 @@ class Guard:
             for o in doc['objects']:
                 if not isinstance(o,dict) or o.get('type')!='skill': continue
                 src=o.get('source');res=o.get('resources')
-                if not isinstance(src,str) or not isinstance(res,list): continue
-                out[Path(src).parent.name]={r for r in res if isinstance(r,str)}
+                if not isinstance(src,str) or not isinstance(res,list):
+                    self.problem('包资源登记结构'); continue
+                pkg=Path(src).parent
+                if any(not isinstance(r,str) or not r.startswith(pkg.as_posix()+'/') for r in res):
+                    self.problem('包资源不属于本包')
+                out[pkg.name]={r for r in res if isinstance(r,str)}
         if not out: self.problem('资源登记不可用',incomplete=True); return None
+        for entry in (self.root/'skills').glob('*/SKILL.md'):
+            if entry.parent.name not in out: self.problem('技能源未登记')
         return out
 
     def edges(self, bodies, reg):
