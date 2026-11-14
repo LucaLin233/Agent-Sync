@@ -65,6 +65,8 @@
 
 ## 批量与自动化走 HTTP
 
+- **固定资源读取**：Minis/iSH 已审 Agent-Sync 副本可用 tools/auth-call.py 的 skill-resource；用法及调用边界见仓库 README。它只取单路径，不证明资源集完整，不在 LobeHub 自动安装。
+
 有等价的已验证接口时，批量和自动化走 HTTP，不用 CLI 循环（既有样本里 CLI 串行调用开销大；性能按当前版本和链路核对，不把历史耗时当常量）。没有等价接口的，仍按官方支持的 CLI 用法，先查原文再试。写法：
 
 - `POST https://<实例>/trpc/lambda/<router>.<procedure>`
