@@ -4,7 +4,7 @@
 
 ## 约定
 
-- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-core/references/agent-document-writing.md`〔分支 skill-authoring〕、`skills/luno-core/scripts/quick_validate.py`、`skills/luno-core/references/code-review.md`。
+- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-core/scripts/quick_validate.py`、`skills/luno-core/references/code-review.md`。
 - 许可全文随技能包分发，文件名为 `skills/<技能>/LICENSE.*.txt`；本文件不是许可原文。对外分发含第三方改写内容的产物时，必须随附对应的版权行和许可全文。
 - 「精选改写」指按本端需要用中文改写选定的判据，不是原文翻译，也不整段照抄。
 - 「核对」指所注日期的本地或在线取证。标「在线可取性未复核」的条目此后没有再访问上游；整理本文件时也没有重新访问任何上游。
@@ -31,7 +31,7 @@
 
 许可为 MIT，版权行 `Copyright (c) 2026 Matt Pocock`；用到它的技能各自随包附 `LICENSE.matt-pocock.txt`。涉及三个固定提交：
 
-- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-authoring（原 luno-coding）、luno-core（原 luno-review）、luno-memory。
+- `5beb35b040e3de97e54fa9e386d7e42d15c295c2`：2026-10-19 的提交，2026-10-25 本地核对，在线可取性未复核。用于 luno-authoring（原 luno-coding）、luno-core（原 luno-review）、luno-platform 的记忆资源（原 luno-memory）。
 - `6fd947921b935b7e1e69293a200400f0fdd5c15f`：依据 2026-10-07 的记录。用于 luno-core（原 luno-sync）。
 - `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d`：2026-11-05（luno-core、luno-review、luno-writing）和 2026-11-06（luno-coding）核对时上游可取。
 
@@ -81,7 +81,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - `https://docs.keenable.ai/api-reference/search.md`：日期参数 before 包含当天整日；query_time 的日期按 UTC 零点计，并受当时索引限制，不是历史原文。
 - `https://docs.keenable.ai/api-reference/fetch.md` 与 `https://api.keenable.ai/openapi.json`（0.1.24）：search 用 POST，fetch 用 GET 查询参数；live 默认为 false；prompt 是定向合成，不能代替事实验证；published_at 的类型存在冲突，没有写死。
 - `https://docs.keenable.ai/authentication.md` 与 `https://exa.ai/docs/admin/error-codes`：认证、额度与权限、401 和 429 的分流以及 Retry-After。
-- OnlyBoxes 的官方文档和实测结论在 `skills/luno-ops/references/execution-environment.md`〔分支 onlyboxes-baseline〕，这里不重复。
+- OnlyBoxes 的官方文档和实测结论在 `skills/luno-ops/references/execution-environment.md`〔分支 onlyboxes〕，这里不重复。
 
 **历史成品**：2026-11-01 `luno-core/references/retrieval.md` sha256 `4d5061133bce8061bc8e00e26dbb90e1adb7a0aef42e86e895fe1354074d7766`；当时 S1–S5 复查用各固定提交加此哈希，不用于现部署判等。
 
@@ -89,9 +89,9 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **openai/skills@`49f948faa9258a0c61caceaf225e179651397431`**（提交时间 2026-06-24T02:36:12Z；2026-11-05 经公开 API 确认可取）：取自 `skills/.system/skill-creator/`，许可 Apache-2.0，许可原字节随包为 `LICENSE.apache-2.0.txt`。
 
-- 精选改写进 `references/agent-document-writing.md`〔分支 skill-authoring〕，只留技能专属的增量；通用书写启发式在 `references/agent-document-writing.md`〔分支 agent-document-writing〕。
+- 2026-11-12 起，`references/agent-document-writing.md`〔分支 skill-authoring〕 不再含改写正文：自由度、资源分工、目录结构和评测方法改为指向 Anthropic 技能编写最佳实践、Agent Skills 规范和 anthropics/skills 的 skill-creator，分支只留受管范围和校验器边界两条本机约定。
 - 校验器 `scripts/quick_validate.py` 源自上游的 `quick_validate.py`，已在本地修改。
-- 两个文件各保留一行 Apache-2.0 修改声明。已去掉 Codex 专用件，初始化器已退役。
+- 校验器保留 Apache-2.0 修改声明。已去掉 Codex 专用件，初始化器已退役。
 - 已知缺口：历史上端侧退役的未闭合记录没有补证，不能视为已完成。
 
 **mattpocock/skills（writing-for-agents 固定提交，见〈共用上游〉）**（直接取自上游 GitHub，不经市场）：`skills/productivity/writing-for-agents/SKILL.md`（该文件 sha256 `551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a`）→ `references/agent-document-writing.md`〔分支 agent-document-writing〕，是中文适配改写，没有作为独立技能入库。上游事实取自 2026-10-07 的核对记录，补登记时没有重新取上游。
@@ -103,7 +103,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ### 审查取材
 
-**anthropics/knowledge-work-plugins@`d3ee81913e5e179273313345847a2a4f42449bd2`**（2026-09-11）：`engineering/skills/code-review/SKILL.md` → `references/code-review.md`。精选改写了上游的四维清单和输出要素；架构维、依赖纪律、结构整改和诚实与分歧是自撰或扩写的；GitHub 长版没有整体采用。许可 Apache-2.0，原字节随包为 `LICENSE.code-review.txt`（11607 B，sha256 `a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26`）。在线可取性未复核。
+**anthropics/knowledge-work-plugins@`d3ee81913e5e179273313345847a2a4f42449bd2`**（2026-09-11）：`engineering/skills/code-review/SKILL.md` → `references/code-review.md`。精选改写了上游的四维清单和输出要素；架构维、依赖纪律、结构整改和诚实与分歧是自撰或扩写的；GitHub 长版没有整体采用。2026-11-12 起通用检查面改为指向 Google 代码审查指南，四维清单正文只剩〈代码双轴与 CI〉中“安全、性能、正确性和可维护性的覆盖仍要做”一句。许可 Apache-2.0，原字节随包为 `LICENSE.code-review.txt`（11607 B，sha256 `a6946284993aeec75c7d75906064b66210c46051e562077efb30eb6dcfe72e26`）。在线可取性未复核。
 
 - 2026-10-16 许可补证：从旧私有 `LucaLin233/Agent` 的 `ee75bb6` 取回原 `code-review` 市场发布物，1302 B，sha256 `3612de8f2c897f98ad20a46f5e0c9f8c6f160873b1e7f44def0bb2ff96ee3451`。实际吸收的四维清单原文 649 B，sha256 `adac810be9904bfb1e479b5bfc547b475ce4f6abab0e7ab3a3952090182bd6b5`，与[固定上游提交的同一段](https://github.com/anthropics/knowledge-work-plugins/blob/d3ee81913e5e179273313345847a2a4f42449bd2/engineering/skills/code-review/SKILL.md)逐字节相等。该提交的[完整 LICENSE](https://github.com/anthropics/knowledge-work-plugins/blob/d3ee81913e5e179273313345847a2a4f42449bd2/LICENSE) 为 Apache-2.0；目标提交根目录的 NOTICE 实读为 404。
 - 这次补证只覆盖当前采用片段的可追溯许可；原市场整包的许可仍未决，不声称已核。
@@ -135,7 +135,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 - `references/service-runtime.md`〔分支 service-runtime〕 的服务排障节于 2026-11-06 依据官方文档（systemd 的 systemctl 与 journalctl、PM2、Docker Compose CLI、nginx 的运行控制与配置测试）独立重写；授权、确认和秘密投影条款是本技能的自有规则。它取代了已移除的 linux-service-triage 来源。
 - `references/cfst.md` 的固定用法和脚本由用户 2026-10-30 指定，脚本行为据 2026-10-31 静态核对，没有实际执行测速。
-- `references/execution-environment.md`〔分支 onlyboxes-baseline〕 自带 OnlyBoxes 官方文档链接、访问日期和实测证据层。
+- `references/execution-environment.md` 的 OnlyBoxes 内容是自有表述：官方文档链接和本端实测写在〔分支 onlyboxes〕，宿主风险结论写在〔分支 execution-environment〕的准入理由里。原〔分支 onlyboxes-baseline〕的取证细节（文档访问日期、宿主风险的逐项证据和加固建议）于 2026-11-12 移出运行包，只留在 Git 历史（`6756b5f` 及更早）。
 
 ## luno-platform
 
@@ -189,13 +189,13 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 原吸收来源已移除，见〈已移除与退役的来源〉。
 
-## luno-memory
+## luno-platform 记忆资源（原 luno-memory，#43 并入）
 
-**mattpocock/skills（2026-10 固定提交，见〈共用上游〉）**：`skills/engineering/retro/SKILL.md` → `references/maintenance.md`〔分支 maintenance〕 的固化落点条款，即机械可判定的编码规范违规，先核对既有检查是否实际接通。不采用「没有护栏即缺陷」，也不无条件新建检查器或门禁。
+**mattpocock/skills（2026-10 固定提交，见〈共用上游〉）**：`skills/engineering/retro/SKILL.md` → `luno-platform/references/memory-common.md`〔分支 maintenance〕 的固化落点条款，即机械可判定的编码规范违规，先核对既有检查是否实际接通。不采用「没有护栏即缺陷」，也不无条件新建检查器或门禁。
 
 ## luno-surge
 
-运行资料的自编/官方事实摘要边界、非译本与无原文摘录声明、`agents/openai.yaml` 自写、有限短摘录的逐项及累计核对义务，统一见 `skills/luno-surge/references/SOURCE.md`〈来源与许可范围〉；不得以根 MIT 或 OpenMinis 通知扩大 Surge 材料分发权。
+产品事实以官方手册为准；未公开的 dump/watch/key-path 离线事实及本端差异保留。自编/摘要边界、非译本与无原文摘录声明、`agents/openai.yaml` 自写、有限短摘录的逐项及累计核对义务，统一见 `skills/luno-surge/references/SOURCE.md`〈来源与许可范围〉；不得以根 MIT 或 OpenMinis 通知扩大 Surge 材料分发权。
 
 **官方来源例外**：Surge Mac 应用包，非 GitHub 技能仓库。取源、包身份、逐文件哈希及许可按 `skills/luno-surge/references/SOURCE.md`，机器证据见 `skills/luno-surge/references/upstream-manifest.json`；普通使用不补原件，原件和 logo 不进公开 Git 或运行包。哈希不授予分发权；例外仅对该对象有效（`luno-core/references/sync.md`〈真源与落点〉）。
 
@@ -215,7 +215,12 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## 追新核对
 
-通用核对方法见 `skills/luno-core/references/retrieval.md`〈来源维护（仅溯源、追新或再分发核对）〉及 `skills/luno-core/references/sync.md`〈真源与落点〉；CCHP 另按上述对象专属要求，Surge 按包内 SOURCE 的官方来源例外。
+通用判据见 `skills/luno-core/references/sync.md`〈真源与落点〉：只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff；CCHP 另按上述对象专属要求，Surge 按包内 SOURCE 的官方来源例外。补充做法：
+
+- 先查默认分支的 `/commits/HEAD`，再按路径查逐文件 commits；按固定提交复查日期时，在同一查询上加 `&sha=<固定提交>`。文件日期取 committer 日期，不用目录的最后更新日期代替。
+- `releases/latest` 返回 404 只说明没有 latest release，要再查同仓库的 `/releases?per_page=1`，不能把没有 tag 当作没有更新。
+- 取得新提交后，在该上游的独立克隆里执行 `git diff <固定提交> <新提交> -- <文件路径>`，核对正文和 LICENSE，不自动覆盖本地取舍。
+- 没有仓库的文档页，重取原 URL 并比对快照；取回日期不能当作发布日期。再分发许可未裁定时只改写接口事实，不转载正文或套用技能的 MIT。
 
 合并及共读资源迁移历史见提交 [`484de55052413ef2004d5e588d5a0540bcf88826`](https://github.com/LucaLin233/Agent-Sync/commit/484de55052413ef2004d5e588d5a0540bcf88826) 及后续 git 历史；现役路径以本文件和 `tools/sync-targets.json` 为准。
 

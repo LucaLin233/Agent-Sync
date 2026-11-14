@@ -26,21 +26,19 @@
 
 官方 Agent Skill 随 Surge Mac 应用包分发，不以同名第三方 GitHub 仓库代替。官方手册 `https://manual.nssurge.com/tools/cli.html` 说明应用包 Skills 目录；Mac 官方 beta appcast `https://nssurge.com/mac/latest/appcast-signed-beta.xml` 可发现版本，它不是 iOS 能力证据。
 
-当前来源基线是 Surge Mac 6.11.0（12710）：2026-11-11 从本机已安装的应用包只读取得逐文件哈希，Info.plist 的 bundle id、版本和 build 已核，没有对应的下载包哈希。上一基线 12680 于 2026-11-03 取自官方直链 `https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`，包 sha256 为 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。逐文件来源哈希按 build 记在 `references/upstream-manifest.json` 的 builds 里：只追加、不删旧条目，末项是当前基线。它只是取证记录，不要求把对应原文装入运行包，也不是当前实测状态。raw_sha256 只记真正官方原件，不把自编正文登记成官方原文；包身份、逐文件证据及运行验证状态不得互相冒充。
+当前来源基线是 Surge Mac 6.12.0（12810）：2026-11-14 从本机已安装的应用包只读核过 Info.plist 的 bundle id、版本、build 及五份来源文件；没有下载包哈希。历史 12710 与 12680 的来源见 `references/upstream-manifest.json`；12680 于 2026-11-03 取自官方直链 `https://dl.nssurge.com/mac/v6/Surge-6.11.0-12680-482248c03e2f359522830a18ee52b1f2.zip`，包 sha256 `37e72b8e31917c2f9a4f0f350147c8d59abd3c4b9eefd59d585521c99cffba85`。manifest 按 build 只追加、不删旧条目，末项为当前来源基线；raw_sha256 只记官方原件。来源证据、包身份和运行验收不得互相冒充，普通使用不补原件。
 
 取源须另获下载及独占证据根写权；无授权就不下载。核 Info.plist 的 bundle id `com.nssurge.surge-mac`、版本和 build，再核文件哈希、差分及发布说明；存在签名目录不等于验签成功。官方包只在获准的私人维护证据范围查阅，原件和 logo 不进入候选发布目录、公开 Git、patch 或托管包。Mac 原生直接从用户自己的已安装应用包使用官方 Skill，与本项目的再分发方案分开。
 
-维护者只人工更新受影响的事实与流程，保留本端 iOS、安全及实现差异。更新不自动安装、部署、重启或清空临时规则。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项，不能自动批准新哈希。`python3 -B scripts/update_upstream.py inspect --source <已授权目录> --version <已核版本及build>` 只读计算五份来源文件的哈希，与 manifest 末项基线比较；不联网、不写入、不导入、不输出原文，缺文件报 `E_SOURCE_READ`。它不认证来源，source 的授权和官方包身份由调用方事前核实。有变化的文件只是待审差异：人工核对并更新运行资料后，再把新 build 追加进 manifest，不能凭哈希批准准入。旧的 prepare/apply 导入流程已移除。
+追新时，用 `shasum -a 256` 只读计算应用包 Skills/surge 下 SKILL.md、references/command-reference.md、references/plugin-authoring.md、agents/openai.yaml、assets/logo.png，与 manifest 末项比较；它只算摘要，不认证来源。有变化先人工核官方差异并更新受影响的本端事实与流程，再追加新 build；不凭哈希批准准入。来源不齐、身份不符、内容漂移或平台语义未核实时停止相关项。追新不自动安装、部署、重启或清空临时规则。旧 prepare/apply 导入流程已移除，运行包不再携带只用于维护取证的 update_upstream.py。
 
 ## 打包、投递及恢复
 
-独立发布包只用 `scripts/package_release.py`；ZIP 根不带顶层目录。LobeHub 按下面的 GitHub 子目录流程安装，不再依赖此 ZIP 投递。保留符号链接/非常规条目拒绝、秘密扫描、候选摘要、源端漂移检测和资源完整清单门禁。禁止官方原件和 logo 进入包：打包器按 manifest 全部 build 的哈希并集拒绝已知官方整文件，所以换基线时只追加新 build。它只认整文件哈希，不能只靠文件缺失或拦截通过宣称许可审查完成。
+独立发布包只用仓库级 `tools/package_release.py`（不随技能分发），从仓库根运行 `python3 -B tools/package_release.py <包外输出路径>`；ZIP 根不带顶层目录，LobeHub 仍从 GitHub 子目录安装。打包器拒绝符号链接和非常规条目，扫描已知秘密模式，并按 manifest 全部 build 的哈希并集拒绝已知官方整文件；每个文件只读一次，同一份字节扫描后归档。它不检查源端漂移或审批摘要，也不证明没有其他秘密或已完成许可审查。
 
-部署只使用已合并且已独立审查通过的版本，按 `tools/sync-targets.json` 核目标实际身份和生效前态；LobeHub 采用公开 GitHub 子目录的 `lh skill install`，安装、资源退役及恢复按 `luno-core/references/sync.md`〔分支 sync-workflow〕。独立 ZIP 打包器及其许可扫描仍保留，不作为 R2 部署入口。变更后逐字节回读本次资源及变更元数据；安装成功、HTTP 200、CI 绿色不等于一致。
+部署只用已合并且已独立审查通过的版本；目标身份、实际生效前态、候选核对、写后逐字节回读及恢复均按 `luno-core/references/sync.md`〔分支 sync-workflow〕。现场与历史不符、存在独有资源或未入库差异、并发漂移、部分失败或结果未知时停止相关对象，列出已同步和未同步范围，不盲目重投或自动删除。受管规则的恢复来源不替代非规则配置、业务数据或完整恢复备份；安装成功、HTTP 200 和 CI 通过不证明一致。
 
-正文、来源或许可附件变化都会改变 Git blob、ZIP 及资源摘要；审批后重算并走候选摘要门禁，不为保住旧摘要回改正文或放宽断言。受管技能正文和包内资源的同步前态与恢复来源，按 `luno-core/references/sync.md`〔分支 sync-workflow〕核对实际生效值与仓库历史中对应的明确旧版本，不另做例行重复备份，不把候选稿当旧版。现场与历史不符、存在未入库差异或独有资源时，停止相关对象并交负责人裁定；本规则不适用于非规则配置、业务数据或完整恢复备份。并发漂移、部分失败或结果未知就停相关对象，不盲目重投或自动删除端上旧资源；列出已同步和未同步范围。恢复同样核授权及后续编辑，不能用旧备份强盖新变化。
-
-**端上旧资源**：新包不含已退役的 `http-metrics.md`、`http-descriptor.md`、`adapt_upstream_reference.py`、`sync_upstream.sh`，安装也不保证删除端上的旧文件。LobeHub 端 2026-11-11 已按此前的包删除重建，不再有官方原件，但仍带着这 4 个退役资源；Minis 端未核实，除这 4 个外还可能留有旧流程装入 references/ 的官方原件 `upstream-SKILL.md`、`upstream-command-reference.md`。下一次部署前，先只读列出两端现有资源（Minis 列技能目录，LobeHub 用 `lh skill resources`），与候选资源清单比对并逐项列出多出的文件。删除仍是单独获批的一步：先按上述同步分支核对目标身份、现存路径集及原始字节与仓库历史明确旧版本的对应，核恢复能力和平台限制；未入库差异或独有资源未裁定前停止相关删除。非规则对象和旧事务原有的适用备份、恢复义务不因本说明豁免。再只删明确退役的路径，不递归扫父目录，不随部署顺带执行。LobeHub 原位更新不删除旧资源（2026-11-11 实测），而部署要求平台资源集合与候选完全相等，带着旧资源直接部署会在安装后的回读失败（此时已进入写路径）；所以先按授权处理旧资源（例如删除重建），再部署。历史 prepare/apply 事务不自动迁移或清理；若曾在 state=applying 中断，停止新维护，先在独立授权下核旧事务的 backup、记录内容及原 mode，逐项恢复受影响的旧目标。新只读入口不能续跑旧事务，也不能把旧原件回写到自编候选或据此批准重新分发。
+**端上旧资源**：新包不含已退役的 `http-metrics.md`、`http-descriptor.md`、`adapt_upstream_reference.py`、`sync_upstream.sh`、`update_upstream.py`、`package_release.py`（打包器已迁仓库 tools），安装也不保证删除端上的旧文件。LobeHub 端 2026-11-11 已按此前的包删除重建，不再有官方原件，当时仍带着前 4 个退役资源；Minis 端未核实，除这些外还可能留有旧流程装入 references/ 的官方原件 `upstream-SKILL.md`、`upstream-command-reference.md`。下一次部署前，先只读列出两端现有资源（Minis 列技能目录，LobeHub 用 `lh skill resources`），与候选资源清单比对并逐项列出多出的文件。删除仍是单独获批的一步：先按上述同步分支核对目标身份、现存路径集及原始字节与仓库历史明确旧版本的对应，核恢复能力和平台限制；未入库差异或独有资源未裁定前停止相关删除。非规则对象和旧事务原有的适用备份、恢复义务不因本说明豁免。再只删明确退役的路径，不递归扫父目录，不随部署顺带执行。LobeHub 原位更新不删除旧资源（2026-11-11 实测），而部署要求平台资源集合与候选完全相等，带着旧资源直接部署会在安装后的回读失败（此时已进入写路径）；所以先按授权处理旧资源（例如删除重建），再部署。历史 prepare/apply 事务不自动迁移或清理；若曾在 state=applying 中断，停止新维护，先在独立授权下核旧事务的 backup、记录内容及原 mode，逐项恢复受影响的旧目标。追新不得续跑旧事务，也不能把旧原件回写到自编候选或据此批准重新分发。
 
 ## 第三方精选改写
 
@@ -78,4 +76,4 @@ CoreDevice/RSD 同机回环内容精选改写自 `OpenMinis/MinisSkills@164395f1
 
 ## 本地帮助证据
 
-仓库桥脚本 SHA-256 为 `0ff3ef70080190856e435f57957afa14a995dbed6ffffbe91ddf99729b9bdd72`。2026-11-10 核过 Minis 当时安装的上一版（`4e58a2411a6af6ef271a1f68fcb749cfd0a9daee5f29e8a520fe2e3e1fb20732`，与当前仓库版只差 reload 帮助补了自动完整重启一句）：在清空凭据环境并禁止写入/网络的审计下，--help、help 和全部静态 HELP 键均可本地读取；plugin、capture-filter 的 help 返回主帮助而非目标契约。该结果不证明远端实例支持任何命令；部署后核端上字节等于上述哈希，升级后须重核。只保留帮助未覆盖的领域事实、安全风险、平台约束及复杂语义；不复制可靠帮助已有的参数说明。
+历史帮助证据：2026-11-10 核过 Minis 当时安装的桥（`4e58a2411a6af6ef271a1f68fcb749cfd0a9daee5f29e8a520fe2e3e1fb20732`），在清空凭据环境并禁止写入/网络的审计下，--help、help 和当时全部静态 HELP 键均可本地读取；plugin、capture-filter 当时回落主帮助。后续仓库版 `0ff3ef70080190856e435f57957afa14a995dbed6ffffbe91ddf99729b9bdd72` 只补过 reload 的自动完整重启说明。新增或修改帮助后须重新核目标输出覆盖及无连接路径，并记录受测脚本哈希；历史结果不覆盖新增帮助，不证明远端支持。部署后按已审脚本字节回读。只保留帮助未覆盖的领域事实、安全风险、平台约束及复杂语义，不复制可靠帮助已有的参数说明。

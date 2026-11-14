@@ -51,7 +51,7 @@ class AuthoredResourceStateTest(unittest.TestCase):
         self.assertFalse((SKILL / 'assets/logo.png').exists())
 
     def test_real_skill_package_is_self_contained(self):
-        packer = load_module('surge_release_state', SCRIPTS / 'package_release.py')
+        packer = load_module('surge_release_state', ROOT / 'tools/package_release.py')
         _doc, obj = surge_registry()
         expected = sorted(['SKILL.md'] + [str(Path(r).relative_to('skills/luno-surge'))
                                         for r in obj['resources']])

@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR=Path(__file__).resolve().parent
-SOURCE=SCRIPT_DIR.parent
+SOURCE=SCRIPT_DIR.parent/'skills'/'luno-surge'
 DEFAULT=Path("/var/minis/shared/release") / f"surge-skill-{datetime.now():%Y%m%d}.zip"
 OUTPUT=Path(sys.argv[1]).expanduser() if len(sys.argv)>1 else DEFAULT
 EXCLUDED_PARTS={"__pycache__",".git",".DS_Store","logs","log","secrets","secret","private",".ssh"}

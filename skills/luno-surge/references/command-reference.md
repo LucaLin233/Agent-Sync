@@ -4,13 +4,13 @@
 <!-- BEGIN command-reference -->
 # Surge 命令知识与操作参考（非官方摘要）
 
-这是依据 Surge Mac 6.11.0 官方命令参考（12680，按 12710 补核），并结合官方公开手册整理的中文接口事实摘要，按本端任务重新组织；不是官方技能或译本，没有原文摘录。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/command-reference.md`〔分支 platform-compatibility〕 为执行门槛；连接、认证和编码先完整读 `references/command-reference.md`〔分支 controller-cli〕；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
+这是本端差异与查证入口；官方手册已覆盖的命令和字段直接查原文，未公开的 dump/watch/key-path 目录保留离线事实摘要。非官方、非译本，无原文摘录；依据 Mac 6.12.0（12810）包内参考复核。取证版本见 `references/upstream-manifest.json`；不是当前设备验收。下列命令即使列出也不等于 Python 桥实现了所有本地转换。协议和平台以 `references/command-reference.md`〔分支 platform-compatibility〕 为执行门槛；连接、认证和编码先完整读 `references/command-reference.md`〔分支 controller-cli〕；安全与再次确认以入口为准。没有证据的参数、输出字段或新版本变化必须停止相关步骤，不用猜测补全。
 
 ## 调用与证据
 
 基本调用、全局参数和常用子命令的参数说明，先在本端读 `surge-cli --help` 和 `surge-cli help <command>`，不在本参考复刻。帮助证据的版本和范围见 `references/SOURCE.md`〈本地帮助证据〉。安全读取示例：`env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/nonexistent PYTHONDONTWRITEBYTECODE=1 surge-cli help rule`，不附 --check、远端或认证参数。目标无精确帮助时可能回退到父级或主帮助，且仍正常返回（rc=0）；必须检查输出是否实际覆盖目标用法，不能把父帮助当成目标子命令的完整说明，也不以退出码证明覆盖。
 
-本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法，下面只补其缺失知识。plugin、capture-filter 帮助在已核桥上回落主帮助，capture-session 在桥里没有帮助条目，都没有该族的实际契约。
+本地帮助足够的用法入口：status、summary、version、mode、global-policy、policy-group、rule、rule temp、profile、module、feature、dns、geoip、http、test、diagnostics、flush、log、logbook、benchmark、vmnet、kill、stop、environment、set、set-log-level。dump/watch/script 只给部分用法。capture-filter、capture-session、policy-avoid、profile section 和 module show 提供本地帮助；plugin 帮助仅列在线子命令及实现边界，个别参数仍须核当前官方 Mac 帮助，取不到就停止依赖参数的步骤。以下只补帮助未覆盖的知识，本地帮助不证明所连实例支持命令。
 
 本端 default 同机不授予远程连接权；IPv6 地址使用方括号加端口，参数含 CR/LF 会在本地拒绝。凭据只用入口允许的变量或 stdin，不采纳官方客户端的密码文件、其他凭据变量和交互提示。
 
@@ -35,13 +35,13 @@
 
 目录中的其他资源仍须按技能根路径和完整分支读取；表内简写 diagnostics 指 `references/command-reference.md`〔分支 diagnostics〕，plugin-authoring.md 指 `references/plugin-authoring.md`。所有授权、再次确认、平台/协议条件、输出限制及恢复要求不因分支细化而减少。
 
-## 覆盖与停止边界
+## 查证与停止边界
 
-本分支及上述六个命令知识分支，与已核本地帮助共同覆盖官方 12710 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型重新组织，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
+- 命令族、参数、版本与产品行为：<https://manual.nssurge.com/tools/cli.md>；抓包流程、选项与返回字段：<https://manual.nssurge.com/tools/http-capture.md>；其他主题按 `references/official-sources.md`。
+- dump 类型全集、watch 事件和内部 key-path 的完整类型表未见公开网页版，以下保留已核离线事实。需新增或核新版时，只在获准 Mac 上查应用包内官方参考或官方 CLI 帮助；取不到就停依赖该项的步骤。
+- 数据通道 payload、未定义事件字段、日志级别枚举、provider-message 消息格式和复杂值的安全写入口仍是缺口；不猜参数或字段，不因目录未列而推定不支持，也不把官方能力归给本桥。本桥格式化以实现为准，未支持的结果可能只美化 JSON。
 
-离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
-
-来源与许可：依据官方命令参考整理的接口事实摘要，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。
+来源与许可按 `references/SOURCE.md`；离线事实和帮助覆盖不等于设备实测，也不扩大整件、译文、拆分转载或 logo 的分发边界。
 <!-- END command-reference -->
 
 <a id="branch-command-observation"></a>
@@ -73,7 +73,7 @@
 
 路由/DNS/临时规则/性能/Tailscale/WireGuard 工作先完整读 `references/command-reference.md`〔分支 diagnostics〕。
 
-rule 的基本形式查 help rule；匹配只评价当前规则，不创建业务连接；match 看命中规则与最终策略，explain 另给组解析链、决策理由、smart 选择、底层代理链及评价说明。裸 hostname 默认 TCP/443，HTTP(S) URL 提供 URL、Host、SNI、协议与端口。可覆盖 hostname、dest-port（别名 port）、process-path、user-agent、url、sni、http-host、source-address、source-port、is-local（别名 local）、client-mac、listen-port、protocol、device-name；空值用于清除可选字段，不按返回内容猜新键。
+rule 的基本形式查 help rule；match/explain 的返回和行为查官方 CLI 手册，覆盖键与排查示例见 diagnostics。两者只评估规则，不建立业务连接；未知参数仍停查，不按返回猜新键。
 
 DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup 看 A/AAAA、回答服务器、接口/路径、耗时与缓存到期，trace 增加解析轨迹。指定接口不存在会失败。GeoIP 用法查 help geoip；它本地查询国家/ASN/组织及两个数据库日期，无记录字段可为 null。
 
@@ -105,9 +105,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 
 日志基本调用查 help log；省略为 file/100，单给数量沿用 file，范围 1–10000，旧到新。memory 保留近期各级，file 受运行日志级别限制。log 的 watch 只订阅新日志，不重放旧内容，可能一直无事件；外部限时。保留日志的字段为 source、requested-line-count、line-count、log，事件字段为 level、module、log。语法查 help set-log-level；它改运行级别，不写 Profile，level 允许值未在本历史资料穷举，需当前证据；不能猜。用法查 help logbook；它返回 records 与 truncated，新到旧；协议≥27 的响应大小上限历史约 iOS 3 MB/Mac 15 MB，会跳过放不下的记录，truncated=true 不是所有记录已取到。`script-log <log-name> <session-id>` 定位单次脚本记录。
 
-**抓包会话**（版本及当前实例支持条件见平台表）：`dump recent` 只留近期记录；HTTP capture 把会话内每个请求连同头和正文存盘，`capture-session` 读取这些会话（iOS 经 Controller 同样可读）。流程：需要时先 `capture-filter set on-disk …` 收窄范围 → 同一条 `set` 先写 `ReplicaSessionParameters.*` 限额、最后写 `Replica=1` 开始（默认 180 秒、100 个请求、50 MB，0 为不限）→ `feature set capture off` 或到达限额结束 → 读取。开始前告知用户并按入口 §3 确认：开关抓包会断开全部现有连接；抓包期间 MITM override 名单内的主机（默认除 Apple、iCloud 等少数外几乎全部）即使 MITM 关闭也会被解密，需要设备信任 profile 里的 CA，`ReplicaSessionParameters.mitmOverride=0` 把解密限回 `[MITM]` 主机名；会话中途改 `ReplicaSessionParameters.*` 会结束当前会话（endReason=replaced）并另起一个，所以限额要先设；限额存在环境里，用户没要求保留就事后恢复原值。
+**抓包会话**：用法、限额、分页和正文解码完整读 <https://manual.nssurge.com/tools/http-capture.md>，平台/协议按平台分支。本端另要求：
 
-读取：`capture-session list [include-size]` 新到旧，active 表示正在写入，include-size 会读遍文件，非必要不加；`dump <会话> [offset=N] [limit=N] [filter=TEXT]` 按存盘顺序返回记录及其 key，limit 默认 100、上限 500，filter 对 URL、主机、地址、策略、规则、进程、设备、状态和方法做不区分大小写的子串匹配，翻页到 offset+returned 达到 total（有 filter 时为 matched）；`data <会话> <key> <request|response> [offset=N] [length=N]` 每次最多 1 MiB（默认 512 KiB），`--raw` 下正文为 base64，truncated=true 时按已取字节推进 offset 续读。会话用 name、请求用 key 定位，不用请求 id（引擎重启后会重复），两者含空格要加引号。正文按传输原样存，有 Content-Encoding 时先解码；取正文报错表示没存下正文（没有发送或 HTTPS 未解密）。会话内容和正文按入口 §3 的隐私数据处理。
+- 开始前按入口 §3 再确认：开关 HTTP capture 会断开全部现有连接；MITM override 名单中的主机即使 MITM 关闭也会被解密，前提是设备信任 Profile 的 CA。只解密 `[MITM]` 主机时设 `ReplicaSessionParameters.mitmOverride=0`。
+- 限额在开始前设置；会话中途修改 `ReplicaSessionParameters.*` 会结束当前会话并另起一个。限额保留在运行环境中，用户未要求保留就事后恢复原值。
+- `include-size` 会读遍文件，非必要不加；按会话 name、请求 key 定位，不用引擎重启后可能重复的请求 id。读取正文和会话仍须获准、限量，不进支持包；输出按 output-safety。
+
 
 订阅的已知基本形式查 help watch，但该帮助未列全事件；支持多个 event 参数；无参数表示取消订阅，本桥 `watch speed` 转 real-time-speed。离线事件名全集按用途为：速度/策略 real-time-speed、auto-test-group、policy-benchmark；流量 request、request-update、traffic、dns；状态 summary、environment、reload、shutdown、network-changed；设备 device-name-map、device-info；诊断 diagnostics、dns-flush、log。network-changed 在新网络稳定后发送，无 payload，协议≥29；log 推荐走 log watch。未在原资料定义的事件字段不在此臆造。诊断用法查 help diagnostics；它启动诊断流，配合 `stop-diagnostics` 停止；长期流按外部限时及真实终态处理。
 
@@ -124,15 +127,16 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |目标|语法与变化契约|
 |---|---|
 |模式/策略|语法分别查 help mode/global-policy/policy-group；auto 清自动组 override。任务型命令优先于内部 set；返回变化后的状态，仍要同对象回读。|
+|临时避用策略|`policy-avoid list/add/remove/clear` 的语法与语义查官方 CLI 手册；它改变自动组的选择，add/remove/clear 均按入口 §3 的「改变策略」再次单独确认。|
 |特性|共享名及基本用法查 help feature；Mac 才有 system-proxy/enhanced-mode，后两者等待实际切换，未完成报错。启 MITM/Rewrite/脚本/抓包先说明隐私影响；开关抓包会断开全部现有连接，按入口 §3 再确认。|
-|捕获范围|协议≥36：`capture-filter list`、`get <in-memory|on-disk>`、`set <scope> <option=value>...`；in-memory 管未开 HTTP capture 时的近期记录，on-disk 管 capture 会话。选项顺序应用，任一无效则不修改。http-only/hide-crash-reporter/hide-apple/hide-udp 为 on/off，crash reporter 默认隐藏；type=off/with-keywords/without-keywords/pattern；keywords=a,b,... 替换（空清除），add-keyword/remove-keyword 单项增删，enable-keyword/disable-keyword 保留但切换。含逗号单项用 add-keyword。pattern 的 *、? 与前缀 - 排除主机语义需保留。list 返回 active 和 filters，get/set 返回 scope、active 布尔与 filter；filter 字段为 httpOnly、hideCrashReporterRequests、hideAppleRequests、hideUDP、type、keywords、disabledKeywords。隐藏项、http-only 和关键词过滤共同决定记录范围，不改变网络是否通。|
+|捕获范围|`capture-filter` 的 scope、选项、顺序与返回字段完整读官方 HTTP 抓包页；隐藏项、http-only 和关键词过滤共同决定记录范围，不决定网络是否通。协议门槛按平台分支；不猜内部字段与 CLI 字段的对应。|
 |模块/资源|语法查 help module；改变模块状态会安排 profile reload；`external-resource update <key|all>` 会更新资源，all 不作为默认；Mac 的 `managed-profile update` 强制检查活动托管配置，等待下载/校验/替换，变化才安排 reload，返回 updated/unchanged。|
 |配置/重载|profile 的基本语法查 help profile；底层 `switch-profile <profile-name>` 同为切配置；Mac 的 `update-profile <base64-rule-section>` 为旧 Rule 更新入口，已由分节入口替代，不能借它绕本桥分节禁令。`reload` 优先差量应用；它与 `restart-engine`、`stop` 的影响和再确认按入口 §3。|
 |临时规则|语法查 help rule temp；其 list/add/remove/set-policy/flush 在桥内分别转 dump temp-rule/add-temp-rule/del-temp-rule/update-temp-rule/flush-temp-rule；直接底层命令参数相同。生效范围和清理限制按入口 §3；先列已有项，按实际规则标识删除。|
 |连接与封禁|语法查 help kill；它断连接，批量断开按入口 §3。用法查 help flush；它清 DNS 数据，其他 type 未核。`security ban list|clear` 查看/清除未授权访问封禁；clear 不作默认测试恢复。|
 |Mac 设备/升级|`set-dhcp-device`、`remove-device-record`、`reconnect-device`、`unattended-upgrade` 仅 Mac，参数按官方 Mac 资料；它们改设备记录、断开客户端或升级，不套到 iOS，也不因在目录出现而获准。|
 
-分节读取/编辑/恢复先完整读 `references/http-api.md`〔分支 http-api〕 和 `references/http-api.md`〔分支 http-sections〕。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
+分节读取、编辑、恢复先完整读 `references/http-api.md`〔分支 http-api〕 和 `references/http-api.md`〔分支 http-sections〕；官方 CLI 手册的分节说明只作语法依据。**本桥在连接、读文件和取密前拒绝 `profile section set`（含 --raw），禁止绕过**；list/get 仍可只读转发，但返回正文可能含密码，经本桥脱敏的正文不能回写。云同步和恢复条件按 HTTP 分节分支，不重复维护。
 
 <!-- END command-mutation -->
 
@@ -228,14 +232,13 @@ External Controller 是以 CRLF 分隔的命令和结果流：
 
 ## 远程管理
 
-依据官方指南 [Surge Remote Management](https://kb.nssurge.com/surge-knowledge-base/guidelines/remote-management)（2026-09-26 读；加 `.md` 取 Markdown 源）。它描述的是官方控制器，不代表每个特性本实现都有。
+可达性、Ponte、USB 和防暴力猜密的官方说明见 [Surge Remote Management](https://kb.nssurge.com/surge-knowledge-base/guidelines/remote-management.md)。和本端相关的要点：
 
-- **Ponte 与远端 loopback**：有用户授权的 Ponte 通路时，`--remote <name>.sgponte:6170` 可以到达远端 Mac 的 loopback，它的 External Controller 可以继续只绑 `127.0.0.1`，不必为此放宽监听。Surge UI 原生的 Ponte 免密发现和这个 CLI 的 host/port/password 连接是两回事，凭据处理不变。
-- **iOS 可达性**：Surge iOS 不能当 Ponte 服务端；蜂窝网络下远程 External Controller 连接会被拒，Wi-Fi 下要开启 Allow Access From Wi-Fi。这些是入站限制，不能证明同机 Minis 的 loopback 可用，要看实际路径。
-- **USB**：官方 Mac Dashboard 能管理 USB 连接的 iPhone/iPad（包括走蜂窝时），本 CLI 不实现；不要从通用能力表推断支持 USB。
-- **认证封禁**：30 秒内 10 次密码错误会临时封禁来源 IP 或本地进程。先停止反复认证，判断「服务死了」之前先考虑是否被封禁。`security ban` 的查看和清除语法见命令参考；清除封禁不是自动的测试恢复步骤。
-- **Ponte 与 HTTP API**：官方对比表把 HTTP API 和 Web Dashboard 标为不支持 Ponte。这说的是原生远程管理集成，不否定「经已有的 `.sgponte` 隧道访问 HTTP 端口」；以实际端点为准。
-- **官方与 Minis CLI 的差异**：Mac CLI 不带命令时进交互模式，Minis 打印帮助。指南里的 Mac 专属能力（Gateway 设备、插件、无人值守升级）不是命令规范，也不授权升级或重启。远程功能缺失可能是版本不匹配或 Mac 专属，不一定是传输故障；官方建议两端版本对齐（必要时都用 beta），先诊断，不自动升级。
+- iOS 总是拒绝来自蜂窝网络的远程 Controller 连接，Wi-Fi 连接要开 Allow Access From Wi-Fi。这些是入站限制，不能证明同机 Minis 经 loopback 一定可用，以实际路径为准。
+- 经用户授权的 Ponte 通路，`--remote <name>.sgponte:6170` 能到达远端 Mac 的 loopback Controller，凭据规则不变。官方说 HTTP API 不支持 Ponte，指的是原生远程管理集成，不否定经已有 `.sgponte` 隧道访问 HTTP 端口。
+- 本桥不实现 USB 连接，也没有交互模式（不带命令时打印帮助）。
+- 30 秒内 10 次密码错误会临时封禁来源 IP 或本地进程。认证失败就先停止重试，判断「服务挂了」之前先考虑是否被封禁。
+- 远程功能缺失可能是版本不匹配或 Mac 专属，不一定是传输故障；先诊断，不自动升级。
 
 ## 兼容性
 
@@ -246,43 +249,40 @@ External Controller 是以 CRLF 分隔的命令和结果流：
 
 <a id="branch-platform-compatibility"></a>
 <!-- BEGIN platform-compatibility -->
-# 平台与协议差异
+# 平台与协议门槛
 
-协议门槛、平台限制和历史验证结论只以本文件为准。其他文件（入口、`references/command-reference.md`〔分支 controller-cli〕、命令参考和插件指南等）里的协议号或版本说法与本文件冲突时，按本文件执行；来源快照中的描述不自动成为当前设备能力。
+执行命令前只按本分支判断门槛；其他文件和官方原文里出现的协议号都不作门槛。下表数字取自官方 Mac 应用包内的命令参考（6.11.0 build 12680 起，2026-11-14 按 6.12.0 build 12810 复核），是能力条件，不是本端设备的验收结果。
 
-下面是有日期的版本快照，不代表当前运行的版本。能力异常时先跑 `surge-cli --raw version`，核对 Surge、Core、平台和 Controller Protocol；不要把 App 发行版本和 Controller 内部版本混为一谈。
+先跑 `surge-cli --raw version`，核对 Surge 版本、Core、平台和 Controller Protocol；App 发行版本和 Controller 内部版本是两回事。所需协议未知或不满足就不执行，不从发行版本反推协议号，也不因为命令出现在手册里就推定可用。
 
-## 命令门槛
+| 能力 | 最低 Controller Protocol | 平台 |
+|---|---|---|
+| `rule`、`dns`、`http probe`、`security ban` | 20 | 共享 |
+| `geoip`、`dump performance`/`rule-usage`/`virtual-ip`、`benchmark rule-matching` | 22 | 共享 |
+| `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS；iOS 返回 `Unsupported command` 属正常 |
+| `plugin` 在线子命令 | 24 | 仅 macOS；iOS 返回 `Unknown command`；`plugin install` 未开放 |
+| `restart-engine` | 24 | 共享；12810 的参考未再列此门槛，沿用 12680 的记录；影响和再确认按入口 §3 |
+| logbook 的大小截断 | 27 | 共享 |
+| `dump dns-lookup-times`、`dump traffic-stat-hourly`、`summary` 的 `network` | 28 | 共享 |
+| `dump policy-usage`、`traffic-stat-hourly` 的 `policy`、`network-changed` 事件 | 29 | 共享 |
+| `summary.network` 的 `ipv4`/`ipv6` | 30 | 共享 |
+| `profile section list`/`get`/`set` | 31 | 共享；本桥拒绝 `set` |
+| `summary.network` 的 `encrypted-dns` | 33 | 共享 |
+| `dump traffic` 的 `testBytes` | 35 | 共享 |
+| `capture-filter` | 36 | 共享 |
+| `capture-session list`/`dump`/`data` | 37 | 共享；取代 `retrieve-data` |
+| `dump traffic-stat-breakdown` | 38 | 共享 |
+| `dump traffic-stat-records` | 39 | 共享 |
+| `policy-avoid`、`policy-group` 的 avoided 标记 | 40 | 共享 |
+| `rule match`/`explain` 的 `rule-source`、`matched-sub-rules` | 41 | 共享 |
 
-| 能力 | 最低 Controller Protocol | 平台 | 说明 |
-|---|---|---|---|
-| `rule`、`dns`、`http probe`、`security ban` | 20 | 共享 | |
-| `geoip`、性能/规则使用/虚拟 IP 的 dump、`benchmark rule-matching` | 22 | 共享 | |
-| `vmnet status`/`arp`/`ndp`/`ra` | 23 | 仅 macOS | 排查 Enhanced/Gateway Mode 的接口、ARP/NDP 邻居和 IPv6 RA 接管；iOS 返回 `Unsupported command` 属正常 |
-| `plugin list`/`info`/`parameters`/`load-unpacked`/`configure`/`enable`/`disable`/`select`/`uninstall` | 24 | 仅 macOS | iOS 返回 `Unknown command`；`plugin install` 尚未开放 |
-| `restart-engine` | 24 | 共享 | 影响和再确认按入口 §3 |
-| logbook 的大小截断语义 | 27 | 共享 | 本行至 capture-filter 行的协议数字沿用官方 Mac 6.11.0 命令参考（12680）的来源记录 |
-| `dump dns-lookup-times`、`traffic-stat-hourly`、`summary.network` | 28 | 共享 | |
-| `policy-usage`、`traffic-stat-hourly.policy`、`network-changed` 事件 | 29 | 共享 | |
-| `summary.network` 的 ipv4/ipv6 | 30 | 共享 | |
-| `profile section list`/`get`/`set` | 31 | 共享 | 本端桥不实现 `set`，见下文 |
-| `summary.network` 的 encrypted-dns | 33 | 共享 | |
-| `traffic.testBytes` | 35 | 共享 | |
-| `capture-filter` | 36 | 共享 | 改捕获过滤会影响记录范围，按既有授权和数据最小化执行 |
-| `capture-session list`/`dump`/`data` | 未核实，见下文 | iOS / macOS | 读取已存盘的 HTTP 抓包会话，取代 `retrieve-data` |
-| `dump traffic-stat-breakdown` | 未核实，见下文 | iOS / macOS | 按两个维度汇总流量 |
-| `dump traffic-stat-records` | 未核实，见下文 | iOS / macOS | 读取指定期间的流量及请求计数记录 |
+仅 macOS 的命令不用到 iOS 上：`profile list`/`check`、`device`、`vmnet`、`set-dhcp-device`、`remove-device-record`、`reconnect-device`、`managed-profile`、`update-profile`、`unattended-upgrade`、`plugin`，以及 `feature` 的 `system-proxy`、`enhanced-mode`。`provider-message` 不支持 macOS。
 
-上述已列数字只是有来源版本的能力条件，不代表本端设备已验收。官方 CLI 手册为 capture-session、dump traffic-stat-breakdown 和 dump traffic-stat-records 标注 iOS 6.0.0+ / Mac 6.11.0+，但这三项的最低 Controller Protocol 数字尚未核实，不以未核实的数字判定支持或拒绝，也不从发行版本反推协议号。执行前仍须按入口核对当前实例的平台、发行版本和 build，并取得当前实例支持目标命令的证据；必要条件未知或不满足时停止该项，不能只凭命令列在手册或历史 Protocol 25 推断可用。依据：https://manual.nssurge.com/tools/cli.html（2026-11-11 读取）。
+## Surge 6 新能力
 
-`plugin validate`/`pack` 是官方 macOS CLI 的本地离线工具，不是 Controller 命令，Minis/iSH 客户端不实现。配置插件前先用 `parameters` 读 schema，API Key 等敏感参数不能出现在回复、日志或公开包里；开发契约见 `references/plugin-authoring.md`；未覆盖的当前格式按官方资料核实，缺依据就停止该项。引用上游插件示例时，不把 `insecure: true` 或命令行里的 `token=…` 当本端默认：保持证书校验，密钥只用已授权注入的变量经已核实的安全入口传递，无法避免进入参数或日志时暂停相关配置。
-
-## Surge 6：分节编辑与内置 MCP
-
-- HTTP 分节编辑和内置 MCP 的最低版本是 iOS 6.0.0 / Mac 6.11.0，仍要核对所选实例实际的平台、营销版本和 build。2026-11-03 时 iOS 6 的发布页是 TestFlight，不是 App Store 稳定版。
-- iOS 6 的 MCP 另需订阅已解锁或有效试用的权益；装了这个版本或有 TestFlight 资格，都不能证明有这项权益。
-- 命令参考和插件指南取材的官方版本和原文哈希，以当前的 `upstream-manifest.json` 为来源证据；拿到安装包或有来源记录，不表示官方原件随包分发，也不表示新能力已经设备实测。
-- Minis 自建桥不实现 `profile section set` 的本地文件和 stdin 转换，但保留 `list`/`get` 的只读路径，不因为 `set` 的风险一律禁用。官方 `get` 可能返回含密码的真实正文，本端 `--raw` 仍是客户端脱敏的 JSON，两者都不会自动成为获准的回写原稿。读取和安全写入按 `references/http-api.md`〔分支 http-api〕 执行；这些新能力没有设备实测，历史的只读和重启验收不扩大到它们。
+- 分节编辑、内置 MCP、HTTP 抓包自动化、`policy-avoid`、`module show` 从 iOS 6.0.0 / Mac 6.11.0 起（官方手册的版本标注），仍要核对所连实例实际的平台、版本和 build。2026-11-03 时 iOS 6 只在 TestFlight 发布。
+- iOS 6 的内置 MCP 还需要订阅已解锁或在有效试用期内；装了这个版本或有 TestFlight 资格，都不能证明有这项权益。
+- 这些新能力都没有设备实测，历史的只读和重启验收不扩大到它们。分节读取和安全写入按 `references/http-api.md`〔分支 http-api〕 和 `references/http-api.md`〔分支 http-sections〕。
 
 ## 历史验证
 

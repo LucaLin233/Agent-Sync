@@ -21,6 +21,17 @@
         "agents/openai.yaml": "ef5cdcb1edd583d4b673774aa1e3b1c153b83df23cf1105191e8aac4d09912b1",
         "assets/logo.png": "6e8ba4a6ee0ac71c7c03e4a5c7ee457d2f782abe71542e9819dc35443fb1d6f9"
       }
+    },
+    {
+      "version_report": "Surge for macOS 6.12.0 (12810)",
+      "retrieved_at": "2026-11-14",
+      "raw_sha256": {
+        "SKILL.md": "9ddb31e51803043ddbaa63c6cb1d512b1e8225ccb2587390ce799c6b2ced22fe",
+        "references/command-reference.md": "20af6955bad2c0151dcb3485816d6d82d144cef9557d9c07faad072ff2fb06c2",
+        "references/plugin-authoring.md": "d41b905588c8a941e5c208854f76b05b8a395f981a6027ba758a8b9ee4ac7193",
+        "agents/openai.yaml": "ef5cdcb1edd583d4b673774aa1e3b1c153b83df23cf1105191e8aac4d09912b1",
+        "assets/logo.png": "6e8ba4a6ee0ac71c7c03e4a5c7ee457d2f782abe71542e9819dc35443fb1d6f9"
+      }
     }
   ],
   "runtime_validation": "not performed"
