@@ -451,6 +451,16 @@ class PrivacyTest(unittest.TestCase):
             self.assertEqual(T(line), json.loads(json.loads(out)['data'])['data'])
 
 
+    def test_api_base_problem_requires_explicit_remote_opt_in(self):
+        """普通 HTTP 与描述符共用的地址门禁；IPv6/远端正控不由分节专用门禁代替。"""
+        with mock.patch.dict(os.environ, {'SURGE_ALLOW_REMOTE': ''}):
+            self.assertIsNotNone(PRIVACY.api_base_problem('http://192.0.2.10:6171'))
+            self.assertIsNone(PRIVACY.api_base_problem('http://[::1]:6171'))
+        with mock.patch.dict(os.environ, {'SURGE_ALLOW_REMOTE': '1'}):
+            self.assertIsNone(PRIVACY.api_base_problem('http://192.0.2.10:6171'))
+            self.assertIsNotNone(PRIVACY.api_base_problem('http://u:p@192.0.2.10:6171'))
+
+
 # ── HTTP 回退与描述符探测 ─────────────────────────────────────────────────────
 PROBE = 'PROBE-9c4e = http, 127.0.0.1, 1080\n'
 
