@@ -1,4 +1,4 @@
-分支：command-reference、controller-cli、platform-compatibility、diagnostics。读法见 luno-core 入口〈加载〉。
+分支：command-reference、command-observation、command-network、command-inspection、command-mutation、command-automation、command-environment、output-safety、controller-cli、platform-compatibility、diagnostics。读法见 luno-core 入口〈加载〉。
 
 <a id="branch-command-reference"></a>
 <!-- BEGIN command-reference -->
@@ -20,6 +20,34 @@
 
 连接超时 8 秒；认证、普通命令及有限流的 socket 读超时 30 秒，均不是任务总时限。有限流包括带宽、加密 benchmark 和 test-ponte；watch、log watch、diagnostics 在认证后无 socket 读超时，首帧也须外部限时。流完成应核 `hasMore=false` 或该命令明确终态，不以首帧当完成。
 
+## 按任务加载
+
+本分支是下表各命令知识分支的共同前置；按任务完整读命中分支，跨项取并集。实际执行仍先满足入口 §1–§3，桥接脚本及其输出另完整读 `references/command-reference.md`〔分支 output-safety〕；纯文档工作不因此连接实例。未知字段、参数、payload 或安全写入口仍按下文停止边界处理，不因目录中未列出就推定不支持。
+
+| 任务 | 完整读取的分支 |
+|---|---|
+| 状态、版本、被动 summary、Gateway 设备概览 | `references/command-reference.md`〔分支 command-observation〕 |
+| rule match/explain、临时规则命令、DNS/GeoIP、主动网络测试与 benchmark | `references/command-reference.md`〔分支 command-network〕；涉及路由、DNS、临时规则或性能时另读 diagnostics |
+| 请求、日志、抓包会话、统计、dump/watch | `references/command-reference.md`〔分支 command-inspection〕；处理多帧输出另读 diagnostics |
+| 模式、策略、功能、模块、profile、capture-filter、reload 等运行状态变更 | `references/command-reference.md`〔分支 command-mutation〕；临时规则同时命中 command-network；分节编辑另按该分支指针加载 HTTP 资源 |
+| 脚本执行、Mac 插件和维护命令 | `references/command-reference.md`〔分支 command-automation〕；Mac 插件开发另读 plugin-authoring.md |
+| 原始 set、环境 key-path、数组/字典、捕获会话参数与过滤字典 | `references/command-reference.md`〔分支 command-environment〕；任务同时涉及功能变更时并读 command-mutation |
+
+目录中的其他资源仍须按技能根路径和完整分支读取；表内简写 diagnostics 指 `references/command-reference.md`〔分支 diagnostics〕，plugin-authoring.md 指 `references/plugin-authoring.md`。所有授权、再次确认、平台/协议条件、输出限制及恢复要求不因分支细化而减少。
+
+## 覆盖与停止边界
+
+本分支及上述六个命令知识分支，与已核本地帮助共同覆盖官方 12710 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型重新组织，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
+
+离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
+
+来源与许可：依据官方命令参考整理的接口事实摘要，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。
+<!-- END command-reference -->
+
+<a id="branch-command-observation"></a>
+<!-- BEGIN command-observation -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
+
 ## 先观察，再决定变更
 
 以下读取也须先限定已确认非秘密的字段和实际需要的量；本表不授权全量导出。
@@ -34,6 +62,12 @@
 |单代理/隧道|`show-policy <policy-name>` 查看策略详情；`proxy-runtime-status <policy-name|line-hash>` 观察流量/速率、UDP relay、测试能力、近期连接错误。WireGuard 还看有效底层策略、活动 TCP/UDP 数与 peer 握手；Tailscale 看会话错误、本地地址、Exit Node、DERP、peer path 和 MagicDNS 等实际提供的信息。先此项，后定向日志。|
 |设备/网关|仅 Mac：`device list|show <identifier|mac>` 和 VMNET 各表；语法查 help vmnet，字段按〈调用与证据〉取官方 Mac 资料。status 在 VMNET 未运行时仍返回 running=false，其他表会报错。|
 |数据通道|抓包正文用〈抓包会话〉的 `capture-session`；旧的 `retrieve-data <record-id> <request|response> [replica-dir]` 走原始数据通道，本桥不渲染，已被前者取代。`get-resource device-icon <id...>` 返回 Base64 图标；两者不是普通状态查询，正文/资源须单独授权和限制，不进入支持包。`provider-message <base64-data>` 发 Packet Tunnel Provider 消息，不支持 Mac，不能当只读探测。|
+
+<!-- END command-observation -->
+
+<a id="branch-command-network"></a>
+<!-- BEGIN command-network -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
 
 ## 路由、DNS 和主动测量
 
@@ -51,6 +85,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 |真实 HTTP|用法查 help http；probe 发 HEAD，未给策略则按规则选路；结果看状态、时序、路由及 headers，非无副作用模拟。|
 |带宽/Ponte|语法查 help test；带宽和 Ponte 测试是流，必须限时并核终态。|
 |本地计算负载|基本调用查 help benchmark；encryption 测 Surge 所在设备而非 CLI 主机的加密吞吐/正确性，不是网络带宽；默认 100 MiB，整数 1–1024，块 type=start/line/complete，中断后当前 primitive 完成才取消。rule-matching 对随机 hostname 做最坏全扫描，返回单个 average-ns，不是流。|
+
+<!-- END command-network -->
+
+<a id="branch-command-inspection"></a>
+<!-- BEGIN command-inspection -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
 
 ## 运行数据、日志与事件
 
@@ -71,6 +111,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 
 订阅的已知基本形式查 help watch，但该帮助未列全事件；支持多个 event 参数；无参数表示取消订阅，本桥 `watch speed` 转 real-time-speed。离线事件名全集按用途为：速度/策略 real-time-speed、auto-test-group、policy-benchmark；流量 request、request-update、traffic、dns；状态 summary、environment、reload、shutdown、network-changed；设备 device-name-map、device-info；诊断 diagnostics、dns-flush、log。network-changed 在新网络稳定后发送，无 payload，协议≥29；log 推荐走 log watch。未在原资料定义的事件字段不在此臆造。诊断用法查 help diagnostics；它启动诊断流，配合 `stop-diagnostics` 停止；长期流按外部限时及真实终态处理。
 
+<!-- END command-inspection -->
+
+<a id="branch-command-mutation"></a>
+<!-- BEGIN command-mutation -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
+
 ## 变更路径与隐含副作用
 
 下列是语法知识，不是授权。模式/策略、profile 切换或更新、批量连接终止、stop/restart 等保持入口的再次单独确认；其他操作按实际影响核授权。
@@ -88,6 +134,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 
 分节读取/编辑/恢复先完整读 `references/http-api.md`〔分支 http-api〕 和 `references/http-api.md`〔分支 http-sections〕。协议≥31 的 `profile section list` 按 Profile 顺序列节的来源相对文件、editable/reason、行数和 revision；get <name> 取无节标题的正文及 file/editable/exists/revision，可能含密码。官方 set <name> <file|-> [revision] 是整节替换/缺节则主文件末尾创建、整 Profile 验证后写回并 reload，revision 冲突拒绝；但**本桥没有文件/stdin 转换，连接、读文件、取密前即拒绝 set，包括 --raw，禁止绕过**。托管/企业、URL/托管 include、多文件汇成或混自身行与 include 的节只读；正文不能另含 header，include 文件中不能再插 include。iOS 写入会触发 iCloud、Dropbox 另有主 App 时机和文件数限制，细节只以安全分节分支为准，不能靠文件回滚撤销已发同步。
 
+<!-- END command-mutation -->
+
+<a id="branch-command-automation"></a>
+<!-- BEGIN command-automation -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
+
 ## 脚本、Mac 插件与本地能力
 
 基础语法查 help script；run 可执行已启用或已禁用的配置 cron，返回输出与结果/异常，并非只读。桥的 `script evaluate <file> [mock-type] [timeout] [engine] [argument]` 读取显式 JS 文件，转 Base64 并转换 mock 名：http-request/http-response/cron/event/rule/dns/generic；engine=auto/jsc/webview。Controller 接口本身为 evaluate <base64-js> 等后续位置参数；不能把 Controller 编码与本地文件入口混用。先审脚本/读取授权，评估可有真实网络或修改行为，mock 不保证隔离。
@@ -95,6 +147,12 @@ DNS 参数查 help dns；经过 Surge DNS 流程会产生查询流量；lookup �
 Mac 插件在线命令的子命令和门槛见平台表，输出字段按官方 Mac 资料；list/info 的 values 可能含秘密，先限制读取。configure、load-unpacked、uninstall 的影响和开发流程先读 `references/plugin-authoring.md`。
 
 `plugin validate`、`plugin pack` 和 `lsp` 是官方 Mac 本地能力（pack 产物见插件指南，lsp 是编辑器长驻服务），本桥不实现，不能发 Controller。`--check` 的上传风险按入口 §3。
+
+<!-- END command-automation -->
+
+<a id="branch-command-environment"></a>
+<!-- BEGIN command-environment -->
+共同前置：先完整读 `references/command-reference.md`〔分支 command-reference〕；实际操作仍按入口与其中的平台、传输和输出安全指针。
 
 ## 环境 key-path：类型、合并与回读
 
@@ -117,14 +175,31 @@ Mac 插件在线命令的子命令和门槛见平台表，输出字段按官方 
 
 `PacketCaptureParameters`：sizeLimit:int 默认 1048576 字节，packetCountLimit:int 默认 100，timeLimit:int 默认 180 秒，packetType:int 的 0/1/6/17 为 Unknown/ICMP/TCP/UDP。成功 set 会发送环境变更通知，但通知、成功回执和真实状态是三件事；必须最小回读，并核自动纠正/回退。
 
-## 覆盖与停止边界
+<!-- END command-environment -->
 
-本参考与已核本地帮助共同覆盖官方 12710 §2 的命令名（含高级入口）、§3.2 的 dump 类型、§3.8 事件及 §4 的 key-path/复杂结构事实；结构按观察、负载、变更与类型重新组织，不移植官方叙述或示例集。详细审计映射随制稿方案保存，不进入运行时增加加载负担。§3.17 的官方 rendered 解析器名单不适用于本桥；本桥格式化支持以代码和 controller-cli 为准，其他结果可能仅美化 JSON。
+<a id="branch-output-safety"></a>
+<!-- BEGIN output-safety -->
+# 桥接脚本输出安全契约
 
-离线知识覆盖不等于执行等价：原目录未给出的数据通道 payload、事件字段、日志级别枚举、provider-message 消息格式和复杂值的可用安全写入口仍属明确缺口；缺证时停止这些参数/字段或执行结论，不撤销已核目录知识，也不擅自接受功能退化。新协议、平台或插件变化逐项核官方资料。未知内容不因未列出被判为不支持；不能把最新官方行为直接归给本桥。
+使用 `scripts/surge_cli.py`、`scripts/surge_ios.py`、`scripts/test_policy_descriptor.py`，或判读、整理、分享它们的输出前，完整读取本分支。它只规定输出保证边界，不授权读取、连接、写入或外发；源头字段投影和秘密来源仍按总控及入口 §3。来源与历史取证留在 `references/SOURCE.md`〈luno-surge 输出脱敏的保证边界〉。
 
-来源与许可：依据官方命令参考整理的接口事实摘要，项目非官方。来源核对和许可限制见 `references/SOURCE.md`；没有把客服短摘录许可扩张为整件、整篇译文、拆分转载或 logo 分发权。未实测的能力不报告通过。
-<!-- END command-reference -->
+`--raw` 是客户端脱敏后的 JSON，不是服务端原始字节；脱敏的 profile、diff 或单节正文不得回写。脱敏输出不等于可以对外发布的安全日志，作为诊断输出前仍需人工检查，对外分享前还要另行核对。
+
+- `user` 和 `username` 仍默认抹除；字段名不能证明其值永远不敏感，放宽须用户明确确认。
+- 仍不覆盖：没有键名的裸方案词、Unicode 转义键名、整体编码或 Base64 载荷，以及 JSON 嵌在普通文本中时的嵌套容器。
+- `surge_cli.py` 的 `--help` 和 `help <cmd>` 输出编译期帮助字面量，走不脱敏路径；该例外不适用于运行时数据，也不改变 `references/command-reference.md`〔分支 command-reference〕 中纯本地帮助的安全调用形状。
+
+- 带键名的认证字段（`authorization`、`proxy-authorization`、`auth`、`authz`，键可带引号）分三种情形处理。① 引号值按引号配对，双引号和单引号各有自己的字符类与转义，键与值之间允许换行缩进，因此覆盖多行 JSON 和双引号内含单引号的情况。② 带方案词（`Bearer`、`Basic`、`Digest`、`Negotiate`、`NTLM`、`aws4-hmac-sha256`）时抹除该字段整行。③ 其余裸值以逗号、分号或换行为界，不以 `}`、`]` 为界，否则 `Authorization: SYNTH}SECRET` 会在闭合符处截断，泄漏尾部；值以抹除标记开头时，只保留标记和其后的结构闭合符，其余残余丢弃。
+
+**输出契约**（2026-09-16 确立，使用方必须遵守）：
+
+1. 裸认证行的整段都视为敏感值。冒号或等号之后的整段内容都是该字段的值，不是「凭据加诊断字段」，所以 `Authorization: <值> status=502` 里的 `status=502` 会一并丢弃。空格不是诊断字段的分隔符，写成 `key=value` 也没有例外（`Authorization: <值> status:502` 同样整段丢弃）。诊断字段只能改为独立的结构化字段或独立的行（如另起一行 `status=502`），不得与认证值同行混排。
+2. 值只限同一行。换行即该字段结束，下一行是独立内容。因此冒号后直接换行的续行凭据 `Authorization:\n<裸凭据>` 不在覆盖范围内，生产者不得输出这种裸续行凭据；而 `Authorization:\nstatus=502` 这样下一行是普通内容的，按独立内容原样保留。
+3. 逗号和分号只是第 ③ 种情形（其余裸值）的终止符，其后的内容视为独立字段而保留，所以契约禁止在这一情形里用 `,` 或 `;` 在值中承载凭据（`Authorization: <标记>,SECRET` 不在覆盖范围内）。第 ② 种带方案词的字段整行抹除，不适用本条：`Authorization: Bearer <值>,status=502` 里的 `status=502` 同样会被抹掉，同行的诊断信息须移到独立行或独立的结构化字段。
+4. 多行结构化值与「同一行」规则不冲突。规则 2 约束的是裸值；`{"auth":\n"值"}` 这种键与值之间换行缩进的引号值属于第 ① 种情形，正常脱敏。
+5. 生产者不满足上述任一条时，必须先解析和规范化认证字段再调用脱敏，或者拒绝输出有歧义的段落。
+<!-- END output-safety -->
+
 
 <a id="branch-controller-cli"></a>
 <!-- BEGIN controller-cli -->
@@ -225,7 +300,7 @@ Protocol 25 仍兼容旧的 JSON `argv` 请求，但本客户端已对齐正式�
 <!-- BEGIN diagnostics -->
 # Surge 按需诊断
 
-只在实际排查对应功能时读取，并先按入口 §2 做完引擎状态预检。命令语法、key-path 和响应字段以 [command-reference.md](command-reference.md#branch-command-reference) 为准，协议门槛和平台限制以 [platform-compatibility.md](command-reference.md#branch-platform-compatibility) 为准。这里只写 Surge 特有的行为，不用其他代理软件的语法代替。
+只在实际排查对应功能时读取，并先按入口 §2 做完引擎状态预检。命令语法、key-path 和响应字段先按 [共同前置与任务目录](command-reference.md#branch-command-reference) 完整读取命中分支，协议门槛和平台限制以 [platform-compatibility.md](command-reference.md#branch-platform-compatibility) 为准。这里只写 Surge 特有的行为，不用其他代理软件的语法代替。
 
 ## 流量与多帧输出
 

@@ -46,9 +46,9 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 `/usr/local/bin/surge-cli` 是 `scripts/surge_cli.py` 这个自建的 Python 3 桥，**不是官方 Mac 二进制**。默认连同机的 Controller；`SURGE_CLI_REMOTE` 或 `--remote` 只在显式指定时使用，用户没指定就不连外部主机。涉及传输、凭据或 `--check` 时，先完整读 `references/command-reference.md`〔分支 controller-cli〕。
 
-优先用 `--raw`，它输出的是**客户端脱敏后的 JSON，不是服务端原文**（包内其他地方说的「原始」都按这个理解）。
+优先用 `--raw`，它输出的是**客户端脱敏后的 JSON，不是服务端原文**（包内其他地方说的「原始」都按这个理解）。使用本包的 CLI、HTTP API 或 policy-descriptor 助手，或判读、整理、分享其输出前，完整读 `references/command-reference.md`〔分支 output-safety〕；本地帮助的字面量例外只按该分支执行，不放宽运行数据的限制。
 
-查命令选择、语法或 key-path 时，先完整读 `references/command-reference.md`〔分支 command-reference〕，再按任务读取其中触发的专业资源。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
+查命令选择、语法、key-path 或响应字段时，先完整读 `references/command-reference.md`〔分支 command-reference〕，再按其任务目录完整读取命中分支及共同前置，跨任务取并集；未触发专题不因同文件共置而加载。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
 
 涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/command-reference.md`〔分支 diagnostics〕。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
 

@@ -6,7 +6,7 @@ description: Linux/Shell/Docker/Compose、部署与网络代理、GitHub/CI/lint
 
 ## 范围
 
-Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surge 的配置与控制另见 `luno-surge`）。输出目标默认是 VPS：先探测实际系统，探测不到时按 Debian 13 + Zsh 假设并声明；这个默认**不构成连接授权**。iSH 只用于辅助生成和验证。参考环境以目标的实际证据为准：Debian 13、Zsh + Oh My Zsh、mise、Surge iOS；两端的执行环境分别是 Minis iSH/Alpine 和经 Debian 设备的 LobeHub。
+Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surge 的配置与控制另见 `luno-surge`）。服务器运维交付的目标默认是 VPS：先探测实际系统，探测不到时按 Debian 13 + Zsh 假设并声明；这个默认**不构成连接授权**，也不覆盖已经明确的本机任务或执行环境。为服务器交付在 iSH 辅助生成和验证，不代替目标环境验收；需要本机能力的任务、可信测试及执行环境选择，仍按〈资源与触发〉及命中资源，不因上述默认改派或换环境。参考环境以目标的实际证据为准：Debian 13、Zsh + Oh My Zsh、mise、Surge iOS；两端的执行环境分别是 Minis iSH/Alpine 和经 Debian 设备的 LobeHub。
 
 ## 资源与触发
 
