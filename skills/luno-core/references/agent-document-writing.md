@@ -4,21 +4,20 @@
 <!-- BEGIN agent-document-writing -->
 # 规则正文书写
 
-本资源是**书写启发式**：常驻提示词、技能正文与 `description`、包内资源和子代理指令该怎么写、哪些该删、指针怎么措辞。它不是硬约束：与授权、安全、角色、派发、同步和语义保真的成文规则冲突时，以后者为准；它也不改变各入口既定的加载要求。只在书写和改写规则时使用，纯状态查询、只读核对和不涉及正文改写的执行不读。
+本资源是**书写启发式**：常驻提示词、技能正文与 `description`、包内资源和子代理指令该怎么写、哪些该删、指针怎么措辞。它不是硬约束，与授权、安全、角色、派发、同步和语义保真的成文规则冲突时，以后者为准。
 
 ## 写法
 
 - **流程类规则写成完整句**：写清主语、条件、例外，并用半句话交代原因。模型知道规则为什么存在，才能在规则没覆盖到的边界情况下推断正确。避免内部代号、省略主语的否定排比和「随单」「依core」这类缩写。
 - **硬禁令保留禁令式**：秘密、凭据、不可逆操作和生产安全相关的禁止事项直接写「不得」「禁止」，不为了顺口而软化。
-- **一件事只写一处**：加载规则、「加载不等于授权」和秘密规则都以 `luno-core` 为准，各技能不再复述；技能里只写本领域特有的事实和限制。
+- **一件事只写一处**：一个意思只留一处权威写法，改行为时只改一处。加载规则、「加载不等于授权」和秘密规则都以 `luno-core` 为准，各技能不再复述，只写本领域特有的事实和限制。常驻提示词和子代理指令例外：它们在 core 加载前就生效，子代理也不注入常驻提示词，所以各自保留秘密底线和「先完整加载 core」的句子。
 - **常驻规则里不写批次用语**：「本批」「本单」「本轮」这类词在部署后已经没有所指，改成不带时态的陈述。带日期和版本的经验结论保留平台或实例、版本和证据日期（总控要求）。
-- **来源详情下沉，必要通知保留**：运行正文仍留必要作者/许可、精选改写性质及来源登记指针；完整提交、路径、日期、取材边界和可取性记在 skills-sources.md 或包内来源登记，完整许可随包分发。Apache-2.0 改写保留修改声明；不能用来源下沉删除必要通知或扩大分发权。
 
 ## 指针与触发
 
 指针是上下文中指向外部材料、并注明读取时机的一行（技能 `description`、加载语句、资源指句）。**读取时机由措辞决定，而不是由目标决定**：必读的材料配上含糊的措辞会导致时读时不读，先把措辞写准，再考虑是否内联。每个真实分支（文档要处理的不同情形）写一个触发，同一分支的同义说法合并；正文里已经写明的身份不必在指针里重复。常驻的指针每轮都要付费，删减标准要比正文更严。
 
-**反引号里的跨技能路径必须带技能名前缀**（如 `luno-surge/references/SOURCE.md`），不能只写 `references/…`：后者会被 `tools/check-rules.py` 按**当前技能根**解析，判为引用断链或资源边未登记。结构守卫不逐字约束正文，防止正文弱化靠 `references/sync.md`〔分支 sync-workflow〕 的风险分级和独立验收。
+**反引号里的跨技能路径必须带技能名前缀**（如 `luno-surge/references/SOURCE.md`），不能只写 `references/…`：后者会被 `tools/check-rules.py` 按**当前技能根**解析，判为引用断链或资源边未登记。
 
 ## 负载与披露
 
@@ -30,60 +29,25 @@
 
 ## 删减判据
 
-- **单真源**：一个意思只留一处权威写法，改行为时只改一处。
 - **环境本身就是真源**：复述环境（配置、目录布局、命令输出）的文字只是缓存；只缓存查不到的东西，比如没成文的约定、选择背后的理由、配置里看不出来的坑。
 - **相关性**：删掉不承载当前任务的行，以及会随行为和外部世界变化而过时的行。
 - **沉积**：只增不减会形成旧层；加规则安全、删规则冒险，时间长了活的规则就要往下翻很久才找得到。
 - **no-op 逐句测试**：判断标准是「相对默认行为有没有改变」，靠实际跑一次或对照已有行为来判断，不靠辩论；一句话不过关就整句删掉，不逐字修补。
 
-不采用的做法：按调用拆分技能、router skill、`disable-model-invocation` 之类的调用机制，以及用单个「锚词」代替多句说明。「按序列拆分」只作启发，不授予派发权限，派发仍按各入口和子代理规则。
+不采用的做法：按调用拆分技能、router skill、`disable-model-invocation` 之类的调用机制，以及用单个「锚词」代替多句说明。
 
 来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END agent-document-writing -->
 
 <a id="branch-skill-authoring"></a>
 <!-- BEGIN skill-authoring -->
-# 技能编写与结构校验（精选）
+# 技能编写与结构校验
 
-本文件含改写自 `openai/skills` 的 skill-creator 内容（Apache-2.0，已修改；许可见 `../LICENSE.apache-2.0.txt`）。通用书写启发式（披露与共置、删减判据、指针措辞）见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；本机的发布规则（登记刷新、跨端同步、平台安装与授权）见 `luno-platform/references/minis.md`〔分支 minis〕、`luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/lobehub.md`〔分支 lobehub〕。
+通用写法（自由度、目录与 `scripts/`/`references/`/`assets/` 分工、渐进披露、`description` 写法）按 [Anthropic 技能编写最佳实践](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) 和 [Agent Skills 规范](https://agentskills.io/specification)；效果评测（with/without 对照、近失负例、留出集、多次运行看方差、客观断言与人工判断分开）按 [anthropics/skills 的 skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md)。改技能就是改行为，要有对照，不凭印象。书写启发式见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；发布、登记刷新和平台安装见 `luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
-## 自由度选择
-按对输出的**约束强度**选档，判据＝「同一目标有多少条可接受路径」：
-- **高**：多条路径都行、验收看整体效果；只写目标与成功判据，不列步骤。
-- **中**：有推荐做法但允许偏离；给结构骨架与必填项，留实现空间。
-- **低**：顺序固定、错一步即失败，或输出须逐字节复现；写成可直接执行或直接粘贴。
-错配是常见缺陷：步骤固定却写散文会执行漂移，该留判断却写死脚本则脆弱。
+- **受管范围**：下列约束只针对受管的自定义技能；平台内置技能不按此判定无效，也不改写、不纳入受管同步。受管技能的目录名必须等于 `name`。
+- **结构校验**：本地只用 `luno-core/scripts/quick_validate.py`（唯一实现），按本次变化的技能直接调用。它只查 frontmatter 的字段与限制、目录名与 `name` 相同、正文非空；**通过不等于可用**，正文质量、`description` 的触发、资源引用、链接与代码能否运行、许可是否齐备都不查。运行需要 Python 3 和 PyYAML；依赖或脚本缺失就停，不回退较弱判据，也不自动安装。
 
-## resources：三类与选择
-- `scripts/`：**确定性**操作（格式转换、校验、打包、接口调用）；一次写成、多轮复用，有副作用或需凭据的须写明调用前提。
-- `references/`：**按分支读取**的口径、清单与接口细节，不占 `SKILL.md` 正文的常驻成本。
-- `assets/`：正文要**原样引用**、随包分发的资源（模板、代码骨架、图标、字体等），**可为文本或二进制**。
-选择判据：每条信息问「是否每个分支都要」——都要进正文，只有部分分支到就下沉为 `references/`；同一动作要重复且要求一致就固化进 `scripts/`。
-
-## 目录结构与必填 frontmatter
-以下约束只针对受管的自定义技能：平台内置技能不按此判定无效，也不改写、不纳入受管同步。
-```
-<skill-name>/
-├── SKILL.md           入口：frontmatter + 正文
-├── references/        按需读取
-├── scripts/           可执行附件
-└── assets/            原样引用的产物
-```
-frontmatter 按 YAML 写；标准必填/可选字段与 `name`/`description` 限制查 [Agent Skills 规范](https://agentskills.io/specification)。受管自定义技能另要求目录名等于 `name`。
-
-## `scripts/quick_validate.py` 的校验边界
-本地校验以 `luno-core/scripts/quick_validate.py` 为唯一实现；按本次变化技能直接调用。检查上述 frontmatter、目录名与 `name` 相同及正文非空；**通过不等于可用**。
-**不检查**：正文质量、`description` 的触发质量、资源引用是否存在、链接与代码是否可运行、许可是否齐备。frontmatter 须以 `---\n…\n---\n` 包裹（CRLF 经文本读取转换后同样可用）。运行须 Python 3 与 PyYAML；依赖或唯一实现缺失时停止，不回退较弱判据、不自动安装。
-
-## 效果评测设计
-改技能就是改行为，须设计对照，不凭印象：
-- **with/without 对照**：同一批任务分别在启用与不启用（或新旧版本）下跑，比较可分辨的差异；只跑一侧＝无对照。
-- **近失负例**：加入「不该触发／边界相邻」的输入，确认触发面没有过宽。
-- **预登记判据**：跑之前写下成功／失败怎么判、看哪些输出；事后挑判据会把噪声读成改进。
-- **留出集**：留一部分变体只在定稿后跑，防止针对评测集过拟合。
-- **记录方差**：同一输入多跑几次并记录波动，先确认差异大于方差再当作效果。
-- **区分两类判据**：**客观断言**（文件是否生成、退出码、必填字段是否齐备）与**人工质量判断**分别记录；只检查「文件存在」不构成正确性验证。
-
-来源登记：openai/skills 的 Apache-2.0 精选改写（已修改），固定提交、取材路径与日期见仓库 skills-sources.md；完整许可见 ../LICENSE.apache-2.0.txt。
+来源登记：校验器改写自 openai/skills 的 skill-creator（Apache-2.0，已修改），完整许可见 ../LICENSE.apache-2.0.txt，固定提交与取材路径见仓库 skills-sources.md。
 <!-- END skill-authoring -->
 

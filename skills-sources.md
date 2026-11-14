@@ -4,7 +4,7 @@
 
 ## 约定
 
-- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-core/references/agent-document-writing.md`〔分支 skill-authoring〕、`skills/luno-core/scripts/quick_validate.py`、`skills/luno-core/references/code-review.md`。
+- 运行正文保留最短必要作者/许可、改写性质及来源指针，完整来源细节集中本文件；正文中的运行限制和加载触发不因来源下沉而删除。Apache-2.0 改写内容另保留修改声明，现有文件为：`skills/luno-core/scripts/quick_validate.py`、`skills/luno-core/references/code-review.md`。
 - 许可全文随技能包分发，文件名为 `skills/<技能>/LICENSE.*.txt`；本文件不是许可原文。对外分发含第三方改写内容的产物时，必须随附对应的版权行和许可全文。
 - 「精选改写」指按本端需要用中文改写选定的判据，不是原文翻译，也不整段照抄。
 - 「核对」指所注日期的本地或在线取证。标「在线可取性未复核」的条目此后没有再访问上游；整理本文件时也没有重新访问任何上游。
@@ -89,9 +89,9 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **openai/skills@`49f948faa9258a0c61caceaf225e179651397431`**（提交时间 2026-06-24T02:36:12Z；2026-11-05 经公开 API 确认可取）：取自 `skills/.system/skill-creator/`，许可 Apache-2.0，许可原字节随包为 `LICENSE.apache-2.0.txt`。
 
-- 精选改写进 `references/agent-document-writing.md`〔分支 skill-authoring〕，只留技能专属的增量；通用书写启发式在 `references/agent-document-writing.md`〔分支 agent-document-writing〕。
+- 2026-11-12 起，`references/agent-document-writing.md`〔分支 skill-authoring〕 不再含改写正文：自由度、资源分工、目录结构和评测方法改为指向 Anthropic 技能编写最佳实践、Agent Skills 规范和 anthropics/skills 的 skill-creator，分支只留受管范围和校验器边界两条本机约定。
 - 校验器 `scripts/quick_validate.py` 源自上游的 `quick_validate.py`，已在本地修改。
-- 两个文件各保留一行 Apache-2.0 修改声明。已去掉 Codex 专用件，初始化器已退役。
+- 校验器保留 Apache-2.0 修改声明。已去掉 Codex 专用件，初始化器已退役。
 - 已知缺口：历史上端侧退役的未闭合记录没有补证，不能视为已完成。
 
 **mattpocock/skills（writing-for-agents 固定提交，见〈共用上游〉）**（直接取自上游 GitHub，不经市场）：`skills/productivity/writing-for-agents/SKILL.md`（该文件 sha256 `551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a`）→ `references/agent-document-writing.md`〔分支 agent-document-writing〕，是中文适配改写，没有作为独立技能入库。上游事实取自 2026-10-07 的核对记录，补登记时没有重新取上游。
