@@ -195,7 +195,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## luno-surge
 
-运行资料的自编/官方事实摘要边界、非译本与无原文摘录声明、`agents/openai.yaml` 自写、有限短摘录的逐项及累计核对义务，统一见 `skills/luno-surge/references/SOURCE.md`〈来源与许可范围〉；不得以根 MIT 或 OpenMinis 通知扩大 Surge 材料分发权。
+产品事实以官方手册为准；未公开的 dump/watch/key-path 离线事实及本端差异保留。自编/摘要边界、非译本与无原文摘录声明、`agents/openai.yaml` 自写、有限短摘录的逐项及累计核对义务，统一见 `skills/luno-surge/references/SOURCE.md`〈来源与许可范围〉；不得以根 MIT 或 OpenMinis 通知扩大 Surge 材料分发权。
 
 **官方来源例外**：Surge Mac 应用包，非 GitHub 技能仓库。取源、包身份、逐文件哈希及许可按 `skills/luno-surge/references/SOURCE.md`，机器证据见 `skills/luno-surge/references/upstream-manifest.json`；普通使用不补原件，原件和 logo 不进公开 Git 或运行包。哈希不授予分发权；例外仅对该对象有效（`luno-core/references/sync.md`〈真源与落点〉）。
 

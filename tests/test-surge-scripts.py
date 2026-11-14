@@ -3,8 +3,8 @@
 scripts/*。多数用例在本进程内执行入口（见 run_entry），每个入口脚本至少保留一个真实子进程用例。
 
 覆盖：输出脱敏（_privacy 语料＋各入口全部输出路径）、3xx 不外泄 X-Key、出网门禁、安全分节
-写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、只读来源检查、
-专用打包器（按 manifest 全部 build 累积拒绝完整官方文件）、安装与验收档。来源检查不需要官方原件。真包与登记等包态判据在
+写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、
+专用打包器（按 manifest 全部 build 累积拒绝完整官方文件）、安装与验收档。真包与登记等包态判据在
 test-surge-package.py。
 """
 import contextlib
@@ -39,7 +39,6 @@ SCRIPTS = SKILL / 'scripts'
 SURGE_IOS = SCRIPTS / 'surge_ios.py'
 POLICY_DESCRIPTOR = SCRIPTS / 'test_policy_descriptor.py'
 SURGE_CLI = SCRIPTS / 'surge_cli.py'
-UPDATE = SCRIPTS / 'update_upstream.py'
 PACKER = SCRIPTS / 'package_release.py'
 API_KEY = 'test'                      # 哑值
 
@@ -56,10 +55,11 @@ R = PRIVACY.REDACTED
 B, T = PRIVACY.redact_boundary, PRIVACY.redact_text
 
 def offline_env(base=None, api_key=API_KEY):
-    """哑凭据＋本地 base，剥掉代理与放行变量。"""
+    """哑凭据＋本地 base；忽略调用方 Surge 参数和代理（含 macOS 系统代理）。"""
     env = {k: v for k, v in os.environ.items()
            if k.lower() not in ('http_proxy', 'https_proxy', 'all_proxy')
-           and k not in ('SURGE_ALLOW_REMOTE', 'SURGE_ALLOW_SENSITIVE', 'SURGE_HTTP_API_BASE')}
+           and not k.startswith('SURGE_')}
+    env['no_proxy'] = '*'
     env['SURGE_API_KEY'] = api_key
     if base is not None:
         env['SURGE_HTTP_API_BASE'] = base
@@ -506,7 +506,9 @@ class HttpEntryTest(unittest.TestCase):
                               ('http://user:SYNTH-GATE@127.0.0.1:6171', 'must not embed URL credentials'),
                               ('ftp://127.0.0.1:6171', 'must use http or https')):
             with self.subTest(base=base):
-                r = run_script(POLICY_DESCRIPTOR, ['--api-base', base], stdin=PROBE)
+                with mock.patch.object(urllib.request.OpenerDirector, 'open') as request:
+                    r = run_script(POLICY_DESCRIPTOR, ['--api-base', base], stdin=PROBE)
+                request.assert_not_called()
                 self.assertNotEqual(0, r.returncode)
                 self.assertIn(message, r.stderr)
                 self.assertNotIn('SYNTH', r.stdout + r.stderr)
@@ -640,53 +642,6 @@ class SurgeCliTest(unittest.TestCase):
                 r, controller = self.cli({'result': 'ok'}, args)
                 self.assertEqual(0, r.returncode, r.stderr)
                 self.assertTrue(controller.commands[0].lower().startswith('profile "section"'))
-
-
-# ── 只读来源检查（update_upstream.py inspect）──────────────────────────────────
-class ProvenanceInspectTest(unittest.TestCase):
-    KEYS = ('SKILL.md', 'references/command-reference.md', 'references/plugin-authoring.md',
-            'agents/openai.yaml', 'assets/logo.png')
-
-    def source(self, tmp):
-        source = Path(tmp) / 'source dir'
-        payloads = {key: ('synthetic-source-' + key).encode() for key in self.KEYS}
-        for key, data in payloads.items():
-            (source / key).parent.mkdir(parents=True, exist_ok=True)
-            (source / key).write_bytes(data)
-        return source, payloads
-
-    def test_inspect_compares_with_the_last_build_and_writes_nothing(self):
-        """末项才是基线：较早 build 与来源全同、末项只差 SKILL.md，报告须只列 SKILL.md。"""
-        with tempfile.TemporaryDirectory(prefix='surge-provenance-') as tmp:
-            source, payloads = self.source(tmp)
-            digests = {key: hashlib.sha256(data).hexdigest() for key, data in payloads.items()}
-            skill = Path(tmp) / 'skill'
-            (skill / 'scripts').mkdir(parents=True)
-            (skill / 'references').mkdir()
-            script = skill / 'scripts/update_upstream.py'
-            shutil.copy2(str(UPDATE), str(script))
-            (skill / 'references/upstream-manifest.json').write_text(json.dumps({'builds': [
-                {'raw_sha256': digests}, {'raw_sha256': dict(digests, **{'SKILL.md': 'a' * 64})}]}))
-            before = sorted(str(p) for p in Path(tmp).rglob('*'))
-            r = run_entry(script, ['inspect', '--source', str(source) + '/', '--version', 'test-build'],
-                          offline_env())
-            self.assertEqual((0, ''), (r.returncode, r.stderr))
-            report = json.loads(r.stdout)
-            self.assertEqual(digests, report['raw_sha256'])
-            self.assertEqual(['SKILL.md'], report['changed_from_baseline'])
-            self.assertEqual(('not performed', 'not performed', False),
-                             (report['source_authentication'], report['runtime_validation'],
-                              report['imported']))
-            self.assertEqual(payloads, {key: (source / key).read_bytes() for key in payloads})
-            self.assertEqual(before, sorted(str(p) for p in Path(tmp).rglob('*')))
-
-    def test_missing_file_is_a_read_error_without_output(self):
-        with tempfile.TemporaryDirectory(prefix='surge-provenance-missing-') as tmp:
-            source, _payloads = self.source(tmp)
-            (source / 'assets/logo.png').unlink()
-            r = run_entry(UPDATE, ['inspect', '--source', str(source), '--version', 'test-build'],
-                          offline_env(), process=True)          # 进程边界
-            self.assertEqual((1, '', 'E_SOURCE_READ\n'), (r.returncode, r.stdout, r.stderr))
 
 
 # ── 专用打包器 ───────────────────────────────────────────────────────────────
@@ -1126,7 +1081,8 @@ class SectionServer:
 
     def current(self):
         """直接取服务端当前状态（不经被测客户端）。"""
-        with urllib.request.urlopen(self.base + '/v1/profiles/section?name=Rule', timeout=30) as response:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(self.base + '/v1/profiles/section?name=Rule', timeout=30) as response:
             doc = json.loads(response.read().decode('utf-8'))
         return doc['content'], doc['revision']
 
@@ -1346,7 +1302,9 @@ class SectionWriteTest(unittest.TestCase):
         server, backups = self.server(), self.backup_dir()
         remote = server.base.replace('127.0.0.1', '203.0.113.7')
         for env in ({}, {'SURGE_ALLOW_REMOTE': '1'}):
-            done = self.run_section(section_payload(backup_dir=backups), remote, env_extra=env)
+            with mock.patch.object(urllib.request.OpenerDirector, 'open') as request:
+                done = self.run_section(section_payload(backup_dir=backups), remote, env_extra=env)
+            request.assert_not_called()
             self.assert_stopped(done, 2, 'E_TLS_REQUIRED')
         self.assertEqual([], server.calls)
 
@@ -1376,20 +1334,31 @@ class SectionWriteTest(unittest.TestCase):
             context.load_cert_chain(cert, key)
             server._server.socket = context.wrap_socket(server._server.socket, server_side=True)
             return server, server._server.server_address[1]
-        # localhost 不是 loopback 字面量：https 非字面量主机须显式放行
-        for host, env in (('localhost', {'SURGE_ALLOW_REMOTE': '1'}), ('127.0.0.1', {'SSL_CERT_FILE': ca})):
-            with self.subTest(host=host):
-                server, port = tls_server()
-                done = self.run_section(section_payload(backup_dir=backups),
-                                        'https://%s:%d' % (host, port), env_extra=env)
-                self.assert_stopped(done, 4, 'E_READ_FAILED', SEC_PRIVATE)
-                self.assertEqual([], server.calls)
-        self.assertEqual([], os.listdir(backups))
-        trusted, port = tls_server()
+        # localhost 不是 loopback 字面量：https 非字面量主机须显式放行。
+        untrusted, port = tls_server()
         done = self.run_section(section_payload(backup_dir=backups), 'https://localhost:%d' % port,
-                                env_extra={'SSL_CERT_FILE': ca, 'SURGE_ALLOW_REMOTE': '1'})
-        self.assertEqual(0, done.returncode, done.stderr)
-        self.assertEqual(SEC_CONTENT, trusted.content)
+                                env_extra={'SURGE_ALLOW_REMOTE': '1'})
+        self.assert_stopped(done, 4, 'E_READ_FAILED', SEC_PRIVATE)
+        self.assertEqual([], untrusted.calls)
+        # LibreSSL 默认库加载不采用 SSL_CERT_FILE，仅该提供方显式加载合成 CA。
+        # OpenSSL 保留环境变量信任路径；CERT_REQUIRED 和 hostname 校验始终真实执行。
+        def load_fixture_ca(context, purpose=ssl.Purpose.SERVER_AUTH):
+            context.load_verify_locations(cafile=ca)
+
+        with contextlib.ExitStack() as trust:
+            if ssl.OPENSSL_VERSION.startswith('LibreSSL '):
+                trust.enter_context(mock.patch.object(ssl.SSLContext, 'load_default_certs', load_fixture_ca))
+            mismatch, port = tls_server()
+            done = self.run_section(section_payload(backup_dir=backups), 'https://127.0.0.1:%d' % port,
+                                    env_extra={'SSL_CERT_FILE': ca})
+            self.assert_stopped(done, 4, 'E_READ_FAILED', SEC_PRIVATE)
+            self.assertEqual([], mismatch.calls)
+            self.assertEqual([], os.listdir(backups))
+            trusted, port = tls_server()
+            done = self.run_section(section_payload(backup_dir=backups), 'https://localhost:%d' % port,
+                                    env_extra={'SSL_CERT_FILE': ca, 'SURGE_ALLOW_REMOTE': '1'})
+            self.assertEqual(0, done.returncode, done.stderr)
+            self.assertEqual(SEC_CONTENT, trusted.content)
 
     def test_t7_unknown_after_post_and_recovery_path(self):
         """POST 落地后断连：E_WRITE_UNKNOWN 且不重投；按备份 original＋当前 revision 恢复；

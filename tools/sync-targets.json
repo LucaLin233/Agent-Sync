@@ -267,7 +267,6 @@
         "skills/luno-surge/scripts/test_policy_descriptor.py",
         "skills/luno-surge/scripts/acceptance.sh",
         "skills/luno-surge/scripts/package_release.py",
-        "skills/luno-surge/scripts/update_upstream.py",
         "skills/luno-surge/LICENSE.openminis.txt",
         "skills/luno-surge/LICENSE.openminis-ios-dev.txt",
         "skills/luno-surge/references/plugin-authoring.md"
