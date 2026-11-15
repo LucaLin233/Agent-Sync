@@ -13,8 +13,9 @@
 
 失败码是封闭集合，不回显正文、资源、异常或外部 stderr：
   bad_args / bad_evidence_json / bad_evidence_shape / bad_evidence_encoding /
-  duplicate_object / duplicate_path / duplicate_request / extra_object / association_error /
-  object_not_registered / registry_invalid / repo_unusable / git_error
+  duplicate_object / duplicate_path / duplicate_request / extra_object / extra_call /
+  association_error / object_not_registered / registry_invalid / repo_unusable / git_error /
+  content_contract_error
 内嵌记录复用 tools/auth-call.py 的资源动作码（含 http_status_NNN 与 missing_variable:NAME／bad_credential:NAME）。
 """
 import argparse
@@ -129,7 +130,7 @@ def _git_config(repo, key):
     raise GitError()
 
 
-def _repo_ready(repo):
+def _repo_ready(repo, version):
     """完整可信本地仓：无 promisor/partial clone，禁 lazy fetch 与 replace。"""
     if not os.path.isdir(repo):
         raise GitError()
@@ -137,6 +138,9 @@ def _repo_ready(repo):
     if promisor:
         raise GitError()
     _git(repo, ["rev-parse", "--git-dir"])
+    # 只接受 commit 本身；不用 ^{commit} 把 tag 解引用成 commit。
+    if _git(repo, ["cat-file", "-t", version]).strip() != b"commit":
+        raise GitError()
 
 
 _BLOBS = {}
@@ -193,6 +197,13 @@ def _str(value, nonempty=False):
     return value
 
 
+class _Skip(Exception):
+    """局部缺字段：已记入 _MISSING，继续遍历同层其余对象。"""
+
+
+_MISSING = []
+
+
 def _keys(node, keys, where):
     if not isinstance(node, dict):
         raise Reject("bad_evidence_shape")
@@ -200,25 +211,50 @@ def _keys(node, keys, where):
         raise Reject("bad_evidence_shape")
     missing = [where + k for k in keys if k not in node]
     if missing:
-        raise Reject("incomplete", missing, exit=3)
+        _MISSING.extend(missing)
+        raise _Skip()
     return node
 
 
 def _validate(evidence):
-    """严格形状检查：多余键/错类型 rc2，缺必需字段 rc3。"""
+    """严格形状检查：多余键/错类型 rc2；缺必需字段收集齐全后 rc3（不因首处缺失掩盖其余）。"""
+    _MISSING.clear()
+    try:
+        _validate_all(evidence)
+    except _Skip:
+        pass
+    if _MISSING:
+        raise Reject("incomplete", list(_MISSING), exit=3)
+    return _keys(evidence, TOP_KEYS, "")
+
+
+def _validate_all(evidence):
     top = _keys(evidence, TOP_KEYS, "")
     if type(top["schemaVersion"]) is not int or top["schemaVersion"] != 1:
         raise Reject("bad_evidence_shape")
-    obs = _keys(top["observation"], OBS_KEYS, "observation.")
-    for key in ("id", "instanceRef", "sourceVersion", "sourceBasis"):
-        _str(obs[key], nonempty=True)
-    if _time(obs["finishedAt"]) < _time(obs["startedAt"]):
-        raise Reject("bad_evidence_shape")
+    try:
+        obs = _keys(top["observation"], OBS_KEYS, "observation.")
+        for key in ("id", "instanceRef", "sourceVersion", "sourceBasis"):
+            _str(obs[key], nonempty=True)
+        if _time(obs["finishedAt"]) < _time(obs["startedAt"]):
+            raise Reject("bad_evidence_shape")
+    except _Skip:
+        obs = None
     if not isinstance(top["objects"], list):
         raise Reject("bad_evidence_shape")
     seen = set()
+    if obs is not None:
+        pass
     for i, item in enumerate(top["objects"]):
         where = "objects[%d]." % i
+        try:
+            _validate_object(item, where, seen)
+        except _Skip:
+            continue
+
+
+def _validate_object(item, where, seen):
+    if True:
         obj = _keys(item, OBJ_KEYS, where)
         name = _str(obj["object"], nonempty=True)
         if name in seen:
@@ -258,7 +294,6 @@ def _validate(evidence):
             if pair in pairs:
                 raise Reject("duplicate_request")
             pairs.add(pair)
-    return top
 
 
 def _rel_path(path):
@@ -277,8 +312,8 @@ def _record(call, auth):
         raw = call["stderr"]
         if not raw.endswith("\n") or raw.count("\n") != 1:
             raise Reject("bad_shape")
-        doc = _strict_json(raw[:-1].encode("utf-8"))
-        if set(doc) != {"ok", "error"} or doc["ok"] is not False:
+        doc = _strict_json(raw[:-1].encode("utf-8"), "bad_shape")
+        if not isinstance(doc, dict) or set(doc) != {"ok", "error"} or doc["ok"] is not False:
             raise Reject("bad_shape")
         code = doc["error"]
         if not isinstance(code, str):
@@ -289,7 +324,7 @@ def _record(call, auth):
             return "error", code
         if re.fullmatch(r"http_status_[0-9]{3}", code):
             return "error", code
-        if re.fullmatch(r"(missing_variable|bad_credential):[A-Z][A-Z0-9_]{0,63}", code):
+        if re.fullmatch(r"(missing_variable|bad_credential):(LOBEHUB_SERVER|LOBEHUB_CLI_API_KEY)", code):
             return "error", code
         raise Reject("bad_shape")
     if call["stderr"] != "":
@@ -298,7 +333,7 @@ def _record(call, auth):
     if not raw.endswith("\n") or raw.count("\n") != 1:
         raise Reject("bad_shape")
     doc = _strict_json(raw[:-1].encode("utf-8"), "bad_shape")
-    if set(doc) != {"ok", "action", "resource"} or doc["ok"] is not True \
+    if not isinstance(doc, dict) or set(doc) != {"ok", "action", "resource"} or doc["ok"] is not True \
             or doc["action"] != "skill-resource":
         raise Reject("bad_shape")
     data = doc["resource"]
@@ -321,79 +356,84 @@ def _record(call, auth):
     return "ok", (data["path"], blob)
 
 
-def _compare(obj, evidence_obj, registry, repo, version, auth):
-    """单对象比对；返回 (有差异, 错误码, 缺证路径)。"""
+def _compare(entry, registry, repo, version, auth):
+    """单对象比对：先身份，再集合，再正文/元数据/资源记录；每步只记实际做过的检查。"""
     body = _load("lh_body_contract", "body_contract.py")
-    rid = registry["ends"]["lobehub"]["id"]
-    record = {"id": rid, "differences": [], "missingEvidence": [], "errors": [],
-              "checked": [], "resourcePaths": {"missing": [], "extra": []}}
-    source = registry["source"]
-    skill_md = _blob(repo, version, source)
-    content = body.body_bytes(skill_md)
-    name = body.fm_get(skill_md, "name")
-    description = body.fm_get(skill_md, "description")
-
-    rel = []
-    for path in registry["resources"]:
-        prefix = source.rsplit("/", 1)[0] + "/"
-        if not path.startswith(prefix) or path == source:
-            raise Reject("registry_invalid")
-        rel.append(_rel_path(path[len(prefix):]))
-    expected_paths = set(rel)
-
-    proj = evidence_obj["projection"]
-    site_paths = set()
-    for path in evidence_obj["resourcePaths"]:
-        site_paths.add(_rel_path(path))
-
-    record["resourcePaths"]["missing"] = sorted(expected_paths - site_paths)
-    record["resourcePaths"]["extra"] = sorted(site_paths - expected_paths)
-    for path in record["resourcePaths"]["missing"]:
-        record["differences"].append("resource:" + path)
-    for path in record["resourcePaths"]["extra"]:
-        record["differences"].append("resource:" + path)
-
+    lh_id = registry["ends"]["lobehub"]["id"]
+    proj = entry["projection"]
+    record = {"object": registry["id"], "id": proj["id"], "differences": [],
+              "missingEvidence": [], "errors": [], "checked": [],
+              "resourcePaths": {"missing": [], "extra": []}}
     record["checked"].append("id")
-    if proj["id"] != rid:
+    if proj["id"] != lh_id:
+        # 身份差异：写实际 ID，停止该对象的内容与集合比较。
         record["differences"].append("id")
-        record["resourcePaths"] = {"missing": [], "extra": []}
         return record
 
-    # 身份匹配后才比元数据与正文；缺字段是缺证，null 与空串都是差异。
-    for field, expected in (("name", name), ("description", description)):
+    source = registry["source"]
+    try:
+        skill_md = _blob(repo, version, source)
+        content = body.body_bytes(skill_md)
+        name = body.fm_get(skill_md, "name")
+        description = body.fm_get(skill_md, "description")
+    except body.ContractError:
+        record["errors"].append("content_contract_error")
+        return record
+
+    prefix = source.rsplit("/", 1)[0] + "/"
+    expected = set()
+    for path in registry["resources"]:
+        if not path.startswith(prefix) or path == source:
+            raise Reject("registry_invalid")
+        expected.add(_rel_path(path[len(prefix):]))
+    site = {_rel_path(path) for path in entry["resourcePaths"]}
+
+    record["checked"].append("resourcePaths")
+    record["resourcePaths"]["missing"] = sorted(expected - site)
+    record["resourcePaths"]["extra"] = sorted(site - expected)
+    for path in record["resourcePaths"]["missing"] + record["resourcePaths"]["extra"]:
+        record["differences"].append("resource:" + path)
+
+    for field, want in (("name", name), ("description", description)):
         record["checked"].append(field)
-        if expected is body.MISSING:
+        if want is body.MISSING:
             record["missingEvidence"].append(field)
-        elif proj[field] != (None if expected is None else str(expected)):
+        elif proj[field] != (None if want is None else str(want)):
             record["differences"].append(field)
 
     record["checked"].append("identifier")
-    want = None
+    ident = None
     if registry["id"] in IDENT_SUPPORTED and name == registry["id"] \
             and registry.get("installSource") == INSTALL_PREFIX + registry["id"]:
-        want = IDENT_PREFIX + registry["id"]
-    if want is None:
+        ident = IDENT_PREFIX + registry["id"]
+    if ident is None:
         record["missingEvidence"].append("identifier")
-    elif proj["identifier"] != want:
+    elif proj["identifier"] != ident:
         record["differences"].append("identifier")
 
     record["checked"].append("content")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
-        raise Reject("registry_invalid") from None
-    if proj["content"] != text:
-        record["differences"].append("content")
+        record["errors"].append("content_contract_error")
+        record["checked"].remove("content")
+    else:
+        if proj["content"] != text:
+            record["differences"].append("content")
 
+    # 只为登记∩现场路径收记录；交集外的记录一律拒绝，其正文不读不比。
+    required = expected & site
     calls = {}
-    for call in evidence_obj["calls"]:
-        pair = (call["request"]["id"], call["request"]["path"])
-        if pair[0] != rid:
-            raise Reject("association_error")
-        calls.setdefault(pair[1], []).append(call)
-    for path in sorted(expected_paths & site_paths):
+    for call in entry["calls"]:
+        path = _rel_path(call["request"]["path"])
+        if call["request"]["id"] != lh_id:
+            record["errors"].append("association_error")
+        elif path not in required:
+            record["errors"].append("extra_call")
+        else:
+            calls.setdefault(path, []).append(call)
+    for path in sorted(required):
         field = "resource:" + path
-        record["checked"].append(field)
         hits = calls.get(path, [])
         if not hits:
             record["missingEvidence"].append(field)
@@ -408,63 +448,72 @@ def _compare(obj, evidence_obj, registry, repo, version, auth):
             continue
         got_path, blob = payload
         if got_path != path:
-            raise Reject("association_error")
-        if blob != _blob(repo, version, source.rsplit("/", 1)[0] + "/" + path):
+            record["errors"].append("association_error")
+            continue
+        record["checked"].append(field)
+        if blob != _blob(repo, version, prefix + path):
             record["differences"].append(field)
     return record
 
 
+class _Parser(argparse.ArgumentParser):
+    """参数错误只映射固定码，不向 stderr 打印 usage/原始参数。"""
+
+    def error(self, message):
+        raise Reject("bad_args")
+
+
+def _empty(version, code):
+    return emit({"gitVersion": version, "status": "error", "objects": [],
+                 "missingEvidence": [], "errors": [code]}, 2)
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="lh-verify", add_help=True, allow_abbrev=False)
+    parser = _Parser(prog="lh-verify", add_help=True, allow_abbrev=False)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--git-version", required=True)
     parser.add_argument("--object", action="append", default=[])
     parser.add_argument("--evidence", required=True)
     try:
         args = parser.parse_args(argv)
-    except SystemExit:
-        return emit({"gitVersion": None, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["bad_args"]}, 2)
+    except Reject:
+        return _empty(None, "bad_args")
+    except SystemExit as exc:  # --help：正常帮助，不产出结果 JSON
+        return exc.code or 0
     version = args.git_version
     if not HEX40_RE.match(version or "") or not args.object \
             or len(set(args.object)) != len(args.object) or not args.evidence:
-        return emit({"gitVersion": None, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["bad_args"]}, 2)
+        return _empty(None, "bad_args")
     try:
         with open(args.evidence, "rb") as handle:
             evidence = _validate(_strict_json(handle.read()))
     except OSError:
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["bad_evidence_json"]}, 2)
+        return _empty(version, "bad_evidence_json")
     except Reject as exc:
         if exc.exit == 3:
             return emit({"gitVersion": version, "status": "incomplete", "objects": [],
                          "missingEvidence": exc.paths, "errors": []}, 3)
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": [exc.code]}, 2)
+        return _empty(version, exc.code)
 
     try:
         auth = _load("lh_auth_call", "auth-call.py")
-        _repo_ready(args.repo)
+        _repo_ready(args.repo, version)
         _prefetch(args.repo, version, ["tools/sync-targets.json"])
         raw_registry = _blob(args.repo, version, "tools/sync-targets.json")
     except GitError:
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["repo_unusable"]}, 2)
+        return _empty(version, "repo_unusable")
     try:
         registry = json.loads(raw_registry.decode("utf-8"))
     except (ValueError, UnicodeError):
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["registry_invalid"]}, 2)
-
-    selected = []
-    known = {}
+        return _empty(version, "registry_invalid")
     if not isinstance(registry, dict) or not isinstance(registry.get("objects"), list):
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["registry_invalid"]}, 2)
+        return _empty(version, "registry_invalid")
+
+    known = {}
     for item in registry["objects"]:
         if isinstance(item, dict) and isinstance(item.get("id"), str):
             known[item["id"]] = item
+    selected = []
     for name in args.object:
         item = known.get(name)
         if not item or item.get("type") != "skill" \
@@ -475,55 +524,45 @@ def main(argv=None):
                 or not item["ends"]["lobehub"]["id"] \
                 or not isinstance(item.get("source"), str) \
                 or not isinstance(item.get("resources"), list):
-            return emit({"gitVersion": version, "status": "error", "objects": [],
-                         "missingEvidence": [], "errors": ["object_not_registered"]}, 2)
+            return _empty(version, "object_not_registered")
         selected.append(item)
     try:
         _prefetch(args.repo, version,
                   [item["source"] for item in selected] +
                   [path for item in selected for path in item["resources"]])
     except GitError:
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["repo_unusable"]}, 2)
-    extra = {item["object"] for item in evidence["objects"]} - set(args.object)
-    if extra:
-        return emit({"gitVersion": version, "status": "error", "objects": [],
-                     "missingEvidence": [], "errors": ["extra_object"]}, 2)
+        return _empty(version, "repo_unusable")
+    if {item["object"] for item in evidence["objects"]} - set(args.object):
+        return _empty(version, "extra_object")
 
     by_id = {item["object"]: item for item in evidence["objects"]}
     obs = evidence["observation"]
-    for item in evidence["objects"]:
-        if item["observationId"] != obs["id"] or item["instanceRef"] != obs["instanceRef"]:
-            return emit({"gitVersion": version, "status": "error", "objects": [],
-                         "missingEvidence": [], "errors": ["association_error"]}, 2)
-        for call in item["calls"]:
-            if call["observationId"] != obs["id"] or call["instanceRef"] != obs["instanceRef"]:
-                return emit({"gitVersion": version, "status": "error", "objects": [],
-                             "missingEvidence": [], "errors": ["association_error"]}, 2)
-
-    results = []
-    errors = []
+    results, errors = [], []
     for item in selected:
         entry = by_id.get(item["id"])
         if entry is None:
-            results.append({"object": item["id"], "id": None, "checked": [],
-                            "differences": [], "missingEvidence": ["objects[" + item["id"] + "]"],
-                            "errors": [], "resourcePaths": {"missing": [], "extra": []}})
-            continue
-        try:
-            record = _compare(item, entry, item, args.repo, version, auth)
-        except GitError:
-            return emit({"gitVersion": version, "status": "error", "objects": [],
-                         "missingEvidence": [], "errors": ["repo_unusable"]}, 2)
-        except Reject as exc:
-            if exc.exit == 3:
-                record = {"object": item["id"], "id": item["id"], "checked": [],
-                          "differences": [], "missingEvidence": exc.paths, "errors": [],
+            record = {"object": item["id"], "id": None, "checked": [], "differences": [],
+                      "missingEvidence": ["objects[" + item["id"] + "]"], "errors": [],
+                      "resourcePaths": {"missing": [], "extra": []}}
+        else:
+            labels_ok = entry["observationId"] == obs["id"] \
+                and entry["instanceRef"] == obs["instanceRef"] \
+                and all(call["observationId"] == obs["id"]
+                        and call["instanceRef"] == obs["instanceRef"] for call in entry["calls"])
+            try:
+                record = _compare(entry, item, args.repo, version, auth) if labels_ok \
+                    else {"object": item["id"], "id": entry["projection"]["id"], "checked": [],
+                          "differences": [], "missingEvidence": [],
+                          "errors": ["association_error"],
                           "resourcePaths": {"missing": [], "extra": []}}
-            else:
-                return emit({"gitVersion": version, "status": "error", "objects": [],
-                             "missingEvidence": [], "errors": [exc.code]}, 2)
-        record["object"] = item["id"]
+            except GitError:
+                return _empty(version, "repo_unusable")
+            except Reject as exc:
+                # 单对象的记录问题不抹掉此前对象的结果。
+                record = {"object": item["id"], "id": None, "checked": [], "differences": [],
+                          "missingEvidence": exc.paths if exc.exit == 3 else [],
+                          "errors": [] if exc.exit == 3 else [exc.code],
+                          "resourcePaths": {"missing": [], "extra": []}}
         results.append({key: record[key] for key in
                         ("object", "id", "checked", "differences", "missingEvidence",
                          "errors", "resourcePaths")})
@@ -533,12 +572,11 @@ def main(argv=None):
 
     missing = [result["object"] + ":" + path for result in results
                for path in result["missingEvidence"]]
-    differences = [item["object"] for item in results if item["differences"]]
     if errors:
         status, code = "error", 2
     elif missing:
         status, code = "incomplete", 3
-    elif differences:
+    elif [result for result in results if result["differences"]]:
         status, code = "different", 1
     else:
         status, code = "match", 0

@@ -166,6 +166,12 @@ class Fixture:
         FILES['skills/luno-core/references/a.md'] = b'alpha changed\n'
         FILES['skills/luno-core/SKILL.md'] = (CORE_SKILL + 'extra\n').encode()
         self.c2 = snapshot(self.repo, 'resource and body')
+        FILES['skills/luno-core/SKILL.md'] = (
+            '---\nname: luno-core\nname: dup\ndescription: 核心\n---\nbody\n').encode()
+        self.c3 = snapshot(self.repo, 'contract violation')
+        git(self.repo, 'tag', '-a', '-m', 'tagged', 'v1')
+        self.tag = git(self.repo, 'rev-parse', 'v1')
+        self.tree = git(self.repo, 'rev-parse', 'HEAD^{tree}')
         FILES['skills/luno-core/SKILL.md'] = CORE_SKILL.encode()
         FILES['skills/luno-core/references/a.md'] = b'alpha\n'
         self.clean = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
@@ -173,24 +179,7 @@ class Fixture:
                       'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1'}
         self.seq = 0
 
-    def run(self, ev, version=None, objects=('luno-core',), cwd=None, args=None):
-        self.seq += 1
-        path = os.path.join(self.root, 'ev-%02d.json' % self.seq)
-        with open(path, 'w', encoding='utf-8') as handle:
-            handle.write(ev if isinstance(ev, str) else json.dumps(ev))
-        argv = [sys.executable, '-I', '-B', str(TOOL), '--repo', self.repo,
-                '--git-version', version or self.c1]
-        for name in objects:
-            argv += ['--object', name]
-        argv += ['--evidence', path] if args is None else args + ['--evidence', path]
-        proc = subprocess.run(argv, capture_output=True, env=dict(self.clean),
-                              cwd=cwd or self.root)
-        text = proc.stdout.decode('utf-8')
-        self.assert_single = (text.count('\n'), text.endswith('\n'))
-        return proc.returncode, json.loads(text), text, proc
-
-    def run_fast(self, ev, version=None, objects=('luno-core',), cwd=None, args=None):
-        """进程内调用同一入口：只有进程边界与 -I 由 run() 的真实子进程守住。"""
+    def run(self, ev, version=None, objects=('luno-core',), cwd=None, args=None, real=False):
         self.seq += 1
         path = os.path.join(self.root, 'ev-%02d.json' % self.seq)
         with open(path, 'w', encoding='utf-8') as handle:
@@ -199,11 +188,16 @@ class Fixture:
         for name in objects:
             argv += ['--object', name]
         argv += ['--evidence', path] if args is None else args + ['--evidence', path]
-        out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            rc = V.main(argv)
-        text = out.getvalue()
-        return rc, json.loads(text), text, err.getvalue()
+        if not real:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                rc = V.main(argv)
+            text = out.getvalue()
+            return rc, json.loads(text), text, ''
+        proc = subprocess.run([sys.executable, '-I', '-B', str(TOOL)] + argv,
+                              capture_output=True, env=dict(self.clean), cwd=cwd or self.root)
+        text = proc.stdout.decode('utf-8')
+        return proc.returncode, json.loads(text) if text else {}, text, proc
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
@@ -224,7 +218,7 @@ def tearDownModule():
 class Verify(unittest.TestCase):
 
     def test_match(self):
-        rc, doc, text, proc = F.run(evidence([full_core()]))
+        rc, doc, text, proc = F.run(evidence([full_core()]), real=True)
         self.assertEqual((rc, doc['status'], proc.stderr), (0, 'match', b''))
         self.assertEqual((text.count('\n'), text.endswith('\n')), (1, True))
         self.assertEqual(list(doc), ['gitVersion', 'status', 'objects', 'missingEvidence', 'errors'])
@@ -233,36 +227,36 @@ class Verify(unittest.TestCase):
                                     'missingEvidence', 'errors', 'resourcePaths'])
         self.assertEqual(doc['gitVersion'], F.c1)
         self.assertEqual(sorted(obj['checked']), sorted(
-            ['id', 'name', 'description', 'identifier', 'content'] +
+            ['id', 'name', 'description', 'identifier', 'content', 'resourcePaths'] +
             ['resource:' + p for p in CORE_PATHS]))
         self.assertNotIn('alpha', text)
 
     def test_cli_isolation_and_order(self):
         ev = evidence([full_core()])
-        rc, doc, _, _ = F.run(ev, objects=('luno-core',), cwd='/')
+        rc, doc, _, _ = F.run(ev, objects=('luno-core',), cwd='/', real=True)
         self.assertEqual((rc, doc['status']), (0, 'match'))
+        rc, doc, _, _ = F.run(ev, args=['--bogus'], real=True)
+        self.assertEqual((rc, doc['errors']), (2, ['bad_args']))
         rc, doc, _, _ = F.run(ev, args=['--bogus'])
         self.assertEqual((rc, doc['errors']), (2, ['bad_args']))
-        rc, doc, _, _ = F.run_fast(ev, args=['--bogus'])
+        rc, doc, _, _ = F.run(ev, objects=('luno-core', 'luno-core'))
         self.assertEqual((rc, doc['errors']), (2, ['bad_args']))
-        rc, doc, _, _ = F.run_fast(ev, objects=('luno-core', 'luno-core'))
+        rc, doc, _, _ = F.run(ev, version=F.c1.upper())
         self.assertEqual((rc, doc['errors']), (2, ['bad_args']))
-        rc, doc, _, _ = F.run_fast(ev, version=F.c1.upper())
-        self.assertEqual((rc, doc['errors']), (2, ['bad_args']))
-        rc, doc, _, _ = F.run_fast(ev, objects=('luno-core', 'ghost'))
+        rc, doc, _, _ = F.run(ev, objects=('luno-core', 'ghost'))
         self.assertEqual((rc, doc['errors']), (2, ['object_not_registered']))
         self.assertEqual(git(F.repo, 'status', '--porcelain'), '')
 
     def test_commit_differences(self):
-        rc, doc, _, _ = F.run_fast(evidence([full_core()]), version=F.c2)
+        rc, doc, _, _ = F.run(evidence([full_core()]), version=F.c2)
         self.assertEqual((rc, doc['status']), (1, 'different'))
         self.assertEqual(doc['objects'][0]['differences'],
                          ['content', 'resource:references/a.md'])
-        self.assertEqual(F.run_fast(evidence([full_core()]), version='0' * 40)[0], 2)
+        self.assertEqual(F.run(evidence([full_core()]), version='0' * 40)[0], 2)
 
     def test_missing_and_extra_sets(self):
         entry = core_entry(paths=CORE_PATHS[:2] + ['references/extra.md'])
-        rc, doc, _, _ = F.run_fast(evidence([entry]))
+        rc, doc, _, _ = F.run(evidence([entry]))
         obj = doc['objects'][0]
         self.assertEqual((rc, doc['status']), (1, 'different'))
         self.assertEqual(obj['resourcePaths'], {'missing': ['references/bin.dat',
@@ -271,35 +265,36 @@ class Verify(unittest.TestCase):
         self.assertEqual(obj['missingEvidence'], [])
         dropped = core_entry(calls=[record(p, FILES['skills/luno-core/' + p])
                                     for p in CORE_PATHS[:2]])
-        rc, doc, _, _ = F.run_fast(evidence([dropped]))
+        rc, doc, _, _ = F.run(evidence([dropped]))
         self.assertEqual(rc, 3)
         self.assertEqual(doc['missingEvidence'], ['luno-core:resource:references/bin.dat',
                                                   'luno-core:resource:references/empty.md'])
         extra_call = record('references/extra.md', b'not accepted\n')
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[
             record(p, FILES['skills/luno-core/' + p]) for p in CORE_PATHS] + [extra_call])]))
-        self.assertEqual((rc, doc['status']), (0, 'match'))
-        rc, doc, _, _ = F.run_fast(evidence([]))
+        self.assertEqual((rc, doc['errors']), (2, ['extra_call']))
+        self.assertEqual(doc['objects'][0]['checked'].count('resource:references/a.md'), 1)
+        rc, doc, _, _ = F.run(evidence([]))
         self.assertEqual((rc, doc['missingEvidence']), (3, ['luno-core:objects[luno-core]']))
 
     def test_bytes_and_integrity(self):
         # CRLF 不归一：只把记录正文换成 LF 版，差异必须只落在该资源。
         entry = full_core()
         entry['calls'][1] = record('references/crlf.md', b'crlf\nline\n')
-        rc, doc, _, _ = F.run_fast(evidence([entry]))
+        rc, doc, _, _ = F.run(evidence([entry]))
         self.assertEqual((rc, doc['status']), (1, 'different'))
         self.assertEqual(doc['objects'][0]['differences'], ['resource:references/crlf.md'])
         broken = record('references/a.md', b'alpha\n')
         broken['stdout'] = broken['stdout'].replace('alpha', 'alpho')
         entry = full_core()
         entry['calls'][0] = broken
-        rc, doc, _, _ = F.run_fast(evidence([entry]))
+        rc, doc, _, _ = F.run(evidence([entry]))
         self.assertEqual((rc, doc['errors']), (2, ['bad_integrity']))
         bad = record('references/a.md', b'alpha\n')
         bad['stdout'] = bad['stdout'].replace('"utf8"', '"hex"')
         entry = full_core()
         entry['calls'][0] = bad
-        rc, doc, _, _ = F.run_fast(evidence([entry]))
+        rc, doc, _, _ = F.run(evidence([entry]))
         self.assertEqual((rc, doc['errors']), (2, ['bad_fields']))
 
     def test_metadata_and_identifier(self):
@@ -308,85 +303,150 @@ class Verify(unittest.TestCase):
                  (dict(identifier='other'), 1, ['identifier']),
                  (dict(content='# Body\nline'), 1, ['content'])]
         for over, rc_want, field in cases:
-            rc, doc, _, _ = F.run_fast(evidence([core_entry(**over)]))
+            rc, doc, _, _ = F.run(evidence([core_entry(**over)]))
             self.assertEqual((rc, doc['objects'][0]['differences']), (rc_want, field))
         extra = {'object': 'extra-skill', 'observationId': OBS, 'instanceRef': ALIAS,
                  'projection': {'id': 'skl_extra', 'name': 'extra-skill',
                                 'description': '额外', 'identifier': None, 'content': 'body\r\n'},
                  'resourcePaths': ['references/x.md'],
                  'calls': [record('references/x.md', b'x\n', ident='extra-skill')]}
-        rc, doc, _, _ = F.run_fast(evidence([extra]), objects=('extra-skill',))
+        rc, doc, _, _ = F.run(evidence([extra]), objects=('extra-skill',))
         self.assertEqual((rc, doc['missingEvidence']), (3, ['extra-skill:identifier']))
-        rc, doc, _, _ = F.run_fast(evidence([dict(extra, projection=dict(extra['projection'],
+        rc, doc, _, _ = F.run(evidence([dict(extra, projection=dict(extra['projection'],
                                                                    id='skl_other'))]),
                               objects=('extra-skill',))
         self.assertEqual((rc, doc['objects'][0]['differences']), (1, ['id']))
+        self.assertEqual(doc['objects'][0]['id'], 'skl_other')
+        self.assertEqual(doc['objects'][0]['checked'], ['id'])
         self.assertEqual(doc['objects'][0]['resourcePaths'], {'missing': [], 'extra': []})
 
     def test_records(self):
         ok = record('references/a.md', b'alpha\n')
         trimmed = dict(ok, stdout=ok['stdout'].rstrip('\n'))
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[trimmed])]))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[trimmed])]))
         self.assertEqual((rc, doc['errors']), (2, ['bad_shape']))
         unknown = dict(ok, exitCode=2, stdout='',
                        stderr=json.dumps({'ok': False, 'error': 'some text'}) + '\n')
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[unknown])]))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[unknown])]))
         self.assertEqual((rc, doc['errors']), (2, ['bad_shape']))
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[failure('references/a.md')])]))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[failure('references/a.md')])]))
         self.assertEqual((rc, doc['errors']), (2, ['transport_error']))
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[failure('references/a.md', 'http_status_503')])]))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[failure('references/a.md', 'http_status_503')])]))
         self.assertEqual((rc, doc['errors']), (2, ['http_status_503']))
 
     def test_association(self):
-        rc, doc, _, _ = F.run_fast(evidence([dict(full_core(), observationId='OTHER')]))
+        rc, doc, _, _ = F.run(evidence([dict(full_core(), observationId='OTHER')]))
         self.assertEqual((rc, doc['errors']), (2, ['association_error']))
         call = record('references/a.md', b'alpha\n')
         call['instanceRef'] = 'other-alias'
-        rc, doc, _, _ = F.run_fast(evidence([core_entry(calls=[call])]))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[call])]))
         self.assertEqual((rc, doc['errors']), (2, ['association_error']))
         moved = record('references/a.md', b'alpha\n')
         moved['request']['path'] = 'references/crlf.md'
         entry = full_core()
         entry['calls'][1] = moved
-        rc, doc, _, _ = F.run_fast(evidence([entry]))
+        rc, doc, _, _ = F.run(evidence([entry]))
         self.assertEqual((rc, doc['errors']), (2, ['association_error']))
+
+
+    def test_reject_non_accepted_calls(self):
+        bad = failure('references/a.md')
+        bad['request']['path'] = 'references/../x'
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[bad])]))
+        self.assertEqual((rc, doc['errors']), (2, ['bad_path']))
+        self.assertNotIn('..', json.dumps(doc))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[record('references/extra.md',
+                                                                 b'x\n')])]))
+        self.assertEqual((rc, doc['errors']), (2, ['extra_call']))
+        self.assertEqual(doc['objects'][0]['checked'].count('resource:references/a.md'), 0)
+
+    def test_credential_variable_names(self):
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[
+            failure('references/a.md', 'missing_variable:LOBEHUB_CLI_API_KEY')])]))
+        self.assertEqual((rc, doc['errors']), (2, ['missing_variable:LOBEHUB_CLI_API_KEY']))
+        rc, doc, _, _ = F.run(evidence([core_entry(calls=[
+            failure('references/a.md', 'missing_variable:GH_TOKEN')])]))
+        self.assertEqual((rc, doc['errors']), (2, ['bad_shape']))
+
+    def test_version_must_be_commit(self):
+        for version in (F.tree, F.tag):
+            rc, doc, _, _ = F.run(evidence([full_core()]), version=version)
+            self.assertEqual((rc, doc['errors']), (2, ['repo_unusable']), version)
+        rc, doc, _, _ = F.run(evidence([full_core()]), version=F.c3)
+        self.assertEqual((rc, doc['errors']), (2, ['content_contract_error']))
+
+    def test_coexisting_findings(self):
+        diff = core_entry(description='x')
+        drop = {'object': 'extra-skill', 'observationId': OBS, 'instanceRef': ALIAS,
+                'projection': {'id': 'skl_extra', 'name': 'extra-skill',
+                               'description': '额外', 'identifier': None, 'content': 'body\r\n'},
+                'resourcePaths': ['references/x.md'], 'calls': []}
+        rc, doc, _, _ = F.run(evidence([diff, drop]), objects=('luno-core', 'extra-skill'))
+        self.assertEqual((rc, doc['status']), (3, 'incomplete'))
+        self.assertEqual(doc['objects'][0]['differences'], ['description'])
+        self.assertEqual(doc['missingEvidence'], ['extra-skill:identifier',
+                                                  'extra-skill:resource:references/x.md'])
+        broke = core_entry(description='x')
+        broke['calls'][0] = failure('references/a.md', 'transport_error')
+        rc, doc, _, _ = F.run(evidence([broke]))
+        self.assertEqual((rc, doc['status'], doc['errors']), (2, 'error', ['transport_error']))
+        self.assertEqual(len(doc['objects']), 1)
+        self.assertEqual(doc['objects'][0]['differences'], ['description'])
 
 
 class Evidence(unittest.TestCase):
 
+    def test_help_and_bad_args(self):
+        proc = subprocess.run([sys.executable, '-I', '-B', str(TOOL), '--help'],
+                             capture_output=True, env=dict(F.clean))
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn(b'--git-version', proc.stdout)
+        proc = subprocess.run([sys.executable, '-I', '-B', str(TOOL), '--repo'],
+                             capture_output=True, env=dict(F.clean))
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(proc.stderr, b'')
+        self.assertEqual(json.loads(proc.stdout.decode())['errors'], ['bad_args'])
+
     def test_strict_json(self):
         text = json.dumps(evidence([full_core()]), ensure_ascii=False)
         dup = text.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1')
-        rc, doc, _, _ = F.run_fast(dup)
+        rc, doc, _, _ = F.run(dup)
         self.assertEqual((rc, doc['errors']), (2, ['bad_evidence_json']))
-        rc, doc, _, _ = F.run_fast(text.replace('"schemaVersion": 1', '"schemaVersion": NaN'))
+        rc, doc, _, _ = F.run(text.replace('"schemaVersion": 1', '"schemaVersion": NaN'))
         self.assertEqual((rc, doc['errors']), (2, ['bad_evidence_json']))
-        rc, doc, _, _ = F.run_fast(text.replace('"schemaVersion": 1', '"schemaVersion": true'))
+        rc, doc, _, _ = F.run(text.replace('"schemaVersion": 1', '"schemaVersion": true'))
         self.assertEqual((rc, doc['errors']), (2, ['bad_evidence_shape']))
-        rc, doc, _, _ = F.run_fast(json.loads(text) | {'extra': 1})
+        rc, doc, _, _ = F.run(json.loads(text) | {'extra': 1})
         self.assertEqual((rc, doc['errors']), (2, ['bad_evidence_shape']))
 
     def test_missing_and_ordering(self):
         doc = evidence([full_core()])
         del doc['observation']['finishedAt']
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['status'], out['missingEvidence']),
                          (3, 'incomplete', ['observation.finishedAt']))
+        doc = evidence([full_core(), dict(full_core(), object='extra-skill')])
+        del doc['objects'][1]['projection']['content']
+        del doc['observation']['sourceBasis']
+        rc, out, _, _ = F.run(doc)
+        self.assertEqual(rc, 3)
+        self.assertEqual(out['missingEvidence'],
+                         ['observation.sourceBasis', 'objects[1].projection.content'])
         doc = evidence([full_core()])
         doc['observation']['finishedAt'] = '2026-11-15T07:00:00Z'
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['errors']), (2, ['bad_evidence_shape']))
         doc = evidence([full_core(), full_core()])
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['errors']), (2, ['duplicate_object']))
         doc = evidence([core_entry(paths=CORE_PATHS + ['references/a.md'])])
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['errors']), (2, ['duplicate_path']))
         doc = evidence([core_entry(calls=[record('references/a.md', b'alpha\n')] * 2)])
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['errors']), (2, ['duplicate_request']))
         doc = evidence([full_core(), dict(full_core(), object='extra-skill')])
-        rc, out, _, _ = F.run_fast(doc)
+        rc, out, _, _ = F.run(doc)
         self.assertEqual((rc, out['errors']), (2, ['extra_object']))
 
 
