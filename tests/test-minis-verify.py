@@ -2,11 +2,13 @@
 """tools/minis-verify.py 本端纵切片（契约见 README〈Minis 本端只读验收〉）：真实 -I -B CLI、Git
 双提交＋pack、字节与模式、SOUL/子代理口径、包集合与枚举上限、安全文件边界接缝、投影、聚合。
 
-为什么必须这么重（入口约 12 s，超 10 s 设计预算；本批发布者已接受该例外）：每个用例都要经真实
-`-I -B` 子进程入口、真实 `git init/commit/gc` 与真实系统调用的打开/重开接缝，M1/M3 还要各自的
-独立仓库与站点树；这些是身份、模式与「读后重开」判据的唯一可观察来源，换成进程内调用或共享夹具
-会让进程边界与仓库身份失去覆盖。可降级方向（未采用，需发布者裁定）：M1/M3 的子进程调用改为进程内
-调用并以一个共用用例守住进程边界；代价是对失败退出通道与 stderr 空白的覆盖变稀。
+为什么入口偏重（实测约 13.6 s，超 10 s 设计预算；本批发布者已接受该例外）：`setUpClass` 共享一个
+真实 Git 夹具（init/commit/gc 各一次），多数用例经真实 `-I -B` 子进程调用工具 CLI；枚举原语与身份
+负控等少数用例在进程内调用工具模块，不经过子进程；M1/M3 另有各自的真实仓库与站点树。需要真实子进程
+与真实 Git 的覆盖点（退出码、stderr 空白、按提交读取、pack）和需要真实系统调用观测点的覆盖点
+（同父重开、目录前后元数据、部分推栈）无法用纯进程内断言等值替代，成本主要来自每次子进程解释器启动
+与 Git 操作。可降级方向（未采用，需发布者裁定）：把 M1/M3 的子进程用例改为进程内调用，并保留一个
+共用子进程用例守住进程边界，代价是失败退出通道与 stderr 空白的覆盖变稀。
 """
 import contextlib
 import importlib.util
@@ -550,6 +552,43 @@ class MinisVerify(unittest.TestCase):
         self.assertEqual(self.status(doc, "file:skills/alpha2/references/empty.md"), "match")
         self.assertEqual(self.status(doc, "exec:skills/alpha2/references/empty.md"), "match")
         self.assertEqual(self.status(doc, "package-set"), "match")
+
+    # 5e SOUL 读取期间持续改写：file/exec 均降级，不残留未经证实的 exec match
+    def test_soul_change_clears_exec_match(self):
+        proj = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
+        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=proj)
+        self.assertEqual(rc, 0, doc["issues"])
+        tool = load_tool()
+        seen = []
+        target = self.soul
+        with open(target, "rb") as fh:
+            original = fh.read()
+
+        def hook(stage, name):
+            if stage == "read" and name == "SOUL.md" and not seen:
+                seen.append(name)
+                tool.HOOK = None
+                _w(target, original + b"rewritten after read\n")
+
+        tool.HOOK = hook
+        argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
+                "--root", self.root, "--object", "prompt/P.md", "--projection", proj]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = tool.main(argv)
+        finally:
+            tool.HOOK = None
+        doc = json.loads(out.getvalue())
+        self.assertEqual(seen, ["SOUL.md"])          # 接缝确实命中
+        self.assertEqual(rc, 3, doc["issues"])
+        self.assertIn("changed_during_read", self.codes(doc))
+        self.assertEqual(self.status(doc, "file:prompt/P.md"), "not_checked")
+        self.assertEqual(self.status(doc, "exec:prompt/P.md"), "not_checked")
+        self.assertEqual(self.status(doc, "field:soul.body"), "match")   # 独立稳定投影保留
+        _w(target, original)
+        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=proj)
+        self.assertEqual(rc, 0, doc["issues"])       # 撤注入恢复
 
     # 5d 枚举判据的直接负控：子目录同父重开与目录元数据确实能发现变化
     def test_enumeration_criteria_negative_control(self):

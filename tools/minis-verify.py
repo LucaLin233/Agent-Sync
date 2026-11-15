@@ -714,6 +714,8 @@ def _check_field_file(entry, ctx):
                 fstatus = "different"
     elif cls == "difference":
         fstatus = "different"
+    if fstatus == "not_checked" and estatus == "match":
+        estatus = "not_checked"     # 与技能分支同口径：读取未获证不得残留 exec match
     return {"file:" + src: fstatus, "exec:" + src: estatus}
 
 
