@@ -172,6 +172,13 @@ class Fixture:
         git(self.repo, 'tag', '-a', '-m', 'tagged', 'v1')
         self.tag = git(self.repo, 'rev-parse', 'v1')
         self.tree = git(self.repo, 'rev-parse', 'HEAD^{tree}')
+        FILES['skills/luno-core/references/new.md'] = b'new\n'
+        reg2 = json.loads(json.dumps(REG))
+        reg2['objects'][0]['resources'] = [p for p in REG['objects'][0]['resources']
+                                           if not p.endswith('a.md')] + [
+            'skills/luno-core/references/new.md']
+        FILES['tools/sync-targets.json'] = json.dumps(reg2).encode()
+        self.c4 = snapshot(self.repo, 'registry resource set')
         FILES['skills/luno-core/SKILL.md'] = CORE_SKILL.encode()
         FILES['skills/luno-core/references/a.md'] = b'alpha\n'
         self.clean = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
@@ -394,7 +401,63 @@ class Verify(unittest.TestCase):
         self.assertEqual(doc['objects'][0]['differences'], ['description'])
 
 
+    def test_record_unicode_surrogate(self):
+        bad = record('references/a.md', b'alpha\n')
+        bad['stdout'] = bad['stdout'].replace('alpha', 'al\ud800pha')
+        rc, doc, text, proc = F.run(evidence([core_entry(calls=[bad])]), real=True)
+        self.assertEqual((rc, doc['errors'], proc.stderr), (2, ['bad_shape'], b''))
+        self.assertEqual((text.count('\n'), text.endswith('\n')), (1, True))
+        failed = failure('references/a.md')
+        failed['stderr'] = failed['stderr'].replace('transport_error', 'trans\udc00port')
+        rc, doc, text, proc = F.run(evidence([core_entry(calls=[failed])]), real=True)
+        self.assertEqual((rc, doc['errors'], proc.stderr), (2, ['bad_shape'], b''))
+        self.assertEqual((text.count('\n'), text.endswith('\n')), (1, True))
+
+    def test_bad_call_path_keeps_findings(self):
+        bad = failure('references/a.md')
+        bad['request']['path'] = 'references/../x'
+        entry = core_entry(description='x', calls=[bad])
+        rc, doc, _, _ = F.run(evidence([entry]))
+        obj = doc['objects'][0]
+        self.assertEqual((rc, doc['errors']), (2, ['bad_path']))
+        self.assertEqual((obj['id'], obj['differences']), ('skl_core', ['description']))
+        self.assertIn('name', obj['checked'])
+        self.assertEqual(obj['resourcePaths'], {'missing': [], 'extra': []})
+        self.assertIn('resource:references/a.md', obj['missingEvidence'])
+        self.assertNotIn('..', json.dumps(doc))
+
+    def test_historical_registry_commit(self):
+        rc, doc, _, _ = F.run(evidence([full_core()]), version=F.c1)
+        self.assertEqual((rc, doc['status']), (0, 'match'))
+        self.assertEqual(doc['gitVersion'], F.c1)
+        self.assertEqual(doc['objects'][0]['resourcePaths'], {'missing': [], 'extra': []})
+
+
 class Evidence(unittest.TestCase):
+
+    def test_missing_with_wrong_type(self):
+        doc = evidence([full_core()])
+        del doc['objects'][0]['projection']['content']
+        doc['objects'][0]['resourcePaths'] = 7
+        rc, out, _, _ = F.run(doc)
+        self.assertEqual((rc, out['errors']), (2, ['bad_evidence_shape']))
+        doc = evidence([full_core()])
+        del doc['objects'][0]['projection']['content']
+        rc, out, _, _ = F.run(doc)
+        self.assertEqual((rc, out['status']), (3, 'incomplete'))
+        self.assertEqual(out['missingEvidence'], ['objects[0].projection.content'])
+        doc = evidence([full_core(), dict(full_core(), object='extra-skill')])
+        del doc['objects'][0]['projection']['identifier']
+        doc['objects'][1]['calls'] = 5
+        rc, out, _, _ = F.run(doc)
+        self.assertEqual((rc, out['errors']), (2, ['bad_evidence_shape']))
+        doc = evidence([full_core(), dict(full_core(), object='extra-skill')])
+        del doc['objects'][0]['projection']['identifier']
+        del doc['objects'][1]['calls'][0]['stdout']
+        rc, out, _, _ = F.run(doc)
+        self.assertEqual(rc, 3)
+        self.assertEqual(out['missingEvidence'], ['objects[0].projection.identifier',
+                                                  'objects[1].calls[0].stdout'])
 
     def test_help_and_bad_args(self):
         proc = subprocess.run([sys.executable, '-I', '-B', str(TOOL), '--help'],

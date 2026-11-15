@@ -94,6 +94,8 @@ def _strict_json(raw, code="bad_evidence_json"):
     def reject_constant(_text):
         raise ValueError("non-finite")
     try:
+        if isinstance(raw, str):  # 孤立代理码点等不可编码输入在这里按固定码拒绝
+            raw = raw.encode("utf-8")
         return json.loads(raw.decode("utf-8"), object_pairs_hook=auth._unique_pairs,
                           parse_constant=reject_constant)
     except (ValueError, UnicodeError, TypeError, KeyError, auth.ToolError):
@@ -197,76 +199,70 @@ def _str(value, nonempty=False):
     return value
 
 
-class _Skip(Exception):
-    """局部缺字段：已记入 _MISSING，继续遍历同层其余对象。"""
-
-
 _MISSING = []
 
 
 def _keys(node, keys, where):
+    """只做容器/未知键检查并登记缺项；缺失不短路，同层其余键仍独立校验。"""
     if not isinstance(node, dict):
         raise Reject("bad_evidence_shape")
     if set(node) - set(keys):
         raise Reject("bad_evidence_shape")
-    missing = [where + k for k in keys if k not in node]
-    if missing:
-        _MISSING.extend(missing)
-        raise _Skip()
+    for key in keys:
+        if key not in node:
+            _MISSING.append(where + key)
     return node
 
 
 def _validate(evidence):
-    """严格形状检查：多余键/错类型 rc2；缺必需字段收集齐全后 rc3（不因首处缺失掩盖其余）。"""
+    """多余键/错类型 rc2；缺必需字段全量收集后 rc3（不掩盖同层或跨对象的类型错误）。"""
     _MISSING.clear()
-    try:
-        _validate_all(evidence)
-    except _Skip:
-        pass
+    _validate_all(evidence)
     if _MISSING:
         raise Reject("incomplete", list(_MISSING), exit=3)
-    return _keys(evidence, TOP_KEYS, "")
+    return evidence
 
 
 def _validate_all(evidence):
     top = _keys(evidence, TOP_KEYS, "")
-    if type(top["schemaVersion"]) is not int or top["schemaVersion"] != 1:
+    if "schemaVersion" in top and (type(top["schemaVersion"]) is not int
+                                   or top["schemaVersion"] != 1):
         raise Reject("bad_evidence_shape")
-    try:
-        obs = _keys(top["observation"], OBS_KEYS, "observation.")
-        for key in ("id", "instanceRef", "sourceVersion", "sourceBasis"):
-            _str(obs[key], nonempty=True)
-        if _time(obs["finishedAt"]) < _time(obs["startedAt"]):
-            raise Reject("bad_evidence_shape")
-    except _Skip:
-        obs = None
-    if not isinstance(top["objects"], list):
-        raise Reject("bad_evidence_shape")
-    seen = set()
+    obs = _keys(top["observation"], OBS_KEYS, "observation.") \
+        if "observation" in top else None
     if obs is not None:
-        pass
-    for i, item in enumerate(top["objects"]):
-        where = "objects[%d]." % i
-        try:
-            _validate_object(item, where, seen)
-        except _Skip:
-            continue
+        for key in ("id", "instanceRef", "sourceVersion", "sourceBasis"):
+            if key in obs:
+                _str(obs[key], nonempty=True)
+        if "startedAt" in obs and "finishedAt" in obs \
+                and _time(obs["finishedAt"]) < _time(obs["startedAt"]):
+            raise Reject("bad_evidence_shape")
+    if "objects" in top:
+        if not isinstance(top["objects"], list):
+            raise Reject("bad_evidence_shape")
+        seen = set()
+        for i, item in enumerate(top["objects"]):
+            _validate_object(item, "objects[%d]." % i, seen)
 
 
 def _validate_object(item, where, seen):
-    if True:
-        obj = _keys(item, OBJ_KEYS, where)
+    obj = _keys(item, OBJ_KEYS, where)
+    if "object" in obj:
         name = _str(obj["object"], nonempty=True)
         if name in seen:
             raise Reject("duplicate_object")
         seen.add(name)
-        _str(obj["observationId"], nonempty=True)
-        _str(obj["instanceRef"], nonempty=True)
+    for key in ("observationId", "instanceRef"):
+        if key in obj:
+            _str(obj[key], nonempty=True)
+    if "projection" in obj:
         proj = _keys(obj["projection"], PROJ_KEYS, where + "projection.")
-        _str(proj["id"], nonempty=True)
+        if "id" in proj:
+            _str(proj["id"], nonempty=True)
         for key in ("name", "description", "identifier", "content"):
-            if proj[key] is not None:
+            if key in proj and proj[key] is not None:
                 _str(proj[key])
+    if "resourcePaths" in obj:
         if not isinstance(obj["resourcePaths"], list):
             raise Reject("bad_evidence_shape")
         paths = set()
@@ -275,25 +271,35 @@ def _validate_object(item, where, seen):
             if path in paths:
                 raise Reject("duplicate_path")
             paths.add(path)
+    if "calls" in obj:
         if not isinstance(obj["calls"], list):
             raise Reject("bad_evidence_shape")
         pairs = set()
         for j, raw_call in enumerate(obj["calls"]):
-            cw = where + "calls[%d]." % j
-            call = _keys(raw_call, CALL_KEYS, cw)
-            _str(call["observationId"], nonempty=True)
-            _str(call["instanceRef"], nonempty=True)
-            req = _keys(call["request"], REQ_KEYS, cw + "request.")
-            _str(req["id"], nonempty=True)
-            _str(req["path"], nonempty=True)
-            if type(call["exitCode"]) is not int or call["exitCode"] not in (0, 2):
-                raise Reject("bad_evidence_shape")
-            _str(call["stdout"])
-            _str(call["stderr"])
-            pair = (req["id"], req["path"])
-            if pair in pairs:
-                raise Reject("duplicate_request")
-            pairs.add(pair)
+            _validate_call(raw_call, where + "calls[%d]." % j, pairs)
+
+
+def _validate_call(call, cw, pairs):
+    node = _keys(call, CALL_KEYS, cw)
+    for key in ("observationId", "instanceRef"):
+        if key in node:
+            _str(node[key], nonempty=True)
+    req = _keys(node["request"], REQ_KEYS, cw + "request.") if "request" in node else None
+    if req is not None:
+        for key in ("id", "path"):
+            if key in req:
+                _str(req[key], nonempty=True)
+    if "exitCode" in node and (type(node["exitCode"]) is not int
+                               or node["exitCode"] not in (0, 2)):
+        raise Reject("bad_evidence_shape")
+    for key in ("stdout", "stderr"):
+        if key in node:
+            _str(node[key])
+    if req is not None and "id" in req and "path" in req:
+        pair = (req["id"], req["path"])
+        if pair in pairs:
+            raise Reject("duplicate_request")
+        pairs.add(pair)
 
 
 def _rel_path(path):
@@ -312,7 +318,7 @@ def _record(call, auth):
         raw = call["stderr"]
         if not raw.endswith("\n") or raw.count("\n") != 1:
             raise Reject("bad_shape")
-        doc = _strict_json(raw[:-1].encode("utf-8"), "bad_shape")
+        doc = _strict_json(raw[:-1], "bad_shape")
         if not isinstance(doc, dict) or set(doc) != {"ok", "error"} or doc["ok"] is not False:
             raise Reject("bad_shape")
         code = doc["error"]
@@ -332,7 +338,7 @@ def _record(call, auth):
     raw = call["stdout"]
     if not raw.endswith("\n") or raw.count("\n") != 1:
         raise Reject("bad_shape")
-    doc = _strict_json(raw[:-1].encode("utf-8"), "bad_shape")
+    doc = _strict_json(raw[:-1], "bad_shape")
     if not isinstance(doc, dict) or set(doc) != {"ok", "action", "resource"} or doc["ok"] is not True \
             or doc["action"] != "skill-resource":
         raise Reject("bad_shape")
@@ -425,7 +431,11 @@ def _compare(entry, registry, repo, version, auth):
     required = expected & site
     calls = {}
     for call in entry["calls"]:
-        path = _rel_path(call["request"]["path"])
+        try:
+            path = _rel_path(call["request"]["path"])
+        except Reject as exc:
+            record["errors"].append(exc.code)
+            continue
         if call["request"]["id"] != lh_id:
             record["errors"].append("association_error")
         elif path not in required:
