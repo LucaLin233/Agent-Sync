@@ -631,22 +631,23 @@ def _check_skill(entry, ctx):
                 for comp in comps:
                     f.push(comp)
                     depth += 1
+                data, cls = _member(f.fd, name, rep, rid, path, expect)
+                estatus = _exec_status(f.fd, name, mode == "100755", rep, rid, path)
             except Reject as exc:
                 rep.issue(exc.code, rid, path)
                 fstatus = "different" if CODES[exc.code][0] == "difference" else "not_checked"
+                estatus = "not_checked"
             else:
-                try:
-                    data, cls = _member(f.fd, name, rep, rid, path, expect)
-                    estatus = _exec_status(f.fd, name, mode == "100755", rep, rid, path)
-                finally:
-                    for _ in range(depth):
-                        f.pop()
                 if cls is None:
                     fstatus = "match"
                 else:
                     fstatus = "different" if cls == "difference" else "not_checked"
                     if cls == "difference":
                         extra_bad = True
+            finally:
+                # 部分 push 成功后下一层失败也必须逐层退栈，后续资源才回到正确父 fd。
+                for _ in range(depth):
+                    f.pop()
             status["file:" + repo_path] = fstatus
             if fstatus == "not_checked" and estatus == "match":
                 estatus = "not_checked"     # 读取未获证时不得残留同一名字的 exec match

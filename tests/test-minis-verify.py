@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """tools/minis-verify.py 本端纵切片（契约见 README〈Minis 本端只读验收〉）：真实 -I -B CLI、Git
-双提交＋pack、字节与模式、SOUL/子代理口径、包集合与枚举上限、安全文件边界接缝、投影、聚合。"""
+双提交＋pack、字节与模式、SOUL/子代理口径、包集合与枚举上限、安全文件边界接缝、投影、聚合。
+
+为什么必须这么重（入口约 12 s，超 10 s 设计预算；本批发布者已接受该例外）：每个用例都要经真实
+`-I -B` 子进程入口、真实 `git init/commit/gc` 与真实系统调用的打开/重开接缝，M1/M3 还要各自的
+独立仓库与站点树；这些是身份、模式与「读后重开」判据的唯一可观察来源，换成进程内调用或共享夹具
+会让进程边界与仓库身份失去覆盖。可降级方向（未采用，需发布者裁定）：M1/M3 的子进程调用改为进程内
+调用并以一个共用用例守住进程边界；代价是对失败退出通道与 stderr 空白的覆盖变稀。
+"""
 import contextlib
 import importlib.util
 import io
@@ -505,6 +512,69 @@ class MinisVerify(unittest.TestCase):
         self.assertIn("missing_projection", self.codes(doc))
         self.assertEqual(doc["status"], "incomplete")
 
+
+
+    # 5c 部分 push 成功后下一层失败：逐层退栈，后续稳定资源不得被误判
+    def test_partial_push_failure_unwinds(self):
+        root = os.path.join(self.root, "deep")
+        repo = os.path.join(root, "repo")
+        site = os.path.join(root, "site")
+        for path in ("tools", "skills/alpha2/references/sub",
+                     "var/minis/skills/alpha2/references"):
+            os.makedirs(os.path.join(repo, path) if not path.startswith("var/")
+                        else os.path.join(site, path))
+        reg = {"schemaVersion": 1, "objects": [
+            {"id": "alpha2", "type": "skill", "source": "skills/alpha2/SKILL.md",
+             "resources": ["skills/alpha2/references/sub/deep.md",
+                           "skills/alpha2/references/empty.md"],
+             "ends": {"repo": {"present": True},
+                      "minis": {"present": True, "kind": "file",
+                                "path": "/var/minis/skills/alpha2/SKILL.md"}}}]}
+        _w(os.path.join(repo, "tools/sync-targets.json"), json.dumps(reg))
+        _w(os.path.join(repo, "skills/alpha2/SKILL.md"), SKILL1)
+        _w(os.path.join(repo, "skills/alpha2/references/sub/deep.md"), b"deep\n")
+        _w(os.path.join(repo, "skills/alpha2/references/empty.md"), b"")
+        _git(repo, "init", "-q")
+        version = _commit(repo, "nested")
+        _w(os.path.join(site, "var/minis/skills/alpha2/SKILL.md"), SKILL1)
+        _w(os.path.join(site, "var/minis/skills/alpha2/references/empty.md"), b"")
+        # 站点缺少 references/sub：第一层 references 推栈成功、第二层 sub 失败
+        argv = [sys.executable, "-I", "-B", TOOL, "--repo", repo, "--git-version", version,
+                "--root", site, "--object", "alpha2"]
+        proc = subprocess.run(argv, cwd="/", capture_output=True)
+        self.assertEqual(proc.stderr, b"")
+        doc = json.loads(proc.stdout.decode())
+        self.assertEqual(proc.returncode, 1, doc["issues"])
+        self.assertIn("file_missing", self.codes(doc))
+        # 后续独立稳定资源仍相对正确父 fd 核对，不被前一个缺证升级为假阳性
+        self.assertEqual(self.status(doc, "file:skills/alpha2/references/empty.md"), "match")
+        self.assertEqual(self.status(doc, "exec:skills/alpha2/references/empty.md"), "match")
+        self.assertEqual(self.status(doc, "package-set"), "match")
+
+    # 5d 枚举判据的直接负控：子目录同父重开与目录元数据确实能发现变化
+    def test_enumeration_criteria_negative_control(self):
+        tool = load_tool()
+        fence = tool.Fence(tool._abs_parts(self.dir, "bad_args"))
+        sub = os.open("references", tool.DIR_FLAGS, dir_fd=fence.fd)
+        self.assertTrue(tool._reopen_same(fence.fd, "references", sub, tool.DIR_FLAGS))
+        os.rename(os.path.join(self.dir, "references"), os.path.join(self.dir, "bench"))
+        os.makedirs(os.path.join(self.dir, "references"))
+        try:
+            self.assertFalse(tool._reopen_same(fence.fd, "references", sub, tool.DIR_FLAGS))
+        finally:
+            os.close(sub)
+            fence.close()
+            os.rmdir(os.path.join(self.dir, "references"))
+            os.rename(os.path.join(self.dir, "bench"), os.path.join(self.dir, "references"))
+        fd = os.open(os.path.join(self.dir, "references"), tool.DIR_FLAGS)
+        try:
+            before = tool._meta(os.fstat(fd))
+            _w(os.path.join(self.dir, "references", "probe.md"), b"p")
+            after = tool._meta(os.fstat(fd))
+        finally:
+            os.close(fd)
+        os.remove(os.path.join(self.dir, "references", "probe.md"))
+        self.assertNotEqual(before, after)
 
 if __name__ == "__main__":
     unittest.main()
