@@ -45,7 +45,66 @@ python3 -I -B tools/lh-verify.py --repo REPO --git-version <40位小写hex> \
     --object luno-ops [--object …] --evidence evidence.json
 ```
 
-- **输入**：固定严格 JSON（`schemaVersion`=1、`observation`、`objects`）；各层列出的键全必需，多余键、任意层重复键、错类型、非有限数值 rc=2，缺必需字段 rc=3。`projection` 的 `name`/`description`/`identifier`/`content` 允许 `null`，缺字段、`null`、空串互相不等。记录是 `auth-call.py skill-resource` 的**原始** stdout/stderr 字符串，不接受已解析对象。
+- **输入**：固定严格 JSON，下表所列键均必需且只接受这些键；任意层重复键、多余键、错类型、非有限数值 rc=2，缺必需字段 rc=3。`projection` 的四个可空字段区分缺键、`null`、空串，禁止互相代填；stdout/stderr 必须保存原字符串，不接受解析后的对象。
+
+| 层级 | 必需键及类型 |
+| --- | --- |
+| 根 | `schemaVersion`：整数 `1`；`observation`：对象；`objects`：对象数组 |
+| `observation` | `id`、`instanceRef`、`sourceVersion`、`sourceBasis`：非空字符串；`startedAt`、`finishedAt`：UTC时间字符串 |
+| `objects[]` | `object`、`observationId`、`instanceRef`：非空字符串；`projection`：对象；`resourcePaths`：路径字符串数组；`calls`：调用对象数组 |
+| `projection` | `id`：非空字符串；`name`、`description`、`identifier`、`content`：字符串或 `null` |
+| `calls[]` | `observationId`、`instanceRef`：非空字符串；`request`：对象；`exitCode`：整数 `0` 或 `2`；`stdout`、`stderr`：字符串，允许空串 |
+| `request` | `id`、`path`：非空字符串 |
+
+UTC时间须为有效的 `YYYY-MM-DDTHH:MM:SSZ`（秒精度、无小数），结束不早于开始。对象及调用的 `observationId`、`instanceRef` 须分别等于顶层 `observation.id`、`observation.instanceRef`。命令的 `--object` 范围须非空；证据 `objects` 可为空，缺所选对象为 rc=3，含未选对象为 rc=2；对象和资源路径不得重复，同一对象的调用以 `(request.id,request.path)` 为唯一键。路径字符串非空；`resourcePaths` 可空，但必须是现场完整相对路径集合；`calls` 为登记集合与该集合交集内每个 `(id,path)` 各一条，多余资源只列路径、不提交正文。`sourceBasis` 仅是外部依据的定位引用，字段齐全不证明来源真实或无并发。
+
+下面是完整结构示例，所有业务标签和内容均为虚构；实际必须按指定提交登记和当次可信观察填充，不表示真实现场或 PASS。
+
+```json
+{
+  "schemaVersion": 1,
+  "observation": {
+    "id": "o",
+    "instanceRef": "i",
+    "sourceVersion": "v",
+    "startedAt": "2026-11-15T08:00:00Z",
+    "finishedAt": "2026-11-15T08:00:01Z",
+    "sourceBasis": "basis-ref"
+  },
+  "objects": [
+    {
+      "object": "example-skill",
+      "observationId": "o",
+      "instanceRef": "i",
+      "projection": {
+        "id": "skill-example",
+        "name": "example-skill",
+        "description": "示例描述",
+        "identifier": "example-identifier",
+        "content": "示例正文\n"
+      },
+      "resourcePaths": [
+        "references/example.md"
+      ],
+      "calls": [
+        {
+          "observationId": "o",
+          "instanceRef": "i",
+          "request": {
+            "id": "skill-example",
+            "path": "references/example.md"
+          },
+          "exitCode": 0,
+          "stdout": "{\"ok\": true, \"action\": \"skill-resource\", \"resource\": {\"content\": \"abc\", \"encoding\": \"utf8\", \"fileHash\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\", \"fileType\": \"text/plain\", \"path\": \"references/example.md\", \"size\": 3}}\n",
+          "stderr": ""
+        }
+      ]
+    }
+  ]
+}
+```
+
+成功调用如上：`exitCode=0`、stderr为空，stdout是原成功 JSON字符串并保留末尾 LF。失败调用保持相同关联字段，改为 `exitCode=2`、`stdout=""`，stderr保存固定错误 JSON原字符串，例如 `"{\"ok\": false, \"error\": \"transport_error\"}\n"`；未知错误码不透传。响应仍须满足六字段的类型、编码和自洽性，详见“固定认证读取”。缺交集调用为缺证；完整集合中缺登记资源是差异，不能补造成功记录。
 - **对象**：只取该提交 `tools/sync-targets.json` 里 `type=skill` 且 `ends.lobehub.present=true` 的项；`projection.id` 比登记的 LobeHub ID，不等即身份差异并停止该对象内容比较；`request.id` 必须等登记 ID，`response.path` 必须等 `request.path`，不靠 path 猜 ID。
 - **判据**：完整 `resourcePaths` 与登记集合先比（登记有、现场无 → 差异；现场多 → 只报告，不接受其正文记录、不扩读）；`name`/`description` 用同提交 `SKILL.md` 的 `fm_get`，`content` 用 `body_contract.body_bytes`（不 strip、不补尾换行、CRLF 不归一）；资源按**原字节**比较；每条记录核结构、编码、`size`、`fileHash`（失败记录只认固定码，未知文本不透传）。`identifier` 仅覆盖已确证五技能：同版 `name`=对象 ID 且 `installSource` 恰为 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/<ID>` 时期望 `lucalin233-agent-sync-<ID>`，否则记缺证。
 - **Git**：`shell=False`、白名单环境，禁 global/system 配置、optional locks、fsmonitor、replace objects、lazy fetch；只认完整本地仓，缺对象即停，不 fetch 修复。
