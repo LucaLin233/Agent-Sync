@@ -147,6 +147,10 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 - `codex-on-ish/SKILL.md` → Codex/iSH TLS 排障一段。许可按 2026-10-25 的 MIT 裁定。
 - `apple-reminders/SKILL.md` 第 94–103 行 → 原生 `apple-*` 条款之后关于原生查询完整性的一段。许可依据根 `LICENSE`（MIT，`Copyright (c) 2026 OpenMinis`）。
 
+### LobeHub
+
+**自有接口说明**（2026-11-16 在线核对）：`@lobehub/cli@0.0.91` 的 npm gitHead 为 `lobehub/lobehub@a8b501bf87ba0e48281e36c23bf8b247eecef5fe`。取证路径：`apps/cli/src/commands/connector.ts`、`packages/utils/src/mcpEndpoint.ts`、`packages/device-control/src/rpcClients.ts`、`apps/server/src/services/mcp/index.ts`、`src/libs/mcp/ssrf.ts`；相关 PR #23047、#23056、#23050（安全修复提交 `641341230f5c3d276d8404f9793899ef3242f8c9`）。仅据接口事实自编连接器秘密存储、设备侧 MCP 和服务端 SSRF 判别，不转载上游正文、不新增吸收件；静态核对不代表已装版本、实例部署或行为实测。
+
 ### CCHP 本端层
 
 `references/cchp.md` 只保留本端认证/输出边界、组织写入约定、恢复及链路核验、带版本的实例经验；官方已覆盖的 CLI 说明、业务示例、输出、错误和分页不再维护中文副本。原 `cchp-source.md`、`cchp-workflow-org.md`、`cchp-workflow-providers.md`、`cchp-coverage-rules.md` 退役，历史取材证据可从 β 前 main 提交 `217ff083cf536cf9f946ffc9a233bc748dffc44b` 恢复。本端层保留历史精选改写的 MIT 版权通知及 `LICENSE.upstream.txt`，不因精简删除必要许可。本端层必需加载官方 cchp，不覆盖官方正文，官方凭据回退不适用于本端。
