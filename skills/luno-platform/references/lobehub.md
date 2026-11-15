@@ -91,7 +91,9 @@
 <!-- BEGIN lobehub-skills -->
 # Skill 与连接器
 
-- **分清对象**：区分内置工具、市场和用户自定义的技能，以及 Custom MCP。共享范围和 Agent 的启用方式按对象类型和当前版本核对，不把连接器的启用方式套到技能上。只改用户指定的层级和启用方式，平台没有的模式不模拟。连接器和 STDIO MCP 的密钥用环境变量传入，不写进内容。
+- **分清对象**：区分内置工具、市场和用户自定义的技能，以及 Custom MCP。共享范围和 Agent 的启用方式按对象类型和当前版本核对，不把连接器的启用方式套到技能上。只改用户指定的层级和启用方式，平台没有的模式不模拟。STDIO 的 `command/args/env` 明文存储，自定义 HTTP header 存于 `metadata.customHeaders` 并可随元数据返回，不能当作秘密通道。
+- **设备侧 MCP**（2026-11-16，CLI 0.0.91 对应源码）：具备 MCP 能力的 `lh connect` 与桌面端均支持设备侧 MCP 和 `listMcpTools`，仍须匹配服务端和网关。HTTP 的 Auto/Connect via device 对应 `metadata.connectVia`；无设备网关的 CE 仍由服务器连接 HTTP，STDIO 不回退服务器执行。工具调用、工具同步、资源读取与 MCP Apps 的支持分别核验。
+- **服务器侧 MCP 拒绝**（同次源码核对）：含 PR #23050 的服务端以 `ssrfSafeFetch` 处理 HTTP MCP/OAuth；`SSRF_BLOCKED` 对应 MCPService 的 tRPC `BAD_REQUEST`，工具执行可报 `MCP_SSRF_BLOCKED`，不是编辑权不足；仅升级 CLI 不使服务端修复生效。
 - **禁读列**（2026-09-17 诊断记录）：`user_connectors.credentials` 是禁读列。对它做 `::jsonb` 强制转换时，Postgres 的错误详情会回显原值前缀；任何涉及这一列的表达式都不能进入诊断输出，包括类型探测。
 - **GitHub 来源与重装**：安装及恢复完整读 `luno-core/references/sync.md`〔分支 sync-workflow〕。用户提供的两轮实测（2026-11-12 接收，实测日期未提供，lh 0.0.79 / CE 2.3.2）：GitHub 子目录来源必须为 `tree/<单段分支>/<子目录>`，不接受固定 SHA；同名技能不能并存，identifier 由 owner-repo-末段目录名生成，实际大小写回读确认。平时原位重装（保留 ID、更新正文、资源深合并）；有资源退役才按仓库历史明确版本可恢复后先删后装（ID 改变、资源与源逐字节一致）。安装前后核分支提交，不把 main URL 当固定版本。来源字段只取 id/identifier/source/zipFileHash 等非秘密投影，禁止全量读取 manifest（可能含签名 URL）。服务端不读 GitHub token，私有仓库、本地路径和私有 IP 不作来源。
 - **三个字段分开更新**：平台把技能的 `content`（正文）、`description`、`name` 当独立字段存。仅编辑正文不会同步描述（本实例发生过，只比正文的巡检没发现）。每次改完分别回读三个字段判等：本地正文按规则仓库 `tools/body_contract.py` 的契约提取，与平台 `content` 的 UTF-8 字节严格相等，不 strip，不归一 CRLF 或末尾换行；没有该仓库工具的端也要遵循同一契约。资源按完整相对路径逐个回读并比较原始字节；CLI 0.0.79 的 `read-resource` 对非空二进制输出 base64，空内容输出 JSON，不能直接把 stdout 当作文件字节，须核对资源编码并还原后判等（对应版本源码，未行为实测）。资源目录、ZIP 哈希和正文判等都不能代替资源判等。
