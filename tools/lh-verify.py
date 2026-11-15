@@ -20,7 +20,6 @@
 """
 import argparse
 import datetime
-import hashlib
 import importlib.util
 import json
 import os
@@ -30,7 +29,6 @@ import sys
 
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 TIME_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
-HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 REL_PATH_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/-]{0,255}\Z")
 
 TOP_KEYS = ("schemaVersion", "observation", "objects")
@@ -145,21 +143,12 @@ def _repo_ready(repo, version):
         raise GitError()
 
 
-_BLOBS = {}
-
-
-def _blob(repo, version, path):
-    try:
-        return _BLOBS[(repo, version, path)]
-    except KeyError:
-        raise GitError() from None
-
-
-def _prefetch(repo, version, paths):
+def _batch(repo, version, paths):
     """一次 cat-file --batch 取全部原 bytes；任何缺对象即失败，不做 lazy fetch 兜底。"""
+    blobs = {}
     ordered = [path for path in dict.fromkeys(paths)]
     if not ordered:
-        return
+        return blobs
     request = "".join("%s:%s\n" % (version, path) for path in ordered).encode("utf-8")
     out = _git(repo, ["cat-file", "--batch"], request)
     pos = 0
@@ -177,8 +166,9 @@ def _prefetch(repo, version, paths):
         start = end + 1
         if start + size + 1 > len(out) or out[start + size:start + size + 1] != b"\n":
             raise GitError()
-        _BLOBS[(repo, version, path)] = out[start:start + size]
+        blobs[path] = out[start:start + size]
         pos = start + size + 1
+    return blobs
 
 
 def _time(value):
@@ -346,24 +336,14 @@ def _record(call, auth):
     data = doc["resource"]
     if not isinstance(data, dict) or set(data) != set(auth.RESOURCE_FIELDS):
         raise Reject("bad_fields")
-    if (data["encoding"] not in ("utf8", "base64")
-            or not isinstance(data["content"], str)
-            or not isinstance(data["fileType"], str)
-            or not isinstance(data["path"], str)
-            or type(data["size"]) is not int or data["size"] < 0
-            or not isinstance(data["fileHash"], str) or not HEX64_RE.match(data["fileHash"])):
-        raise Reject("bad_fields")
     try:
-        blob = data["content"].encode("utf-8") if data["encoding"] == "utf8" \
-            else __import__("base64").b64decode(data["content"], validate=True)
-    except (ValueError, UnicodeError):
-        raise Reject("bad_fields") from None
-    if len(blob) != data["size"] or hashlib.sha256(blob).hexdigest() != data["fileHash"]:
-        raise Reject("bad_integrity")
+        blob = auth.resource_bytes(data)
+    except auth.ToolError as exc:
+        raise Reject(str(exc)) from None
     return "ok", (data["path"], blob)
 
 
-def _compare(entry, registry, repo, version, auth):
+def _compare(entry, registry, blobs, auth):
     """单对象比对：先身份，再集合，再正文/元数据/资源记录；每步只记实际做过的检查。"""
     body = _load("lh_body_contract", "body_contract.py")
     lh_id = registry["ends"]["lobehub"]["id"]
@@ -379,7 +359,7 @@ def _compare(entry, registry, repo, version, auth):
 
     source = registry["source"]
     try:
-        skill_md = _blob(repo, version, source)
+        skill_md = blobs[source]
         content = body.body_bytes(skill_md)
         name = body.fm_get(skill_md, "name")
         description = body.fm_get(skill_md, "description")
@@ -462,7 +442,7 @@ def _compare(entry, registry, repo, version, auth):
             record["errors"].append("association_error")
             continue
         record["checked"].append(field)
-        if blob != _blob(repo, version, prefix + path):
+        if blob != blobs[prefix + path]:
             record["differences"].append(field)
     return record
 
@@ -509,8 +489,8 @@ def main(argv=None):
     try:
         auth = _load("lh_auth_call", "auth-call.py")
         _repo_ready(args.repo, version)
-        _prefetch(args.repo, version, ["tools/sync-targets.json"])
-        raw_registry = _blob(args.repo, version, "tools/sync-targets.json")
+        raw_registry = _batch(args.repo, version,
+                              ["tools/sync-targets.json"])["tools/sync-targets.json"]
     except GitError:
         return _empty(version, "repo_unusable")
     try:
@@ -538,9 +518,9 @@ def main(argv=None):
             return _empty(version, "object_not_registered")
         selected.append(item)
     try:
-        _prefetch(args.repo, version,
-                  [item["source"] for item in selected] +
-                  [path for item in selected for path in item["resources"]])
+        blobs = _batch(args.repo, version,
+                       [item["source"] for item in selected] +
+                       [path for item in selected for path in item["resources"]])
     except GitError:
         return _empty(version, "repo_unusable")
     if {item["object"] for item in evidence["objects"]} - set(args.object):
@@ -561,13 +541,11 @@ def main(argv=None):
                 and all(call["observationId"] == obs["id"]
                         and call["instanceRef"] == obs["instanceRef"] for call in entry["calls"])
             try:
-                record = _compare(entry, item, args.repo, version, auth) if labels_ok \
+                record = _compare(entry, item, blobs, auth) if labels_ok \
                     else {"object": item["id"], "id": entry["projection"]["id"], "checked": [],
                           "differences": [], "missingEvidence": [],
                           "errors": ["association_error"],
                           "resourcePaths": {"missing": [], "extra": []}}
-            except GitError:
-                return _empty(version, "repo_unusable")
             except Reject as exc:
                 # 单对象的记录问题不抹掉此前对象的结果。
                 record = {"object": item["id"], "id": None, "checked": [], "differences": [],

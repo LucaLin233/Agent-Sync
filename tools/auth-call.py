@@ -199,6 +199,29 @@ def pr_meta(repo, number, getter=None, opener=None):
     return out
 
 
+def resource_bytes(data, expected_path=None):
+    """六字段资源校验并解码；不读取环境，不发请求。"""
+    if not isinstance(data, dict) or set(data) != set(RESOURCE_FIELDS):
+        raise ToolError("bad_fields")
+    if (not isinstance(data["path"], str)
+            or (expected_path is not None and data["path"] != expected_path)
+            or data["encoding"] not in ("utf8", "base64")
+            or not isinstance(data["content"], str)
+            or not isinstance(data["fileType"], str)
+            or isinstance(data["size"], bool) or not isinstance(data["size"], int)
+            or data["size"] < 0
+            or not isinstance(data["fileHash"], str) or not HEX64_RE.match(data["fileHash"])):
+        raise ToolError("bad_fields")
+    try:
+        blob = data["content"].encode("utf-8") if data["encoding"] == "utf8" \
+            else base64.b64decode(data["content"], validate=True)
+    except ValueError:
+        raise ToolError("bad_fields") from None
+    if len(blob) != data["size"] or hashlib.sha256(blob).hexdigest() != data["fileHash"]:
+        raise ToolError("bad_integrity")
+    return blob
+
+
 def skill_resource(skill_id, path, getter=None, opener=None):
     getter = _env_getter if getter is None else getter
     if not isinstance(skill_id, str) or not SKILL_ID_RE.match(skill_id):
@@ -228,23 +251,7 @@ def skill_resource(skill_id, path, getter=None, opener=None):
         data = result["data"]["json"]
     except (KeyError, TypeError):
         raise ToolError("bad_shape") from None
-    if not isinstance(data, dict) or set(data) != set(RESOURCE_FIELDS):
-        raise ToolError("bad_fields")
-    if (data["path"] != path
-            or data["encoding"] not in ("utf8", "base64")
-            or not isinstance(data["content"], str)
-            or not isinstance(data["fileType"], str)
-            or isinstance(data["size"], bool) or not isinstance(data["size"], int)
-            or data["size"] < 0
-            or not isinstance(data["fileHash"], str) or not HEX64_RE.match(data["fileHash"])):
-        raise ToolError("bad_fields")
-    try:
-        blob = data["content"].encode("utf-8") if data["encoding"] == "utf8" \
-            else base64.b64decode(data["content"], validate=True)
-    except ValueError:  # includes UnicodeEncodeError
-        raise ToolError("bad_fields") from None
-    if len(blob) != data["size"] or hashlib.sha256(blob).hexdigest() != data["fileHash"]:
-        raise ToolError("bad_integrity")
+    blob = resource_bytes(data, path)
     if token.encode("utf-8") in blob:  # covers base64 content the leaf check cannot
         raise ToolError("reflected_credential")
     out = {"action": "skill-resource", "resource": data}
