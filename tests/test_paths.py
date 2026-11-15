@@ -29,6 +29,15 @@ PATHS_RULES = (
       'tests/test-commit-identities.py', 'skills/luno-core/references/review.md',
       '.github/workflows/commit-identities.yml'),
      ('group', 'identity'), '署名机械检查器、其测试与署名规则 → identity'),
+    # 新消费者：验收工具自身、其依赖的固定认证读取/正文契约与对象登记变化都要跑 verify。
+    (('tools/lh-verify.py', 'tests/test-lh-verify.py'),
+     ('case', 'test-lh-verify.py'), 'LH 技能离线验收工具或工具测试 → verify'),
+    (('tools/auth-call.py', 'tests/test-auth-call.py'),
+     ('case', 'test-lh-verify.py'), '固定认证读取变更 → verify 消费者'),
+    (('tools/body_contract.py', 'tests/test-body-contract.py'),
+     ('case', 'test-lh-verify.py'), '正文契约变更 → verify 消费者'),
+    (('tools/sync-targets.json',),
+     ('case', 'test-lh-verify.py'), '对象登记变更 → verify 消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
     (('tests/run-tests.sh', 'tests/test_paths.py', 'tools/sync-all.sh',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),

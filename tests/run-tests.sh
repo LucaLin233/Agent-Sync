@@ -13,6 +13,10 @@
 #   Surge 脚本或脚本测试 → surge 脚本
 #   脱敏实现与读取模板 → privacy
 #   署名机械检查器、其测试与署名规则 → identity
+#   LH 技能离线验收工具或工具测试 → verify
+#   固定认证读取变更 → verify 消费者
+#   正文契约变更 → verify 消费者
+#   对象登记变更 → verify 消费者
 #   运行器与聚合入口 → full
 # <<<
 set -u
@@ -35,6 +39,7 @@ test-redact.py|privacy|cd tests && python3 -B -m unittest -v test-redact|1
 test-surge-package.py|surge|cd tests && python3 -B -m unittest -v test-surge-package|1
 test-surge-scripts.py|surge|cd tests && python3 -B -m unittest -v test-surge-scripts|1
 test-commit-identities.py|identity|cd tests && python3 -B -m unittest -v test-commit-identities|0
+test-lh-verify.py|verify|cd tests && python3 -B -m unittest -v test-lh-verify|0
 '
 
 mode=${1:-smoke}

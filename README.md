@@ -36,6 +36,24 @@ pr-meta 仅九字段，不含 CI 或签名验收；skill-resource 仅六字段�
 
 专项：sh tests/run-tests.sh case test-auth-call.py，默认不进 full。新增同族测试是因为既有 body/privacy 套件不覆盖固定认证动作；设计预算见 test-authoring，耗时以实跑为准。
 
+## 技能专项离线验收
+
+`tools/lh-verify.py` 把一次 LobeHub 技能专项观察记录与**同一提交**的仓库原字节对账；只读、无网络、无写入。
+
+```sh
+python3 -I -B tools/lh-verify.py --repo REPO --git-version <40位小写hex> \
+    --object luno-ops [--object …] --evidence evidence.json
+```
+
+- **输入**：固定严格 JSON（`schemaVersion`=1、`observation`、`objects`）；各层列出的键全必需，多余键、任意层重复键、错类型、非有限数值 rc=2，缺必需字段 rc=3。`projection` 的 `name`/`description`/`identifier`/`content` 允许 `null`，缺字段、`null`、空串互相不等。记录是 `auth-call.py skill-resource` 的**原始** stdout/stderr 字符串，不接受已解析对象。
+- **对象**：只取该提交 `tools/sync-targets.json` 里 `type=skill` 且 `ends.lobehub.present=true` 的项；`projection.id` 比登记的 LobeHub ID，不等即身份差异并停止该对象内容比较；`request.id` 必须等登记 ID，`response.path` 必须等 `request.path`，不靠 path 猜 ID。
+- **判据**：完整 `resourcePaths` 与登记集合先比（登记有、现场无 → 差异；现场多 → 只报告，不接受其正文记录、不扩读）；`name`/`description` 用同提交 `SKILL.md` 的 `fm_get`，`content` 用 `body_contract.body_bytes`（不 strip、不补尾换行、CRLF 不归一）；资源按**原字节**比较；每条记录核结构、编码、`size`、`fileHash`（失败记录只认固定码，未知文本不透传）。`identifier` 仅覆盖已确证五技能：同版 `name`=对象 ID 且 `installSource` 恰为 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/<ID>` 时期望 `lucalin233-agent-sync-<ID>`，否则记缺证。
+- **Git**：`shell=False`、白名单环境，禁 global/system 配置、optional locks、fsmonitor、replace objects、lazy fetch；只认完整本地仓，缺对象即停，不 fetch 修复。
+- **输出**：stdout 一份 JSON（`gitVersion`/`status`/`objects`/`missingEvidence`/`errors`），不输出正文或元数据值。退出码 0 匹配 / 1 确证差异 / 2 参数、格式、执行或已记录读取错误 / 3 缺证，并存按 2>3>1>0。
+- **边界**：工具只证结构与字节一致。真实实例、源端版本、采集侧投影、资源集合完整性、记录真实性和无并发须由当次可信调用方在外部核准；`sourceBasis` 只是依据定位引用，不打开也不当批准或真实性证明；标签一致的伪造记录仍可能 rc=0。写前写明旧提交与新观察，写后对合并提交另做一次观察，否则只能看出可观察路径/bytes 差异。
+
+专项：`sh tests/run-tests.sh case test-lh-verify.py`，不进 full；跑集另含依赖变更命中的 verify 消费者选路。
+
 ## 测试与历史
 
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。
