@@ -6,6 +6,7 @@
 #   select：读取该 JSON（文件参数或 stdin），合并去重后运行。
 # 变更路径→必跑套件（机器表 tests/test_paths.py；本块与 render-paths 输出须一致）：
 # >>> PATHS_RULES
+#   固定认证读取 → auth
 #   结构守卫或边登记 → gate
 #   正文契约及既有用例 → body
 #   Surge 包内文件、登记或包态测试 → surge 包态
@@ -26,6 +27,7 @@ esac
 # 名称|分组|命令|进 full
 # unittest 以模块名加载：文件名带连字符，discover 找不到；整模块导入后再收集用例。
 CASES='
+test-auth-call.py|auth|cd tests && python3 -B -m unittest -v test-auth-call|0
 check-rules.py|smoke|python3 -B tools/check-rules.py|1
 test-check-rules.sh|gate|sh tests/test-check-rules.sh|1
 test-body-contract.py|body|cd tests && python3 -B -m unittest -v test-body-contract|1

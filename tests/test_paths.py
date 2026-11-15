@@ -9,6 +9,8 @@ import json
 import sys
 
 PATHS_RULES = (
+    (('tools/auth-call.py', 'tests/test-auth-call.py'),
+     ('case', 'test-auth-call.py'), '固定认证读取 → auth'),
     (('tools/check-rules.py', 'tools/sync-targets.json',
       'tests/test-check-rules.sh'),
      ('group', 'gate'), '结构守卫或边登记 → gate'),
