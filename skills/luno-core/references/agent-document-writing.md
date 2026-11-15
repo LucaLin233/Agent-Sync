@@ -15,7 +15,7 @@
 
 ## 指针与触发
 
-指针是上下文中指向外部材料、并注明读取时机的一行（技能 `description`、加载语句、资源指句）。**读取时机由措辞决定，而不是由目标决定**：必读的材料配上含糊的措辞会导致时读时不读，先把措辞写准，再考虑是否内联。每个真实分支（文档要处理的不同情形）写一个触发，同一分支的同义说法合并；正文里已经写明的身份不必在指针里重复。常驻的指针每轮都要付费，删减标准要比正文更严。
+指针是上下文中指向外部材料、并注明读取时机的一行（技能 `description`、加载语句、资源指句）。技能 `description` 写清适用范围和边界；不同模型和宿主的自动触发方式及效果不能互相外推，不用强触发措辞替代本端的准确路由。**读取时机由措辞决定，而不是由目标决定**：必读的材料配上含糊的措辞会导致时读时不读，先把措辞写准，再考虑是否内联。每个真实分支（文档要处理的不同情形）写一个触发，同一分支的同义说法合并；正文里已经写明的身份不必在指针里重复。常驻的指针每轮都要付费，删减标准要比正文更严。
 
 **反引号里的跨技能路径必须带技能名前缀**（如 `luno-surge/references/SOURCE.md`），不能只写 `references/…`：后者会被 `tools/check-rules.py` 按**当前技能根**解析，判为引用断链或资源边未登记。
 
@@ -29,12 +29,12 @@
 
 ## 删减判据
 
-- **环境本身就是真源**：复述环境（配置、目录布局、命令输出）的文字只是缓存；只缓存查不到的东西，比如没成文的约定、选择背后的理由、配置里看不出来的坑。
+- **环境本身就是真源**：复述配置、目录布局或命令输出的文字是缓存；优先只记环境里查不到的约定、选择理由和隐含限制。查询代价高且确需复用时可以缓存已核事实，但须保留来源、版本或日期、适用范围及重核条件，不把缓存当当前真源。
 - **相关性**：删掉不承载当前任务的行，以及会随行为和外部世界变化而过时的行。
 - **沉积**：只增不减会形成旧层；加规则安全、删规则冒险，时间长了活的规则就要往下翻很久才找得到。
-- **no-op 逐句测试**：判断标准是「相对默认行为有没有改变」，靠实际跑一次或对照已有行为来判断，不靠辩论；一句话不过关就整句删掉，不逐字修补。
+- **no-op 逐句核对**：先核规则职责、适用场景和反例，再与默认行为或旧版对照；单次运行没有差异不足以证明无效。只有证据表明不承载必要义务时才删除，安全、授权、秘密、恢复等边界不能因一次未触发而删；存疑保留并按同步分级处理。
 
-不采用的做法：按调用拆分技能、router skill、`disable-model-invocation` 之类的调用机制，以及用单个「锚词」代替多句说明。
+不直接移植本端宿主未支持或未经核实的调用机制，如 `disable-model-invocation`；按调用拆分或 router skill 也不作为默认改造方案。这不排除本端已有、按真实任务分支渐进加载的最小路由。仍不以单个「锚词」替代多句说明。
 
 来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END agent-document-writing -->
@@ -43,7 +43,7 @@
 <!-- BEGIN skill-authoring -->
 # 技能编写与结构校验
 
-通用写法（自由度、目录与 `scripts/`/`references/`/`assets/` 分工、渐进披露、`description` 写法）按 [Anthropic 技能编写最佳实践](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) 和 [Agent Skills 规范](https://agentskills.io/specification)；效果评测（with/without 对照、近失负例、留出集、多次运行看方差、客观断言与人工判断分开）按 [anthropics/skills 的 skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md)。改技能就是改行为，要有对照，不凭印象。效果评测须在运行前写明成功、失败的判据和观察输出；不得在看到结果后选择判据。书写启发式见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；发布、登记刷新和平台安装见 `luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
+通用写法（自由度、目录与 `scripts/`/`references/`/`assets/` 分工、渐进披露、`description` 写法）按 [Anthropic 技能编写最佳实践](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) 和 [Agent Skills 规范](https://agentskills.io/specification)；效果评测（with/without 对照、近失负例、留出集、多次运行看方差、客观断言与人工判断分开）按 [anthropics/skills 的 skill-creator](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md)。影响实际触发、路由或执行行为的技能改动，要按受影响场景作最小对照，优先比较旧版与候选；无旧版时再用不加载该技能作基线，不凭印象。可证明不改变解释、加载闭包和义务的 typo、排版或精确重复删除，不一律做行为效果评测；风险分级及必要的最终差分独审仍按同步规则。效果评测须在运行前写明成功、失败的判据和观察输出；不得在看到结果后选择判据。书写启发式见 `references/agent-document-writing.md`〔分支 agent-document-writing〕；发布、登记刷新和平台安装见 `luno-core/references/sync.md`〔分支 sync〕、`luno-platform/references/minis.md`〔分支 minis〕和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
 - **受管范围**：下列约束只针对受管的自定义技能；平台内置技能不按此判定无效，也不改写、不纳入受管同步。受管技能的目录名必须等于 `name`。
 - **结构校验**：本地只用 `luno-core/scripts/quick_validate.py`（唯一实现），按本次变化的技能直接调用。它只查 frontmatter 的字段与限制、目录名与 `name` 相同、正文非空；**通过不等于可用**，正文质量、`description` 的触发、资源引用、链接与代码能否运行、许可是否齐备都不查。运行需要 Python 3 和 PyYAML；依赖或脚本缺失就停，不回退较弱判据，也不自动安装。

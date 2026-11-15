@@ -89,14 +89,14 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **openai/skills@`49f948faa9258a0c61caceaf225e179651397431`**（提交时间 2026-06-24T02:36:12Z；2026-11-05 经公开 API 确认可取）：取自 `skills/.system/skill-creator/`，许可 Apache-2.0，许可原字节随包为 `LICENSE.apache-2.0.txt`。
 
-- 2026-11-12 起，`references/agent-document-writing.md`〔分支 skill-authoring〕 不再含改写正文：自由度、资源分工、目录结构和评测方法改为指向 Anthropic 技能编写最佳实践、Agent Skills 规范和 anthropics/skills 的 skill-creator，分支只留受管范围和校验器边界两条本机约定。
+- 2026-11-12 起，`references/agent-document-writing.md`〔分支 skill-authoring〕 的通用自由度、资源分工、目录结构和评测方法改为指向 Anthropic 技能编写最佳实践、Agent Skills 规范和 anthropics/skills 的 skill-creator；分支保留本端受管范围、校验器边界，以及按实际行为影响做最小对照、优先旧版基线和遵守同步分级的约定，不整段吸收上游评测流程。
 - 校验器 `scripts/quick_validate.py` 源自上游的 `quick_validate.py`，已在本地修改。
 - 校验器保留 Apache-2.0 修改声明。已去掉 Codex 专用件，初始化器已退役。
 - 已知缺口：历史上端侧退役的未闭合记录没有补证，不能视为已完成。
 
 **mattpocock/skills（writing-for-agents 固定提交，见〈共用上游〉）**（直接取自上游 GitHub，不经市场）：`skills/productivity/writing-for-agents/SKILL.md`（该文件 sha256 `551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a`）→ `references/agent-document-writing.md`〔分支 agent-document-writing〕，是中文适配改写，没有作为独立技能入库。上游事实取自 2026-10-07 的核对记录，补登记时没有重新取上游。
 
-- 未采纳 `SKILL-MECHANICS.md` 的调用机制（`disable-model-invocation`、按调用拆分、router skill）。
+- 未移植 `SKILL-MECHANICS.md` 的宿主专属调用机制（如 `disable-model-invocation`），不默认采用按调用拆分或 router skill 改造；不据此排除本端已有的真实分支最小路由。环境缓存保留查询代价高的受控例外；no-op 判据不采用单次无差异即删除，必要安全边界仍保留。
 - 未采纳 leading words：中文锚词没有本端证据，不推广「一词代替多句」。
 - 未把 negation 当作普遍定律，不据此改写现行的禁令式表述。
 - 「按序列拆分」只作启发式，不授予派发权限，派发仍按各入口和子代理的规则。

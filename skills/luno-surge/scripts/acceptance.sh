@@ -69,6 +69,14 @@ trap 'rm -rf "$TMP"' EXIT INT TERM
 command -v "$CLI" >/dev/null || fail "surge-cli is not installed"
 
 "$CLI" --raw version > "$TMP/version.json"; json_check "$TMP/version.json" "version"
+# 协议门槛先于任何上传、metrics 或性能查询：低于 22 的实例直接失败。
+python3 - "$TMP/version.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1]))
+assert x.get("controller-protocol",0)>=22, "Controller Protocol 22+ required"
+assert x.get("system") in ("iOS","macOS"), "Unexpected Surge platform"
+PY
+pass "Controller handshake and capability"
 if [ "$MODE" = --network ]; then
 cat > "$TMP/minimal.conf" <<'EOF'
 [General]
@@ -86,14 +94,6 @@ if [ -n "${SURGE_API_KEY:-}" ]; then
   grep -q '^# TYPE surge_build_info gauge$' "$TMP/metrics.txt" || fail "Prometheus metrics output is invalid"
   pass "Prometheus metrics endpoint"
 fi
-python3 - "$TMP/version.json" <<'PY'
-import json,sys
-x=json.load(open(sys.argv[1]))
-assert x.get("controller-protocol",0)>=20, "Controller Protocol 20+ required"
-assert x.get("system") in ("iOS","macOS"), "Unexpected Surge platform"
-PY
-pass "Controller handshake and capability"
-
 "$CLI" --raw status > "$TMP/status.json"; json_check "$TMP/status.json" "status"
 "$CLI" --raw summary > "$TMP/summary.json"; json_check "$TMP/summary.json" "summary"
 "$CLI" --raw dump performance > "$TMP/performance.json"; json_check "$TMP/performance.json" "dump performance"

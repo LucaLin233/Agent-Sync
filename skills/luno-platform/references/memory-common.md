@@ -4,11 +4,11 @@
 <!-- BEGIN memory-common -->
 # LUNO｜经验与记忆纠错
 
-记忆各端自持：LobeHub 知识库不作跨端载体，也不回写 Minis。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有涉及记忆更正、事故或复发、固化候选或疑似规则缺口时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
+日志及未指定的其他记忆各端自持，不互导。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向私人副本，Minis 为唯一真源；LobeHub 优先私人助理空间文件，仅在确认该能力不可用时以私有知识库文档兜底，均须按已核实的文件路径或文档 ID 完整读取，不以检索片段或摘要代替，不导入原生记忆。目标独有修改或冲突即停，不回写或双向合并；涉及该私人副本时，完整读 `references/lobehub-knowledge.md`〔分支 knowledge〕。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有涉及记忆更正、事故或复发、固化候选或疑似规则缺口时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
 
 ## 资源与触发
 
-实际读写、整理或更正记忆，处理事故或错误复发、固化候选、疑似规则缺口，以及对它们做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时也先读它，再由它转到 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口；LobeHub 记忆操作、规划或审查另完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。
+纯检索记忆时，完整读取本分支及本端检索入口，不加载仅写入格式和容量维护。写入、整理或更正记忆，处理事故或错误复发、固化候选、疑似规则缺口，以及对它们做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕；检索中命中这些情形，或发现日志达到约 100 KiB、注入截断时，也须补读 maintenance 及其命中的 correction 分支。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时，先读 maintenance，再读 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口；LobeHub 记忆操作、规划或审查另完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。
 
 ## 检索与采用
 
@@ -34,7 +34,7 @@
 
 ## 写入前后的检查
 
-- **写入前**：检查关键词、必留信息、秘密和已知重复。其他存储形态的端（如分层数据库记录）按其实际容量或检索机制检查，无此维度标「不适用」，未知报缺口。Minis 另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 的写前容量规则。不用压短单条、填空行或删事实来达标。
+- **写入前**：检查关键词、必留信息、秘密和已知重复。其他存储形态的端（如分层数据库记录）按其实际容量或检索机制检查，无此维度标「不适用」，未知报缺口。Minis 另完整读取 `references/minis-memory.md`〔分支 minis-memory-injection〕 的关键词位置和写前容量规则。不用压短单条、填空行或删事实来达标。
 - **写入后**：回读新增条目，核对格式、内容、**字节数和物理行数**；字节和行数必须实测，不用自估。
 - **不可用时**：检索不可用不阻止授权内写入，但不得声称已查重。除符合 `references/minis-memory.md`〔分支 minis-memory〕〈Minis 记忆读写入口〉的已授权文件分支外，记忆关闭、写入工具不可用或无写权限时，不改用文件写入绕过。
 
@@ -46,7 +46,7 @@
 
 ## 整理、纠正与固化分支
 
-日志达到约 100 KiB 或发现注入截断时，以及整理或更正记忆、处理事故或复发、固化候选或疑似规则缺口的规划、审查或执行前，另完整读 `references/memory-common.md`〔分支 correction〕。整理或更正后的下一次获授权写入，也必须读它并执行其中的写后复核。普通新增或检索只有未命中这些条件时才只读本资源的共同规则；出现上述情形立即补读，不得把修正当普通新增来绕过范围、备份、事实对应、撤销链、回读或下次写入复核。
+日志达到约 100 KiB 或发现注入截断时，以及整理或更正记忆、处理事故或复发、固化候选或疑似规则缺口的规划、审查或执行前，另完整读 `references/memory-common.md`〔分支 correction〕。整理或更正后的下一次获授权写入，也必须读它并执行其中的写后复核。普通新增未命中这些条件时只读本维护分支的共同规则；纯检索按 memory-common 分支加载；出现上述情形立即补读，不得把修正当普通新增来绕过范围、备份、事实对应、撤销链、回读或下次写入复核。
 
 来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock；不采用“无护栏即缺陷”或无条件新建检查器、门禁。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END maintenance -->

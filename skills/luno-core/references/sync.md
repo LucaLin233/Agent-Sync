@@ -6,7 +6,7 @@
 
 ## 范围
 
-本技能处理**跨端规则对象**（常驻提示词、`luno-*` 与专题技能、子代理指令）在三处落点的同步、巡检和漂移修复：Minis 本地、LobeHub 平台、公开仓库 `LucaLin233/Agent-Sync`。**记忆各端自持，不互相同步**，各端的记忆写法见 `luno-platform/references/minis.md`〔分支 minis〕 和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
+本技能处理**跨端规则对象**（常驻提示词、`luno-*` 与专题技能、子代理指令）在三处落点的同步、巡检和漂移修复：Minis 本地、LobeHub 平台、公开仓库 `LucaLin233/Agent-Sync`。**日志和未指定的其他记忆各端自持，不互相同步**。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向同步到经核实的 LobeHub 私人载体，Minis 文件为唯一真源，不分区、不回写、不双向合并；目标独有修改或冲突即停下交用户核对。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。载体、首次读取和恢复细则见 `luno-platform/references/lobehub-knowledge.md`〔分支 knowledge〕；本例外不纳入公开规则发布或默认部署授权，私人读写依当次授权执行，各端的记忆写法见 `luno-platform/references/minis.md`〔分支 minis〕 和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
 管理落点是 Minis、LobeHub 和公开仓库，运行端是 Minis 和 LobeHub；并不是每个对象三处都有。对象的身份和各端落点只以 `tools/sync-targets.json` 这一份登记为准：某端标为没有的不算漂移，`present` 只表示受管存在，不表示已部署或已核验。正文里不缓存各对象的部署状态，部署沿革见旧私有仓库 `LucaLin233/Agent` 的 git 历史。部署前按登记 ID 回读既有对象的实际身份、identifier 和生效字段；首次安装按已审来源与名称核目标，取得实际 ID 后补登记。与已审基线冲突就停止相关对象并交负责人判定。现在不再做自动的三副本互校和同名发现，所以不能声称已排除额外的同名对象；需要查询时也要有当次授权。
 

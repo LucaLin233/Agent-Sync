@@ -97,7 +97,8 @@ def main() -> int:
     )
 
     try:
-        with urllib.request.build_opener(_NoRedirect).open(request, timeout=args.timeout + 8) as response:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect).open(
+                request, timeout=args.timeout + 8) as response:
             payload = json.loads(response.read())
             result = payload.get("result", payload)
             output = {

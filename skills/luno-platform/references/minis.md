@@ -36,7 +36,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 <!-- BEGIN minis-configuration -->
 # Minis 客户端配置
 
-本资源的操作只在Minis端可用。配置任务整份读取。
+本资源的操作只在Minis端可用。配置任务完整读取本分支。
 
 ## 配置接口
 
@@ -60,7 +60,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 ## 记忆与生效真源
 
-- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`。需要每轮注入的偏好和约定可以放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户的明示修改，只承载本端约定，不作跨端真源。记忆的边界、更正和诚实边界见 `references/memory-common.md`〔分支 memory-common〕；注入窗口和容量见本技能的记忆资源。
+- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`，日志仍各端自持。需每轮注入的偏好和约定可放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户明示修改；用户已指定 `/var/minis/memory/GLOBAL.md` 为整份单向同步至 LobeHub 私人载体的唯一真源，不分区、不反向回写或双向合并。目标独有修改或冲突停下交用户核对；私人载体与完整读取细则见 `references/lobehub-knowledge.md`〔分支 knowledge〕。秘密不得进入 GLOBAL；端专属事实标适用范围、日期和例外，偏好不等于已安装事实或操作授权。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。记忆边界见 `references/memory-common.md`〔分支 memory-common〕；Minis 注入窗口和容量仍按本端资源，不推定 LobeHub 自动加载同名文件。
 - **跨端规则的生效真源在 Minis**：技能正文 `/var/minis/skills/<name>/SKILL.md`，常驻提示词 `soul.body`（文件视图 `SOUL.md`）。候选只在隔离的仓库副本里编辑，写生效端之前必须按 `luno-core/references/sync.md`〔分支 sync〕 的同步流程执行。
 
 ## 技能登记

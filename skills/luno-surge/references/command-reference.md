@@ -300,7 +300,7 @@ Protocol 25 仍兼容旧的 JSON `argv` 请求，但本客户端已对齐正式�
 <!-- BEGIN diagnostics -->
 # Surge 按需诊断
 
-只在实际排查对应功能时读取，并先按入口 §2 做完引擎状态预检。命令语法、key-path 和响应字段先按 [共同前置与任务目录](command-reference.md#branch-command-reference) 完整读取命中分支，协议门槛和平台限制以 [platform-compatibility.md](command-reference.md#branch-platform-compatibility) 为准。这里只写 Surge 特有的行为，不用其他代理软件的语法代替。
+只在实际排查对应功能时读取，并先按入口 §2 做完引擎状态预检。命令语法、key-path 和响应字段先按 [共同前置与任务目录](command-reference.md#branch-command-reference) 完整读取命中分支，协议门槛和平台限制以 [平台与协议门槛](command-reference.md#branch-platform-compatibility) 为准。这里只写 Surge 特有的行为，不用其他代理软件的语法代替。
 
 ## 流量与多帧输出
 

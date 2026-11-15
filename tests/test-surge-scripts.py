@@ -6,6 +6,15 @@ scripts/*。多数用例在本进程内执行入口（见 run_entry），每个�
 写入（revision、POST 后不重投、备份目录、TLS、门禁先于副作用）、
 专用打包器（按 manifest 全部 build 累积拒绝完整官方文件）、安装与验收档。真包与登记等包态判据在
 test-surge-package.py。
+
+入口成本与常跑取舍（2026-11-16，iSH 独审单次样本，非稳定基准）：本文件仍在 full 集内
+（tests/run-tests.sh 用例表第 4 列为 1）。新增回归守住本次已证实的安全/协议入口契约：环境代理
+可能携带合成认证外发，以及低协议须在上传/metrics 前失败。每批完整回归都需守住认证去向和
+副作用前的协议门槛，因此本批发布者选择保留既有 full 归属、原断言和运行入口，不另造 opt-in 或提速框架。
+超过 10 s 是因为保留各入口的真实子进程与本地夹具回归——含代理污染与隔离负控、acceptance 替身 CLI
+与临时根核验——不为提速删除断言或拆文件。注释修订前的超限例外：文件 85020→93147 B（+8127 B），
+iSH 入口旧 18 s→新 32 s；这不是稳定性能基准。实际仍按 tests/run-tests.sh 的变更路径命中执行，
+不默认加跑 full；已核降级入口为 sh tests/run-tests.sh case test-surge-scripts.py，只定向运行同一完整入口。
 """
 import contextlib
 import errno
@@ -534,6 +543,78 @@ class HttpEntryTest(unittest.TestCase):
                 self.assertNotEqual(0, r.returncode)
                 self.assertNotIn('SYNTH', r.stdout + r.stderr)
 
+    def polluted_env(self, base, proxy):
+        """最小白名单环境＋大小写代理变量；显式清掉 offline_env 的 no_proxy=* 旁路。"""
+        env = offline_env(base)
+        for name in ('no_proxy', 'NO_PROXY'):
+            env.pop(name, None)
+        for name in ('HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy',
+                     'ALL_PROXY', 'all_proxy'):
+            env[name] = proxy
+        return env
+
+    def proxy_entries(self):
+        return ((SURGE_IOS, ['outbound'], None),
+                (POLICY_DESCRIPTOR, ['--descriptor-file', '-'], PROBE))
+
+    def test_environment_proxy_is_not_used(self):
+        """两个入口在代理污染下仍直达目标：目标收到合成 key，代理接收器 0 请求（真实子进程）。"""
+        for script, args, stdin in self.proxy_entries():
+            with self.subTest(script=script.name):
+                target = self.fixture(json_reply(b'{"result": {"status": 200}}'))
+                proxy = self.fixture(json_reply(b'{"result": {"status": 200}}'))
+                if script == POLICY_DESCRIPTOR:
+                    args = ['--api-base', target.base] + args
+                r = run_entry(script, args, self.polluted_env(target.base, proxy.base),
+                              stdin=stdin or b'', process=True)
+                self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+                self.assertEqual([API_KEY], target.keys())
+                self.assertEqual([], proxy.requests)
+
+    def test_negative_control_without_empty_proxy_handler(self):
+        """负控：隔离副本去掉 ProxyHandler({}) 后同场景改走代理，证明上面的断言不空转。"""
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        stripped = Path(temp.name)
+        for entry in SCRIPTS.iterdir():
+            (stripped / entry.name).symlink_to(entry)
+        for name, old, new in (
+                ('surge_ios.py', 'build_opener(ProxyHandler({}), _NoRedirect)',
+                 'build_opener(_NoRedirect)'),
+                ('test_policy_descriptor.py',
+                 'urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)',
+                 'urllib.request.build_opener(_NoRedirect)')):
+            path = stripped / name
+            path.unlink()
+            text = (SCRIPTS / name).read_text()
+            self.assertIn(old, text)
+            path.write_text(text.replace(old, new))
+        for name, args, stdin in ((SURGE_IOS.name, ['outbound'], None),
+                                  (POLICY_DESCRIPTOR.name, ['--descriptor-file', '-'], PROBE)):
+            with self.subTest(script=name):
+                target = self.fixture(json_reply(b'{"result": {"status": 200}}'))
+                proxy = self.fixture(json_reply(b'{"result": {"status": 200}}'))
+                if name == POLICY_DESCRIPTOR.name:
+                    args = ['--api-base', target.base] + args
+                run_entry(stripped / name, args, self.polluted_env(target.base, proxy.base),
+                          stdin=stdin or b'', process=True)
+                self.assertTrue(proxy.requests, '注入代理未被使用，回归无法证明有效')
+                self.assertEqual([], target.requests)
+
+    def test_empty_proxy_handler_seam_covers_http_and_https(self):
+        """标准库接缝：空 ProxyHandler 压过 getproxies()，对 http/https 同一机制。
+
+        没有可信 TLS 夹具，因此这不是 HTTPS 端到端实测，只证明 opener 不取环境代理。
+        """
+        with mock.patch.dict(os.environ, {'HTTP_PROXY': 'http://127.0.0.1:9',
+                                          'HTTPS_PROXY': 'http://127.0.0.1:9'}, clear=False):
+            self.assertTrue(urllib.request.getproxies())
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # http 与 https 共用 ProxyHandler 解析；空映射后 opener 里不残留任何代理映射（本机 CPython
+        # 3.12 观察：空 ProxyHandler 实例直接不进入 handlers 列表）。
+        self.assertEqual([], [h.proxies for h in opener.handlers
+                              if isinstance(h, urllib.request.ProxyHandler)])
+
 
 # ── surge_cli（Controller 客户端）───────────────────────────────────────────
 class SurgeCliTest(unittest.TestCase):
@@ -995,6 +1076,78 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(0, r.returncode, r.stderr)
         self.assertEqual(str(self.cli), os.path.realpath(str(target)))
         self.assertIn('Installed: %s -> %s\n' % (target, self.cli), r.stdout)
+
+
+# ── 验收档 --controller／--network：Controller Protocol 22 门槛先于上传/metrics ──
+class ControllerTierTest(unittest.TestCase):
+    """本地 surge-cli 替身记录 argv；mktemp 替身把 acceptance 的临时根限定在测试根内。"""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.tmp = Path(temp.name)
+        self.pkg = self.tmp / 'pkg'
+        shutil.copytree(str(SCRIPTS), str(self.pkg / 'scripts'))
+        self.bin = self.tmp / 'bin'
+        self.bin.mkdir()
+        self.log = self.tmp / 'argv.jsonl'
+        self.tmproot = self.tmp / 'acc-tmp'
+        self.tmproot.mkdir()
+        cli = self.bin / 'surge-cli'
+        cli.write_text(
+            '#!%s\n'
+            'import json, os, sys\n'
+            'a = sys.argv[1:]\n'
+            'open(os.environ["FAKE_CLI_LOG"], "a").write(json.dumps(a) + "\\n")\n'
+            'if a == ["--raw", "version"]:\n'
+            '    d = {"system": "iOS"}\n'
+            '    if os.environ.get("FAKE_PROTOCOL") != "missing":\n'
+            '        d["controller-protocol"] = int(os.environ["FAKE_PROTOCOL"])\n'
+            '    print(json.dumps(d))\n'
+            'elif a[:1] == ["--check"]:\n'
+            '    print("OK")\n'
+            'else:\n'
+            '    print("{}")\n' % sys.executable)
+        cli.chmod(0o755)
+        mktemp = self.bin / 'mktemp'
+        mktemp.write_text('#!/bin/sh\nmkdir -p "$FAKE_TMP_ROOT/acc.$$"\necho "$FAKE_TMP_ROOT/acc.$$"\n')
+        mktemp.chmod(0o755)
+
+    def run_tier(self, protocol, mode):
+        if self.log.exists():
+            self.log.unlink()
+        env = {k: v for k, v in os.environ.items() if not k.startswith('SURGE_')}
+        env['PATH'] = os.pathsep.join([str(self.bin), os.path.dirname(sys.executable),
+                                       '/bin', '/usr/bin'])
+        env.update(FAKE_CLI_LOG=str(self.log), FAKE_TMP_ROOT=str(self.tmproot),
+                   FAKE_PROTOCOL=protocol)
+        r = subprocess.run(['sh', str(self.pkg / 'scripts/acceptance.sh'), mode],
+                           cwd=str(self.tmp), env=env, capture_output=True, text=True,
+                           timeout=120)
+        calls = ([json.loads(line) for line in self.log.read_text().splitlines()]
+                 if self.log.exists() else [])
+        return r, calls
+
+    def test_protocol_below_22_fails_before_upload_metrics_or_performance(self):
+        for protocol in ('missing', '20', '21'):
+            for mode in ('--controller', '--network'):
+                with self.subTest(protocol=protocol, mode=mode):
+                    r, calls = self.run_tier(protocol, mode)
+                    self.assertEqual(1, r.returncode)
+                    self.assertIn('Controller Protocol 22+ required', r.stderr)
+                    self.assertEqual([['--raw', 'version']], calls)
+                    self.assertNotIn('Prometheus', r.stdout)
+
+    def test_protocol_22_still_requires_dump_performance(self):
+        r, calls = self.run_tier('22', '--controller')
+        self.assertEqual(0, r.returncode, r.stdout + r.stderr)
+        self.assertIn('PASS  Controller handshake and capability\n', r.stdout)
+        self.assertIn(['--raw', 'dump', 'performance'], calls)
+
+    def test_acceptance_temp_root_is_cleaned(self):
+        r, _ = self.run_tier('22', '--controller')
+        self.assertEqual(0, r.returncode, r.stderr)
+        self.assertEqual([], list(self.tmproot.iterdir()))
 
 
 # ── 安全分节写入（surge_ios.py section replace）───────────────────────────────

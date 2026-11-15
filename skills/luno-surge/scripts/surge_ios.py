@@ -80,7 +80,7 @@ def request(method, path, body=None, dangerous=False, confirm=False):
         headers["Content-Type"] = "application/json"
     req = Request(BASE + path, data=data, headers=headers, method=method)
     try:
-        with build_opener(_NoRedirect).open(req, timeout=30) as response:
+        with build_opener(ProxyHandler({}), _NoRedirect).open(req, timeout=30) as response:
             raw = response.read()
             ctype = response.headers.get("Content-Type", "")
     except HTTPError as e:
