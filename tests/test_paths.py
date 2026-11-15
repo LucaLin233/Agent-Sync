@@ -38,6 +38,12 @@ PATHS_RULES = (
      ('case', 'test-lh-verify.py'), '正文契约变更 → verify 消费者'),
     (('tools/sync-targets.json',),
      ('case', 'test-lh-verify.py'), '对象登记变更 → verify 消费者'),
+    (('tools/minis-verify.py', 'tests/test-minis-verify.py'),
+     ('case', 'test-minis-verify.py'), 'Minis 本端验收工具或工具测试 → minis-verify'),
+    (('tools/body_contract.py', 'tests/test-body-contract.py'),
+     ('case', 'test-minis-verify.py'), '正文契约变更 → Minis 验收消费者'),
+    (('tools/sync-targets.json',),
+     ('case', 'test-minis-verify.py'), '对象登记变更 → Minis 验收消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
     (('tests/run-tests.sh', 'tests/test_paths.py', 'tools/sync-all.sh',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),

@@ -17,6 +17,9 @@
 #   固定认证读取变更 → verify 消费者
 #   正文契约变更 → verify 消费者
 #   对象登记变更 → verify 消费者
+#   Minis 本端验收工具或工具测试 → minis-verify
+#   正文契约变更 → Minis 验收消费者
+#   对象登记变更 → Minis 验收消费者
 #   运行器与聚合入口 → full
 # <<<
 set -u
@@ -40,6 +43,7 @@ test-surge-package.py|surge|cd tests && python3 -B -m unittest -v test-surge-pac
 test-surge-scripts.py|surge|cd tests && python3 -B -m unittest -v test-surge-scripts|1
 test-commit-identities.py|identity|cd tests && python3 -B -m unittest -v test-commit-identities|0
 test-lh-verify.py|verify|cd tests && python3 -B -m unittest -v test-lh-verify|0
+test-minis-verify.py|minis-verify|cd tests && python3 -B -m unittest -v test-minis-verify|0
 '
 
 mode=${1:-smoke}
