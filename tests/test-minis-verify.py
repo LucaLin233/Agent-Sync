@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""tools/minis-verify.py 本端纵切片（契约见 README〈Minis 本端只读验收〉）：真实 -I -B CLI、Git
-双提交＋pack、字节与模式、SOUL/子代理口径、包集合与枚举上限、安全文件边界接缝、投影、聚合。
-
-为什么入口偏重（实测约 13.6 s，超 10 s 设计预算；本批发布者已接受该例外）：`setUpClass` 共享真实
-Git 双提交及 pack/gc 夹具（`build` 建 first/second 两次提交后执行 `gc`），多数用例经真实 `-I -B`
-子进程调用工具 CLI；枚举原语与身份
-负控等少数用例在进程内调用工具模块，不经过子进程；M1/M3 另有各自的真实仓库与站点树。需要真实子进程
-与真实 Git 的覆盖点（退出码、stderr 空白、按提交读取、pack）和需要真实系统调用观测点的覆盖点
-（同父重开、目录前后元数据、部分推栈）无法用纯进程内断言等值替代，成本主要来自每次子进程解释器启动
-与 Git 操作。可降级方向（未采用，需发布者裁定）：把 M1/M3 的子进程用例改为进程内调用，并保留一个
-共用子进程用例守住进程边界，代价是失败退出通道与 stderr 空白的覆盖变稀。
+"""tools/minis-verify.py 本端纵切片：共享真实 Git 双提交及 pack 夹具。
+test_live_slice_and_shapes、test_git_history_pack_and_missing 保留真实 -I -B CLI；
+其他用例调用 main，退出码、stdout、stderr 断言保留；故障注入和负控仍走真实系统调用。
+历史基线约 13.6 s 来自 PR55 原文件头，未给出环境，不能当作本版或本机实测。
+本机同环境实测（Minis/iSH Alpine aarch64、CPython 3.12.15、git 2.47.3）：本文件 13.9 s →
+9.2 s，全部必跑集 20.9 s → 16.2 s。
 """
 import contextlib
 import importlib.util
@@ -138,16 +133,26 @@ class MinisVerify(unittest.TestCase):
         self.dir = os.path.join(self.root, "var/minis/skills/alpha")
         self.soul = os.path.join(self.root, "var/minis/memory/SOUL.md")
 
-    def run_cli(self, *args, version=None, objects=("alpha",), projection_path=None):
-        argv = [sys.executable, "-I", "-B", TOOL, "--repo", self.fx["repo"],
-                "--git-version", version or self.fx["first"], "--root", self.root]
+    def run_main(self, argv, tool=None):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = (load_tool() if tool is None else tool).main(argv)
+        self.assertEqual(err.getvalue(), "", "stderr 必须是空")
+        text = out.getvalue()
+        return rc, json.loads(text), text
+
+    def run_tool(self, *args, version=None, objects=("alpha",), projection_path=None, real=False):
+        argv = ["--repo", self.fx["repo"], "--git-version", version or self.fx["first"], "--root", self.root]
         for obj in objects:
             argv += ["--object", obj]
         if projection_path:
             argv += ["--projection", projection_path]
-        proc = subprocess.run(argv + list(args), cwd="/", capture_output=True)
+        if not real:
+            return self.run_main(argv + list(args))
+        proc = subprocess.run([sys.executable, "-I", "-B", TOOL] + argv + list(args), cwd="/", capture_output=True)
         self.assertEqual(proc.stderr, b"", "stderr 必须是空")
-        return proc.returncode, json.loads(proc.stdout.decode()), proc.stdout.decode()
+        text = proc.stdout.decode()
+        return proc.returncode, json.loads(text), text
 
     def status(self, doc, item):
         return next((c["status"] for c in doc["checks"] if c["item"] == item), None)
@@ -173,8 +178,8 @@ class MinisVerify(unittest.TestCase):
     # 1 正常纵切片
     def test_live_slice_and_shapes(self):
         proj = self.write_projection(projection(self.body(), "instructions body"))
-        rc, doc, text = self.run_cli(objects=("alpha", "prompt/P.md", "subagents/S.md"),
-                                     projection_path=proj)
+        rc, doc, text = self.run_tool(objects=("alpha", "prompt/P.md", "subagents/S.md"),
+                                     projection_path=proj, real=True)
         self.assertEqual(rc, 0, doc["issues"])
         self.assertEqual(doc["status"], "match")
         self.assertEqual(doc["rootView"], "relocated")
@@ -187,61 +192,61 @@ class MinisVerify(unittest.TestCase):
         self.assertTrue(any("App" in item for item in doc["notCovered"]))
         self.assertTrue(any("ABA" in item for item in doc["notCovered"]))
         self.assertNotIn("正文", text)
-        rc, doc, _text = self.run_cli(objects=("alpha",))
+        rc, doc, _text = self.run_tool(objects=("alpha",), real=True)
         self.assertEqual(rc, 0)
         self.assertEqual({c["object"] for c in doc["checks"]}, {"alpha"})
         self.assertEqual(len(doc["checks"]), 9)
 
     # 2 Git 历史与 pack
     def test_git_history_pack_and_missing(self):
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool(real=True)
         self.assertEqual(rc, 0, doc["issues"])
-        rc, doc, _text = self.run_cli(version=self.fx["second"])
+        rc, doc, _text = self.run_tool(version=self.fx["second"], real=True)
         self.assertEqual(rc, 1)
         self.assertEqual(self.status(doc, "file:skills/alpha/SKILL.md"), "different")
         self.assertEqual(self.status(doc, "exec:skills/alpha/scripts/run.sh"), "different")
         for bad in ("HEAD", self.fx["first"][:12], self.fx["first"].upper()):
-            rc, doc, _text = self.run_cli(version=bad)
+            rc, doc, _text = self.run_tool(version=bad, real=True)
             self.assertEqual(rc, 2)
             self.assertEqual(self.codes(doc), ["bad_args"])
             self.assertIsNone(doc["gitVersion"])
-        rc, doc, _text = self.run_cli(version="0" * 40)
+        rc, doc, _text = self.run_tool(version="0" * 40, real=True)
         self.assertEqual(rc, 2)
         self.assertEqual(self.codes(doc), ["git_error"])
         self.assertEqual(doc["checks"], [])
 
     # 3 字节、模式与字段边界
     def test_bytes_modes_and_field_edges(self):
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool()
         self.assertEqual(rc, 0, doc["issues"])
         os.chmod(os.path.join(self.dir, "scripts/run.sh"), 0o644)
         _w(os.path.join(self.dir, "references/a.md"), b"\x00\xff\x01\n")
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool()
         self.assertEqual(rc, 1)
         self.assertIn("file_exec", self.codes(doc))
         self.assertIn("file_bytes", self.codes(doc))
         self.assertEqual(self.status(doc, "file:skills/alpha/references/empty.md"), "match")
         _w(self.soul, "---\nname: Other\nicon: z\n---\nSOUL 正文\n")
         good = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=good)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md",), projection_path=good)
         self.assertEqual(rc, 0, doc["issues"])
         _w(self.soul, "---\nname: Other\n---\nSOUL 正文改写\n")
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=good)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md",), projection_path=good)
         self.assertEqual(rc, 1)
         self.assertIn("file_bytes", self.codes(doc))
         self.assertNotIn("file_contract", self.codes(doc))
         # 子代理：仓库正文无尾 LF，投影多一个即不同；带一个尾 LF 的仓库文件只允许去掉恰好那一个
         plus = self.one("subagents/S.md", "subagents.general.instructions", "instructions body\n")
-        rc, doc, _text = self.run_cli(objects=("subagents/S.md",),
+        rc, doc, _text = self.run_tool(objects=("subagents/S.md",),
                                       projection_path=self.write_projection(plus))
         self.assertEqual(rc, 1)
         self.assertEqual(self.status(doc, "field:subagents.general.instructions"), "different")
         one = self.one("subagents/T.md", "subagents.t.instructions", "instructions with tail ")
-        rc, doc, _text = self.run_cli(objects=("subagents/T.md",),
+        rc, doc, _text = self.run_tool(objects=("subagents/T.md",),
                                       projection_path=self.write_projection(one))
         self.assertEqual(rc, 0, doc["issues"])
         one["objects"][0]["value"] = "instructions with tail"      # 多加 rstrip 即失败
-        rc, doc, _text = self.run_cli(objects=("subagents/T.md",),
+        rc, doc, _text = self.run_tool(objects=("subagents/T.md",),
                                       projection_path=self.write_projection(one))
         self.assertEqual(rc, 1)
         self.assertEqual(self.status(doc, "field:subagents.t.instructions"), "different")
@@ -251,7 +256,7 @@ class MinisVerify(unittest.TestCase):
         os.remove(os.path.join(self.dir, "references/empty.md"))
         _w(os.path.join(self.dir, "extra.txt"), "SYNTHETIC-MARKER")
         os.makedirs(os.path.join(self.dir, "emptydir"))
-        rc, doc, text = self.run_cli()
+        rc, doc, text = self.run_tool()
         self.assertEqual(rc, 1)
         self.assertIn("file_missing", self.codes(doc))
         self.assertEqual(sorted(i["path"] for i in doc["issues"] if i["code"] == "package_set"),
@@ -263,7 +268,7 @@ class MinisVerify(unittest.TestCase):
         for _ in range(66):
             deep = os.path.join(deep, "d")
             os.mkdir(deep)
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool()
         self.assertEqual(rc, 3)
         self.assertIn("enumeration_limit", self.codes(doc))
         self.assertEqual(self.status(doc, "package-set"), "not_checked")
@@ -275,7 +280,7 @@ class MinisVerify(unittest.TestCase):
         os.remove(broken)
         os.symlink("/etc/hostname", broken)             # 末级软链：不打开
         os.mkfifo(os.path.join(self.dir, "fifo"))
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool()
         self.assertEqual(rc, 3)                 # 软链阻断内容检查，同时记不可验证
         self.assertIn("file_type", self.codes(doc))
         self.assertIn("unsafe_path", self.codes(doc))
@@ -295,7 +300,7 @@ class MinisVerify(unittest.TestCase):
         _w(broken, b"\x00\xff\x01\r\n")
         os.remove(os.path.join(self.root, "var/minis/skills/evil"))
         # 负控：去掉注入后恢复 match
-        rc, doc, _text = self.run_cli()
+        rc, doc, _text = self.run_tool()
         self.assertEqual(rc, 0, doc["issues"])
         # 接缝注入：读取前替换同名文件 → 旧 fd 与新 fd 全 tuple 不一致，不保留 match
         tool = load_tool()
@@ -313,13 +318,10 @@ class MinisVerify(unittest.TestCase):
         tool.HOOK = hook
         argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
                 "--root", self.root, "--object", "alpha"]
-        out = io.StringIO()
         try:
-            with contextlib.redirect_stdout(out):
-                rc = tool.main(argv)
+            rc, doc, _text = self.run_main(argv, tool)
         finally:
             tool.HOOK = None
-        doc = json.loads(out.getvalue())
         self.assertEqual(rc, 3)
         self.assertTrue({"identity_unverifiable", "changed_during_read"} & set(self.codes(doc)))
         # 原语级正控/负控：名字被替换后同父重开与仍存活旧 fd 全 tuple 不一致
@@ -334,42 +336,42 @@ class MinisVerify(unittest.TestCase):
         fence.close()
         self.assertEqual(self.status(doc, "file:skills/alpha/SKILL.md"), "not_checked")
         _w(target, original)
-        rc, doc, _text = self.run_cli()                  # 负控：恢复后 match
+        rc, doc, _text = self.run_tool()                  # 负控：恢复后 match
         self.assertEqual(rc, 0, doc["issues"])
 
     # 6 配置投影
     def test_projection_rules(self):
         soul = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md",))
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md",))
         self.assertEqual(rc, 3)   # 未传投影仍检查独立文件
         self.assertEqual(self.codes(doc), ["missing_projection"])
         self.assertEqual(self.status(doc, "file:prompt/P.md"), "match")
-        rc, doc, _text = self.run_cli(objects=("alpha",), projection_path=soul)
+        rc, doc, _text = self.run_tool(objects=("alpha",), projection_path=soul)
         self.assertEqual(rc, 2)   # 只选文件对象时投影不必要
         self.assertEqual(self.codes(doc), ["bad_args"])
         self.assertEqual(doc["checks"], [])   # 且不打开目标文件
         empty = self.write_projection(projection(self.body(), "x", objects=[]))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md", "subagents/S.md"), projection_path=empty)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md", "subagents/S.md"), projection_path=empty)
         self.assertEqual(rc, 3)
         self.assertEqual(self.codes(doc), ["missing_object"])
         nulls = self.write_projection(projection(None, None))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md", "subagents/S.md"), projection_path=nulls)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md", "subagents/S.md"), projection_path=nulls)
         self.assertEqual(rc, 1)
         self.assertEqual(self.status(doc, "field:soul.body"), "different")
         blanks = self.write_projection(projection("", ""))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md", "subagents/S.md"), projection_path=blanks)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md", "subagents/S.md"), projection_path=blanks)
         self.assertEqual(rc, 1)   # 空串是可比较值
         extra = projection(self.body(), "instructions body")
         extra["objects"].append({"object": "alpha", "observationId": "o", "instanceRef": "i",
                                  "field": "soul.body", "value": ""})
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md", "subagents/S.md"),
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md", "subagents/S.md"),
                                       projection_path=self.write_projection(extra))
         self.assertEqual(rc, 2)
         self.assertIn("unselected_object", self.codes(doc))
         bound = projection(self.body(), "instructions body")
         bound["objects"][0]["field"] = "soul.other"
         bound["objects"][1]["instanceRef"] = "other"
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md", "subagents/S.md"),
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md", "subagents/S.md"),
                                       projection_path=self.write_projection(bound))
         self.assertEqual(rc, 2)
         self.assertIn("field_binding", self.codes(doc))
@@ -384,9 +386,9 @@ class MinisVerify(unittest.TestCase):
         self.assertNotEqual(reg1, reg2)
         self.assertIn("references/a.md", reg1)
         self.assertIn("references/b.md", reg2)
-        rc, doc, _text = self.run_cli()      # 工作树登记已指向 b.md，first 仍按提交登记匹配
+        rc, doc, _text = self.run_tool()      # 工作树登记已指向 b.md，first 仍按提交登记匹配
         self.assertEqual(rc, 0, doc["issues"])
-        rc, doc, _text = self.run_cli(version=self.fx["second"])
+        rc, doc, _text = self.run_tool(version=self.fx["second"])
         self.assertEqual(rc, 1)
         self.assertIn("file_missing", self.codes(doc))
 
@@ -409,13 +411,10 @@ class MinisVerify(unittest.TestCase):
         tool.HOOK = hook
         argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
                 "--root", self.root, "--object", "alpha"]
-        out = io.StringIO()
         try:
-            with contextlib.redirect_stdout(out):
-                rc = tool.main(argv)
+            rc, doc, _text = self.run_main(argv, tool)
         finally:
             tool.HOOK = None
-        doc = json.loads(out.getvalue())
         self.assertTrue(seen, "接缝未命中")
         self.assertEqual(rc, 3, doc["issues"])
         self.assertIn("identity_unverifiable", self.codes(doc))
@@ -423,7 +422,7 @@ class MinisVerify(unittest.TestCase):
         self.assertNotEqual(self.status(doc, "exec:skills/alpha/references/a.md"), "match")
         shutil.rmtree(refs)
         os.rename(moved, refs)
-        rc, doc, _text = self.run_cli()          # 负控：撤掉注入后恢复正常
+        rc, doc, _text = self.run_tool()          # 负控：撤掉注入后恢复正常
         self.assertEqual(rc, 0, doc["issues"])
 
     # 6b 纯缺键 rc3；缺键叠加独立错类型仍 rc2；真实错绑 rc2
@@ -434,33 +433,33 @@ class MinisVerify(unittest.TestCase):
 
         doc = one()
         del doc["objects"][0]["field"]
-        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+        rc, out, _text = self.run_tool(objects=("prompt/P.md",),
                                       projection_path=self.write_projection(doc))
         self.assertEqual(rc, 3)
         self.assertEqual(self.codes(out), ["missing_field"])
         doc = one()
         del doc["objects"][0]["object"]
-        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+        rc, out, _text = self.run_tool(objects=("prompt/P.md",),
                                       projection_path=self.write_projection(doc))
         self.assertEqual(rc, 3)
         self.assertNotIn("field_binding", self.codes(out))
         self.assertNotIn("unselected_object", self.codes(out))
         doc = one()                                  # 缺观察标签：不制造绑定错误
         del doc["observation"]["id"]
-        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+        rc, out, _text = self.run_tool(objects=("prompt/P.md",),
                                       projection_path=self.write_projection(doc))
         self.assertEqual(rc, 3)
         self.assertNotIn("field_binding", self.codes(out))
         doc = one("subagents/S.md")                  # 缺键 + 已给 value 错类型 → rc2
         del doc["objects"][0]["object"]
         doc["objects"][0]["value"] = 7
-        rc, out, _text = self.run_cli(objects=("subagents/S.md",),
+        rc, out, _text = self.run_tool(objects=("subagents/S.md",),
                                       projection_path=self.write_projection(doc))
         self.assertEqual(rc, 2)
         self.assertIn("bad_shape", self.codes(out))
         doc = one()                                  # 真实绑定错：已给且不等
         doc["objects"][0]["field"] = "soul.other"
-        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+        rc, out, _text = self.run_tool(objects=("prompt/P.md",),
                                       projection_path=self.write_projection(doc))
         self.assertEqual(rc, 2)
         self.assertIn("field_binding", self.codes(out))
@@ -480,12 +479,10 @@ class MinisVerify(unittest.TestCase):
         os.symlink("../body.txt", os.path.join(repo, "subagents/S.md"))
         _git(repo, "init", "-q")
         version = _commit(repo, "link")
-        argv = [sys.executable, "-I", "-B", TOOL, "--repo", repo, "--git-version", version,
+        argv = ["--repo", repo, "--git-version", version,
                 "--root", self.root, "--object", "subagents/S.md"]
-        proc = subprocess.run(argv, cwd="/", capture_output=True)
-        self.assertEqual(proc.stderr, b"")
-        doc = json.loads(proc.stdout.decode())
-        self.assertEqual(proc.returncode, 2)
+        rc, doc, _text = self.run_main(argv)
+        self.assertEqual(rc, 2)
         self.assertEqual(self.codes(doc), ["unsupported_git_mode"])
 
     def test_strict_json_and_aggregation(self):
@@ -494,13 +491,13 @@ class MinisVerify(unittest.TestCase):
         nan = good.replace('"schemaVersion": 1', '"schemaVersion": NaN')
         lone = good.replace('"sourceBasis": "b"', '"sourceBasis": "\\ud800"')
         for raw, want in ((dup, "duplicate_key"), (nan, "bad_json"), (lone, "bad_json")):
-            rc, doc, _text = self.run_cli(objects=("subagents/S.md",),
+            rc, doc, _text = self.run_tool(objects=("subagents/S.md",),
                                           projection_path=self.write_projection(None, raw))
             self.assertEqual(rc, 2, want)
             self.assertEqual(self.codes(doc), [want])
         short = {"schemaVersion": 1, "observation": {"startedAt": 5},
                  "objects": [{"object": "subagents/S.md"}], "extra": []}
-        rc, doc, _text = self.run_cli(objects=("subagents/S.md",),
+        rc, doc, _text = self.run_tool(objects=("subagents/S.md",),
                                       projection_path=self.write_projection(short))
         self.assertEqual(rc, 2)
         codes = self.codes(doc)
@@ -509,7 +506,7 @@ class MinisVerify(unittest.TestCase):
         self.assertIn("unknown_key", codes)
         # 聚合：确证差异 + 缺证并存 → rc3，两者都保留
         os.chmod(os.path.join(self.dir, "scripts/run.sh"), 0o644)
-        rc, doc, _text = self.run_cli(objects=("alpha", "subagents/S.md"))
+        rc, doc, _text = self.run_tool(objects=("alpha", "subagents/S.md"))
         self.assertEqual(rc, 3)
         self.assertIn("file_exec", self.codes(doc))
         self.assertIn("missing_projection", self.codes(doc))
@@ -542,12 +539,10 @@ class MinisVerify(unittest.TestCase):
         _w(os.path.join(site, "var/minis/skills/alpha2/SKILL.md"), SKILL1)
         _w(os.path.join(site, "var/minis/skills/alpha2/references/empty.md"), b"")
         # 站点缺少 references/sub：第一层 references 推栈成功、第二层 sub 失败
-        argv = [sys.executable, "-I", "-B", TOOL, "--repo", repo, "--git-version", version,
+        argv = ["--repo", repo, "--git-version", version,
                 "--root", site, "--object", "alpha2"]
-        proc = subprocess.run(argv, cwd="/", capture_output=True)
-        self.assertEqual(proc.stderr, b"")
-        doc = json.loads(proc.stdout.decode())
-        self.assertEqual(proc.returncode, 1, doc["issues"])
+        rc, doc, _text = self.run_main(argv)
+        self.assertEqual(rc, 1, doc["issues"])
         self.assertIn("file_missing", self.codes(doc))
         # 后续独立稳定资源仍相对正确父 fd 核对，不被前一个缺证升级为假阳性
         self.assertEqual(self.status(doc, "file:skills/alpha2/references/empty.md"), "match")
@@ -557,7 +552,7 @@ class MinisVerify(unittest.TestCase):
     # 5e SOUL 读取期间持续改写：file/exec 均降级，不残留未经证实的 exec match
     def test_soul_change_clears_exec_match(self):
         proj = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=proj)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md",), projection_path=proj)
         self.assertEqual(rc, 0, doc["issues"])
         tool = load_tool()
         seen = []
@@ -574,13 +569,10 @@ class MinisVerify(unittest.TestCase):
         tool.HOOK = hook
         argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
                 "--root", self.root, "--object", "prompt/P.md", "--projection", proj]
-        out = io.StringIO()
         try:
-            with contextlib.redirect_stdout(out):
-                rc = tool.main(argv)
+            rc, doc, _text = self.run_main(argv, tool)
         finally:
             tool.HOOK = None
-        doc = json.loads(out.getvalue())
         self.assertEqual(seen, ["SOUL.md"])          # 接缝确实命中
         self.assertEqual(rc, 3, doc["issues"])
         self.assertIn("changed_during_read", self.codes(doc))
@@ -588,7 +580,7 @@ class MinisVerify(unittest.TestCase):
         self.assertEqual(self.status(doc, "exec:prompt/P.md"), "not_checked")
         self.assertEqual(self.status(doc, "field:soul.body"), "match")   # 独立稳定投影保留
         _w(target, original)
-        rc, doc, _text = self.run_cli(objects=("prompt/P.md",), projection_path=proj)
+        rc, doc, _text = self.run_tool(objects=("prompt/P.md",), projection_path=proj)
         self.assertEqual(rc, 0, doc["issues"])       # 撤注入恢复
 
     # 5d 枚举判据的直接负控：子目录同父重开与目录元数据确实能发现变化
