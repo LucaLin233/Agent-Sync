@@ -193,6 +193,9 @@ class Fence:
         self.fd = fd
 
     def pop(self):
+        """退栈前先复核祖先链：子目录 fd 关闭后不再有名字绑定可核。"""
+        _seam("pop", self.links[-1][1] if self.links else "")
+        self.recheck()
         dfd, _comp, fd = self.links.pop()
         os.close(fd)
         self.fd = dfd
@@ -228,10 +231,10 @@ def _seam(stage, name):
         HOOK(stage, name)
 
 
-def _reopen_same(dfd, name, fd):
-    """读后从原父 fd 真正重开同名文件，两个仍存活 fd 比全 tuple。"""
+def _reopen_same(dfd, name, fd, flags=FILE_FLAGS):
+    """读后从原父 fd 真正重开同名文件/子目录，两个仍存活 fd 比全 tuple。"""
     try:
-        fd2 = os.open(name, FILE_FLAGS, dir_fd=dfd)
+        fd2 = os.open(name, flags, dir_fd=dfd)
     except OSError:
         return False
     try:
@@ -535,6 +538,7 @@ def _enumerate(dfd):
         if depth > MAX_DEPTH:
             raise Reject("enumeration_limit")
         try:
+            before = os.fstat(fd)
             it = os.scandir(fd)
         except OSError:
             raise Reject("not_readable") from None
@@ -552,12 +556,15 @@ def _enumerate(dfd):
                 if stat.S_ISDIR(st.st_mode):
                     try:
                         sub = os.open(ent.name, DIR_FLAGS, dir_fd=fd)
-                    except OSError:
-                        dirs[rel] = "other"
-                        continue
+                    except OSError as exc:
+                        raise _dir_err(exc, "changed_during_read") from None
                     try:
+                        if not _reopen_same(fd, ent.name, sub, DIR_FLAGS):
+                            raise Reject("identity_unverifiable")
                         dirs[rel] = "dir"
                         walk(sub, rel + "/", depth + 1)
+                        if not _reopen_same(fd, ent.name, sub, DIR_FLAGS):
+                            raise Reject("identity_unverifiable")
                     finally:
                         os.close(sub)
                 elif stat.S_ISREG(st.st_mode):
@@ -568,6 +575,12 @@ def _enumerate(dfd):
                     files[rel] = "special"
         finally:
             it.close()
+        try:
+            after = os.fstat(fd)
+        except OSError:
+            raise Reject("not_readable") from None
+        if _meta(before) != _meta(after):
+            raise Reject("changed_during_read")
 
     walk(dfd, "", 1)
     return files, dirs
@@ -635,6 +648,8 @@ def _check_skill(entry, ctx):
                     if cls == "difference":
                         extra_bad = True
             status["file:" + repo_path] = fstatus
+            if fstatus == "not_checked" and estatus == "match":
+                estatus = "not_checked"     # 读取未获证时不得残留同一名字的 exec match
             status["exec:" + repo_path] = estatus
         if enum_cls is not None:
             status["package-set"] = "not_checked"
@@ -801,17 +816,23 @@ def _projection_values(rep, raw, rid_field):
                     if key in rec and (not isinstance(rec[key], str) or not rec[key]):
                         rep.issue("bad_shape", rid, None)
                 if rid is None:
-                    rep.issue("unselected_object")
+                    if "object" in rec:
+                        rep.issue("unselected_object")
+                    if "value" in rec and rec["value"] is not None \
+                            and not isinstance(rec["value"], str):
+                        rep.issue("bad_shape", rid, None)
                     continue
                 if rid in seen:
                     rep.issue("duplicate_item", rid, None)
                     continue
                 seen.add(rid)
-                if rec.get("field") != rid_field[rid]:
+                if isinstance(rec.get("field"), str) and rec["field"] != rid_field[rid]:
                     rep.issue("field_binding", rid, None)
-                if "observationId" in rec and rec["observationId"] != labels.get("id"):
+                if isinstance(rec.get("observationId"), str) and "id" in labels \
+                        and rec["observationId"] != labels["id"]:
                     rep.issue("field_binding", rid, None)
-                if "instanceRef" in rec and rec["instanceRef"] != labels.get("instanceRef"):
+                if isinstance(rec.get("instanceRef"), str) and "instanceRef" in labels \
+                        and rec["instanceRef"] != labels["instanceRef"]:
                     rep.issue("field_binding", rid, None)
                 if "value" not in rec:
                     values[rid] = ("missing", None)
@@ -880,13 +901,16 @@ def _run(rep, args, version, repo, root_parts):
             rels[entry["id"]] = _skill_rels(entry)
             paths.extend(entry["resources"])
     modes = _tree(repo.fd, version)
-    ctx = {"rep": rep, "root_parts": root_parts, "blobs": _batch(repo.fd, version, paths),
+    ctx = {"rep": rep, "root_parts": root_parts, "blobs": {},
            "modes": {}, "body": _load_body(), "rels": rels, "git_body": {}}
     for path in dict.fromkeys(paths):
         rec = modes.get(path)
         if rec is None:
             raise Reject("expected_contract_error")
+        if rec[1] != "blob" or rec[0] not in ("100644", "100755"):
+            raise Reject("unsupported_git_mode")
         ctx["modes"][path] = rec[0]
+    ctx["blobs"] = _batch(repo.fd, version, paths)
 
     for entry in selected:
         file_items = [item for item in _item_list(entry) if not item.startswith("field:")]

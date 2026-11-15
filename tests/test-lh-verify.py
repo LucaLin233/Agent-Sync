@@ -66,9 +66,10 @@ def git(repo, *args):
     return out.stdout.decode().strip()
 
 
-def snapshot(repo, label):
+def snapshot(repo, label, registry=None):
     for path, blob in list(FILES.items()) + [('tools/sync-targets.json',
-                                              json.dumps(REG).encode())]:
+                                              json.dumps(REG if registry is None
+                                                         else registry).encode())]:
         target = os.path.join(repo, path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, 'wb') as handle:
@@ -178,7 +179,7 @@ class Fixture:
                                            if not p.endswith('a.md')] + [
             'skills/luno-core/references/new.md']
         FILES['tools/sync-targets.json'] = json.dumps(reg2).encode()
-        self.c4 = snapshot(self.repo, 'registry resource set')
+        self.c4 = snapshot(self.repo, 'registry resource set', reg2)
         FILES['skills/luno-core/SKILL.md'] = CORE_SKILL.encode()
         FILES['skills/luno-core/references/a.md'] = b'alpha\n'
         self.clean = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'),
@@ -432,6 +433,24 @@ class Verify(unittest.TestCase):
         self.assertEqual(doc['gitVersion'], F.c1)
         self.assertEqual(doc['objects'][0]['resourcePaths'], {'missing': [], 'extra': []})
 
+    def test_historical_registry_differs_from_worktree(self):
+        """登记取自指定提交：工作树登记已是 reg2，c1 仍 rc0；c1/c4 登记与路径集不同。"""
+        def res(commit):
+            return json.loads(git(F.repo, 'cat-file', 'blob',
+                                  commit + ':tools/sync-targets.json'))
+        reg1, reg4 = res(F.c1), res(F.c4)
+        self.assertNotEqual(git(F.repo, 'rev-parse', F.c1 + ':tools/sync-targets.json'),
+                            git(F.repo, 'rev-parse', F.c4 + ':tools/sync-targets.json'))
+        self.assertIn('skills/luno-core/references/a.md',
+                      reg1['objects'][0]['resources'])
+        self.assertNotIn('skills/luno-core/references/a.md',
+                         reg4['objects'][0]['resources'])
+        self.assertIn('skills/luno-core/references/new.md',
+                      reg4['objects'][0]['resources'])
+        rc, doc, _, _ = F.run(evidence([full_core()]), version=F.c1)
+        self.assertEqual((rc, doc['status']), (0, 'match'))
+        self.assertEqual(doc['objects'][0]['resourcePaths'], {'missing': [], 'extra': []})
+
 
 class Evidence(unittest.TestCase):
 
@@ -458,6 +477,25 @@ class Evidence(unittest.TestCase):
         self.assertEqual(rc, 3)
         self.assertEqual(out['missingEvidence'], ['objects[0].projection.identifier',
                                                   'objects[1].calls[0].stdout'])
+
+    def test_observation_time_keys_independent(self):
+        """两个时间键各自独立校验：缺一加另一错型 rc2；纯缺 rc3（2>3）。"""
+        doc = evidence([full_core()])
+        del doc['observation']['finishedAt']
+        doc['observation']['startedAt'] = 7
+        rc, out, _, _ = F.run(doc, real=True)
+        self.assertEqual((rc, out['errors'], out['missingEvidence']),
+                         (2, ['bad_evidence_shape'], []))
+        doc = evidence([full_core()])
+        del doc['observation']['startedAt']
+        doc['observation']['finishedAt'] = '2026-11-15T08:00:00'
+        rc, out, _, _ = F.run(doc, real=True)
+        self.assertEqual((rc, out['errors']), (2, ['bad_evidence_shape']))
+        doc = evidence([full_core()])
+        del doc['observation']['finishedAt']
+        rc, out, _, _ = F.run(doc, real=True)
+        self.assertEqual((rc, out['status']), (3, 'incomplete'))
+        self.assertEqual(out['missingEvidence'], ['observation.finishedAt'])
 
     def test_help_and_bad_args(self):
         proc = subprocess.run([sys.executable, '-I', '-B', str(TOOL), '--help'],

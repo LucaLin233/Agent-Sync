@@ -234,8 +234,9 @@ def _validate_all(evidence):
         for key in ("id", "instanceRef", "sourceVersion", "sourceBasis"):
             if key in obs:
                 _str(obs[key], nonempty=True)
-        if "startedAt" in obs and "finishedAt" in obs \
-                and _time(obs["finishedAt"]) < _time(obs["startedAt"]):
+        start = _time(obs["startedAt"]) if "startedAt" in obs else None
+        end = _time(obs["finishedAt"]) if "finishedAt" in obs else None
+        if start is not None and end is not None and end < start:
             raise Reject("bad_evidence_shape")
     if "objects" in top:
         if not isinstance(top["objects"], list):

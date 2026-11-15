@@ -69,6 +69,11 @@ def build(tmp):
     _w(os.path.join(repo, "subagents/T.md"), "instructions with tail \n")
     _git(repo, "init", "-q")
     first = _commit(repo, "one")
+    # 第二个提交同时改变登记路径与包内文件名：指定提交登记与工作树登记必须可分
+    reg["objects"][0]["resources"][0] = "skills/alpha/references/b.md"
+    os.rename(os.path.join(repo, "skills/alpha/references/a.md"),
+              os.path.join(repo, "skills/alpha/references/b.md"))
+    _w(os.path.join(repo, "tools/sync-targets.json"), json.dumps(reg))
     _w(os.path.join(repo, "skills/alpha/SKILL.md"), SKILL2)
     _w(os.path.join(repo, "skills/alpha/scripts/run.sh"), "#!/bin/sh\necho hi\n", 0o644)
     second = _commit(repo, "two")
@@ -360,6 +365,119 @@ class MinisVerify(unittest.TestCase):
         self.assertIn("field_binding", self.codes(doc))
 
     # 7 固定失败与聚合
+    # 2b 登记取自指定提交，不取工作树
+    def test_registry_read_from_commit(self):
+        reg1 = _git(self.fx["repo"], "cat-file", "blob",
+                    self.fx["first"] + ":tools/sync-targets.json")
+        reg2 = _git(self.fx["repo"], "cat-file", "blob",
+                    self.fx["second"] + ":tools/sync-targets.json")
+        self.assertNotEqual(reg1, reg2)
+        self.assertIn("references/a.md", reg1)
+        self.assertIn("references/b.md", reg2)
+        rc, doc, _text = self.run_cli()      # 工作树登记已指向 b.md，first 仍按提交登记匹配
+        self.assertEqual(rc, 0, doc["issues"])
+        rc, doc, _text = self.run_cli(version=self.fx["second"])
+        self.assertEqual(rc, 1)
+        self.assertIn("file_missing", self.codes(doc))
+
+    # 5b 目录在收尾退栈前被持续换绑：同一系统调用接缝，旧 fd 仍存活
+    def test_directory_rebind_before_unwind(self):
+        refs = os.path.join(self.dir, "references")
+        moved = refs + "-old"
+        tool = load_tool()
+        seen = []
+
+        def hook(stage, name):
+            if stage == "pop" and name == "references" and not seen:
+                seen.append(name)
+                tool.HOOK = None
+                os.rename(refs, moved)
+                os.makedirs(refs)
+                _w(os.path.join(refs, "a.md"), b"SWAPPED")
+                _w(os.path.join(refs, "empty.md"), b"")
+
+        tool.HOOK = hook
+        argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
+                "--root", self.root, "--object", "alpha"]
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                rc = tool.main(argv)
+        finally:
+            tool.HOOK = None
+        doc = json.loads(out.getvalue())
+        self.assertTrue(seen, "接缝未命中")
+        self.assertEqual(rc, 3, doc["issues"])
+        self.assertIn("identity_unverifiable", self.codes(doc))
+        self.assertNotEqual(self.status(doc, "file:skills/alpha/references/a.md"), "match")
+        self.assertNotEqual(self.status(doc, "exec:skills/alpha/references/a.md"), "match")
+        shutil.rmtree(refs)
+        os.rename(moved, refs)
+        rc, doc, _text = self.run_cli()          # 负控：撤掉注入后恢复正常
+        self.assertEqual(rc, 0, doc["issues"])
+
+    # 6b 纯缺键 rc3；缺键叠加独立错类型仍 rc2；真实错绑 rc2
+    def test_projection_missing_keys(self):
+        def one(rid="prompt/P.md"):
+            return self.one(rid, "soul.body" if rid == "prompt/P.md"
+                            else "subagents.general.instructions", self.body())
+
+        doc = one()
+        del doc["objects"][0]["field"]
+        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+                                      projection_path=self.write_projection(doc))
+        self.assertEqual(rc, 3)
+        self.assertEqual(self.codes(out), ["missing_field"])
+        doc = one()
+        del doc["objects"][0]["object"]
+        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+                                      projection_path=self.write_projection(doc))
+        self.assertEqual(rc, 3)
+        self.assertNotIn("field_binding", self.codes(out))
+        self.assertNotIn("unselected_object", self.codes(out))
+        doc = one()                                  # 缺观察标签：不制造绑定错误
+        del doc["observation"]["id"]
+        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+                                      projection_path=self.write_projection(doc))
+        self.assertEqual(rc, 3)
+        self.assertNotIn("field_binding", self.codes(out))
+        doc = one("subagents/S.md")                  # 缺键 + 已给 value 错类型 → rc2
+        del doc["objects"][0]["object"]
+        doc["objects"][0]["value"] = 7
+        rc, out, _text = self.run_cli(objects=("subagents/S.md",),
+                                      projection_path=self.write_projection(doc))
+        self.assertEqual(rc, 2)
+        self.assertIn("bad_shape", self.codes(out))
+        doc = one()                                  # 真实绑定错：已给且不等
+        doc["objects"][0]["field"] = "soul.other"
+        rc, out, _text = self.run_cli(objects=("prompt/P.md",),
+                                      projection_path=self.write_projection(doc))
+        self.assertEqual(rc, 2)
+        self.assertIn("field_binding", self.codes(out))
+
+    # 3b 纯字段来源的 Git 软链模式统一拒绝
+    def test_git_symlink_mode_rejected(self):
+        repo = os.path.join(self.root, "linkrepo")
+        for part in ("tools", "subagents"):
+            os.makedirs(os.path.join(repo, part))
+        reg = {"schemaVersion": 1, "objects": [
+            {"id": "subagents/S.md", "type": "subagent", "source": "subagents/S.md",
+             "resources": [], "ends": {"repo": {"present": True},
+                                       "minis": {"present": True, "kind": "field",
+                                                 "field": "subagents.general.instructions"}}}]}
+        _w(os.path.join(repo, "tools/sync-targets.json"), json.dumps(reg))
+        _w(os.path.join(repo, "body.txt"), "instructions body")
+        os.symlink("../body.txt", os.path.join(repo, "subagents/S.md"))
+        _git(repo, "init", "-q")
+        version = _commit(repo, "link")
+        argv = [sys.executable, "-I", "-B", TOOL, "--repo", repo, "--git-version", version,
+                "--root", self.root, "--object", "subagents/S.md"]
+        proc = subprocess.run(argv, cwd="/", capture_output=True)
+        self.assertEqual(proc.stderr, b"")
+        doc = json.loads(proc.stdout.decode())
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(self.codes(doc), ["unsupported_git_mode"])
+
     def test_strict_json_and_aggregation(self):
         good = json.dumps(projection(self.body(), "instructions body"))
         dup = good.replace('"schemaVersion": 1', '"schemaVersion": 1, "schemaVersion": 1')
