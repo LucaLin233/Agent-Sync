@@ -326,7 +326,11 @@ class Case(unittest.TestCase):
             """假子进程：communicate/wait 立即超时、poll 仍在跑；不制造真实不可中断进程。"""
             returncode = None
 
+            def __init__(self):
+                self.entered = False
+
             def communicate(self, *args, **kwargs):
+                self.entered = True
                 raise subprocess.TimeoutExpired("child", 0.1)
 
             def terminate(self):
@@ -341,17 +345,20 @@ class Case(unittest.TestCase):
             def wait(self, timeout=None):
                 raise subprocess.TimeoutExpired("child", timeout)
 
-        callers = (lambda: mod._ssh_run(TARGET["ssh"], TARGET["postgres"], "/k", "", [],
-                                        mod.Deadline(time.monotonic() + 3)),
-                   lambda: mod._auth_call(self.repo, "skl_1", "references/a.md",
-                                          mod.Deadline(time.monotonic() + 3)))
-        for call in callers:
+        def seam(call, deadline):
+            return (lambda: call(mod.Deadline(deadline)), deadline != 0)
+
+        run = (lambda d: mod._ssh_run(TARGET["ssh"], TARGET["postgres"], "/k", "", [], d),
+               lambda d: mod._auth_call(self.repo, "skl_1", "references/a.md", d))
+        # 现有两条提前出口，两调用者各一：communicate 超时后 _reap 未回收；期限先抛未进 communicate。
+        for call, entered in [seam(f, d) for f in run for d in (time.monotonic() + 3, 0)]:
             proc = Stuck()
             mod._ACTIVE.clear()
             mod._spawn = lambda argv, _proc=proc, **kwargs: (mod._ACTIVE.add(_proc), _proc)[1]
             with self.assertRaises(mod.Fail) as caught:
                 call()
             self.assertEqual(caught.exception.code, "timeout")
+            self.assertEqual(proc.entered, entered)                    # 期限先抛时未进入 communicate
             self.assertIn(proc, mod._ACTIVE)                          # 修前被 finally 无条件丢弃
             self.assertFalse(mod._stop_active(time.monotonic() + 3))  # 清理汇总可观察未回收
 

@@ -488,9 +488,10 @@ def _ssh_run(ssh, pg, keyfile, sql, variables, limits):
                       stderr=subprocess.DEVNULL, env=_env(), shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("source_unverified", 3) from None
-    reaped = True
+    reaped = False
     try:
         out, _ = proc.communicate(sql.encode("utf-8"), timeout=limits.left())
+        reaped = True
     except subprocess.TimeoutExpired:
         reaped = _reap(proc, limits.hard)
         _check()
@@ -523,9 +524,10 @@ def _auth_call(repo, skill_id, path, limits):
                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("resource_read_error") from None
-    reaped = True
+    reaped = False
     try:
         out, err = proc.communicate(timeout=limits.left())
+        reaped = True
     except subprocess.TimeoutExpired:
         reaped = _reap(proc, limits.hard)
         _check()
