@@ -22,6 +22,8 @@ import importlib.util
 import json
 import os
 import re
+import signal
+import stat
 import subprocess
 import sys
 import time
@@ -38,6 +40,8 @@ GIT_ENV = {
     "GIT_NO_LAZY_FETCH": "1", "GIT_ASKPASS": "/bin/false", "LC_ALL": "C",
 }
 BASE_ENV = {"LC_ALL": "C.UTF-8"}
+# 每对象硬截止 D、清理保留 C=2 秒：业务只用 W=D-C，留给子进程清理与回报。
+CLEANUP_RESERVE = 2.0
 
 
 class Fail(Exception):
@@ -48,6 +52,7 @@ class Fail(Exception):
         self.phase = phase
         self.object_name = object_name
         self.changed = changed
+        self.residuals = []
 
 
 class _Parser(argparse.ArgumentParser):
@@ -62,6 +67,20 @@ def _env():
     if os.environ.get("TMPDIR"):
         env["TMPDIR"] = os.environ["TMPDIR"]
     return env
+
+
+class Deadline:
+    """每对象硬截止 D、工作截止 W=D-CLEANUP_RESERVE；业务取用一律只到 W。"""
+
+    def __init__(self, hard):
+        self.hard = hard
+        self.work = hard - CLEANUP_RESERVE
+
+    def left(self):
+        remain = self.work - time.monotonic()
+        if remain <= 0:
+            raise Fail("timeout", 2, "cleanup", changed="unknown")
+        return remain
 
 
 def _utc():
@@ -150,33 +169,93 @@ def _target(raw):
 
 
 def _outfd(path):
-    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    """从 / 逐组件 nofollow 锚定已创建的 out 根。"""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        for component in (part for part in path.split("/") if part):
+            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY
+                              | getattr(os, "O_NOFOLLOW", 0), dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _write_raw(dir_fd, name, data):
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-    fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+    """排他写后在同一 FD 全文回读判等；不一致即 unsafe_path。"""
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
+    except OSError:
+        raise Fail("unsafe_path", 2) from None
     try:
         off = 0
         while off < len(data):
             off += os.write(fd, data[off:])
         os.fsync(fd)
+        os.lseek(fd, 0, os.SEEK_SET)
+        back = b""
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            back += chunk
     finally:
         os.close(fd)
+    if back != data:
+        raise Fail("unsafe_path", 2)
+
+
+def _read_evidence(path):
+    """out 根 FD → 子目录 FD → O_NOFOLLOW 叶 FD，在同一 FD 读全文（不跟链、不先开再查）。"""
+    parent = os.path.dirname(path)
+    try:
+        rfd = _outfd(os.path.dirname(parent))
+    except OSError:
+        raise Fail("unsafe_path", 2) from None
+    try:
+        try:
+            dfd = os.open(os.path.basename(parent), os.O_RDONLY | os.O_DIRECTORY
+                          | getattr(os, "O_NOFOLLOW", 0), dir_fd=rfd)
+        except OSError:
+            raise Fail("unsafe_path", 2) from None
+    finally:
+        os.close(rfd)
+    try:
+        try:
+            fd = os.open(os.path.basename(path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                         dir_fd=dfd)
+        except OSError:
+            raise Fail("unsafe_path", 2) from None
+    finally:
+        os.close(dfd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Fail("unsafe_path", 2)
+        raw = b""
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            raw += chunk
+    finally:
+        os.close(fd)
+    return raw
 
 
 def _agent_value(out_dir, name, lh_id):
     """严格核 agent-evidence.json：唯一对象、ID/field/观察关联正确；value 为 null 或 str。"""
     path = os.path.join(out_dir, "agent-evidence.json")
     try:
-        with open(path, "rb") as handle:
-            doc = json.loads(handle.read().decode("utf-8"))
+        doc = json.loads(_read_evidence(path).decode("utf-8"))
         if doc.get("schemaVersion") != 1:
             raise ValueError
         obs = doc["observation"]
         obs_id, inst = obs["id"], obs["instanceRef"]
         objects = doc["objects"]
-    except (OSError, ValueError, UnicodeError, KeyError, TypeError):
+    except (ValueError, UnicodeError, KeyError, TypeError):
         raise Fail("source_unverified", 3) from None
     if not isinstance(objects, list) or len(objects) != 1:
         raise Fail("source_unverified", 3)
@@ -241,11 +320,12 @@ def _tail_lf_only(verify_json, evidence_path, expected):
     if paths.get("missing") or paths.get("extra"):
         return False
     try:
-        with open(evidence_path, "rb") as handle:
-            ev = json.loads(handle.read().decode("utf-8"))
+        ev = json.loads(_read_evidence(evidence_path).decode("utf-8"))
         content = ev["objects"][0]["projection"]["content"]
         observed = content.encode("utf-8")
-    except (OSError, ValueError, UnicodeError, KeyError, IndexError, TypeError, AttributeError):
+    except Fail:
+        raise
+    except (ValueError, UnicodeError, KeyError, IndexError, TypeError, AttributeError):
         return False
     return isinstance(content, str) and expected.endswith(b"\n") and observed == expected[:-1]
 
@@ -311,25 +391,111 @@ def _collect_env():
     return env
 
 
-def _collect(repo, name, version, out_dir, args, target_raw, phase, timeout):
+def _signal_group(proc, number):
+    """只终止本次 start_new_session 独占的进程组；失败再退到单进程信号。"""
+    try:
+        os.killpg(proc.pid, number)
+    except OSError:
+        try:
+            proc.send_signal(number)
+        except OSError:
+            pass
+
+
+def _drain(fd):
+    chunks = []
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
+    """真实子进程：过 W 先 SIGTERM 等子清理至 D，仍不退才强杀本组；缺确认不报已清。"""
+    read_fd, write_fd = os.pipe()
     argv = [sys.executable or "python3", "-I", "-B",
             os.path.join(repo, "tools", "lh-collect.py"),
             "--repo", repo, "--object", name, "--git-version", version,
             "--out-dir", out_dir, "--instance-ref", args.instance_ref,
             "--source-basis", args.source_basis,
             "--source-version", args.source_version,
-            "--total-timeout", str(args.total_timeout)]
+            "--total-timeout", str(args.total_timeout),
+            "--_parent-deadline", repr(float(limits.hard)),
+            "--_cleanup-fd", str(write_fd)]
     try:
-        proc = subprocess.run(argv, input=target_raw, env=_collect_env(),
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                              shell=False, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise Fail("timeout", 2, phase) from None
-    except (OSError, subprocess.SubprocessError):
-        raise Fail("cli_error", 2, phase) from None
-    if proc.returncode != 0:
-        raise Fail("missing_evidence" if proc.returncode == 3 else "cli_error",
-                   3 if proc.returncode == 3 else 2, phase)
+        if limits.work - time.monotonic() <= 0:
+            raise Fail("timeout", 2, phase)
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, env=_collect_env(),
+                                    pass_fds=(write_fd,), start_new_session=True,
+                                    shell=False)
+        except (OSError, subprocess.SubprocessError):
+            raise Fail("cli_error", 2, phase) from None
+        finally:
+            os.close(write_fd)
+            write_fd = None
+        try:
+            proc.stdin.write(target_raw)
+            proc.stdin.close()
+        except OSError:
+            pass
+        terminated = False
+        killed = False
+        try:
+            proc.wait(timeout=max(0.0, limits.work - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            terminated = True
+            _signal_group(proc, signal.SIGTERM)
+            try:
+                proc.wait(timeout=max(0.0, limits.hard - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                killed = True
+                _signal_group(proc, signal.SIGKILL)
+                try:
+                    proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
+        buf = _drain(read_fd)
+    finally:
+        os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
+    root = None
+    residuals = []
+    confirmed = False
+    for line in buf.decode("ascii", "replace").splitlines():
+        try:
+            doc = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("event") == "key_root" and isinstance(doc.get("root"), str):
+            root = doc["root"]
+        elif doc.get("event") == "cleanup" and isinstance(doc.get("residuals"), list):
+            confirmed = True
+            residuals = [item for item in doc["residuals"]
+                         if isinstance(item, dict) and isinstance(item.get("path"), str)
+                         and item.get("status") in ("remaining", "unverified")]
+    if not confirmed and root is not None:
+        # 缺 cleanup 确认（如强杀）：只按先前根记录列根与固定 id，不扫描、不猜名、不补删。
+        residuals = [{"path": root, "status": "unverified"},
+                     {"path": os.path.join(root, "id"), "status": "unverified"}]
+    if terminated or killed or proc.returncode != 0 or residuals:
+        if terminated or killed:
+            code, exit_code = "timeout", 2
+        elif proc.returncode == 3:
+            code, exit_code = "missing_evidence", 3
+        else:
+            code, exit_code = "cli_error", 2
+        if not confirmed or residuals:
+            code, exit_code = "cleanup_failed", 2
+        exc = Fail(code, exit_code, phase)
+        exc.residuals = residuals
+        raise exc
     return out_dir
 
 
@@ -363,7 +529,7 @@ HOME_HOLDER = ["/"]
 
 def main(argv=None):
     summary = {"schemaVersion": 1, "status": "failed", "objects": [], "errors": [],
-               "artifacts": [], "notCovered": [
+               "artifacts": [], "cleanupResiduals": [], "notCovered": [
                    "无平台 CAS：不保证不存在外部并发",
                    "Agent 现场有效 systemRole 与存储 system_role 的等价由负责人人工核实",
                ]}
@@ -382,6 +548,8 @@ def main(argv=None):
         args = parser.parse_args(argv)
         if type(args.total_timeout) is not int or args.total_timeout <= 0:
             raise Fail("bad_args", 2)
+        if args.total_timeout <= 2:
+            raise Fail("timeout", 2)
         for sha in (args.base, args.merged):
             if not isinstance(sha, str) or not HEX40_RE.match(sha):
                 raise Fail("bad_args", 2)
@@ -417,6 +585,10 @@ def main(argv=None):
             if not set(old.get("resources") or []) <= set(new.get("resources") or []):
                 raise Fail("unsupported", 3)
             plan.append((name, old, new, kind, lh_id))
+        # 官方写依赖本次非空 API-key 短路：逐名核，缺者零写退出（standalone collect 仍只需 SSH）。
+        for name in ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
+            if not os.environ.get(name):
+                raise Fail("missing_variable:" + name, 3)
         installs = {}
         for name, old, new, kind, lh_id in plan:
             if kind == "skill":
@@ -434,13 +606,8 @@ def main(argv=None):
         os.mkdir(args.out_dir, 0o700)
         os.chmod(args.out_dir, 0o700)
         HOME_HOLDER[0] = os.path.join(args.out_dir, "cli-home")
-        api_env = {}
-        for name in ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
-            if os.environ.get(name):
-                api_env[name] = os.environ[name]
-        if not api_env:
-            # 变量缺失由 collect 报 missing_variable；这里只表示本阶段无凭据可用。
-            pass
+        api_env = {name: os.environ[name]
+                   for name in ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY")}
         stop = False
         for index, (name, old, new, kind, lh_id) in enumerate(plan):
             entry = {"object": name, "phase": "admission", "status": "not_run",
@@ -448,19 +615,16 @@ def main(argv=None):
             summary["objects"].append(entry)
             if stop:
                 continue
-            deadline = time.monotonic() + args.total_timeout
+            limits = Deadline(time.monotonic() + args.total_timeout)
 
             def left():
-                remain = deadline - time.monotonic()
-                if remain <= 0:
-                    raise Fail("timeout", 2, "cleanup", changed="unknown")
-                return remain
+                return limits.left()
 
             wrote = False
             try:
                 pre_dir = os.path.join(args.out_dir, "pre-%d" % index)
                 _collect(args.repo, name, args.base, pre_dir, args, target_raw, "pre",
-                         left())
+                         limits)
                 if kind == "agent":
                     value = _agent_value(pre_dir, name, lh_id)
                     expected = _body_bytes(args.repo, args.base, old["source"])
@@ -480,7 +644,7 @@ def main(argv=None):
                         raise Fail("cli_error", 2, "write", changed="unknown")
                     post_dir = os.path.join(args.out_dir, "post-%d" % index)
                     _collect(args.repo, name, args.merged, post_dir, args, target_raw,
-                             "post", left())
+                             "post", limits)
                     got = _agent_value(post_dir, name, lh_id)
                     want = _body_bytes(args.repo, args.merged, new["source"])
                     if _agent_bytes(got) != want:
@@ -505,7 +669,7 @@ def main(argv=None):
                 if kind == "skill":
                     _install_source(new, args.merged, left())
                 post_dir = os.path.join(args.out_dir, "post-%d" % index)
-                _collect(args.repo, name, args.merged, post_dir, args, target_raw, "post", left())
+                _collect(args.repo, name, args.merged, post_dir, args, target_raw, "post", limits)
                 vrc, vout = _verify(args.repo, name, args.merged,
                                     os.path.join(post_dir, "skill-evidence.json"),
                                     args, "post", left())
@@ -528,7 +692,7 @@ def main(argv=None):
                             raise Fail("cli_error", 2, "post", changed="unknown")
                         post2 = os.path.join(args.out_dir, "post-%d-fix" % index)
                         _collect(args.repo, name, args.merged, post2, args, target_raw,
-                                 "post", left())
+                                 "post", limits)
                         vrc, vout = _verify(args.repo, name, args.merged,
                                             os.path.join(post2, "skill-evidence.json"),
                                             args, "post", left())
@@ -543,6 +707,7 @@ def main(argv=None):
                                          "verify-pre-%d.json" % index,
                                          "verify-post-%d.json" % index]
             except Fail as exc:
+                summary["cleanupResiduals"].extend(exc.residuals)
                 if wrote and not exc.changed:
                     exc.changed = "unknown"
                 entry.update(phase=exc.phase, status="failed", code=exc.code,
@@ -562,6 +727,7 @@ def main(argv=None):
             summary["status"] = "failed"
     except Fail as exc:
         err = exc
+        summary["cleanupResiduals"].extend(exc.residuals)
         summary["errors"].append(exc.code)
         summary["status"] = "failed"
         if not summary["objects"]:

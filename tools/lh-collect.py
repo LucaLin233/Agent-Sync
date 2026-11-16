@@ -23,6 +23,8 @@ import datetime
 import json
 import os
 import re
+import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -38,6 +40,10 @@ MAX_SQL_OUT = 2_000_000
 SSH_SECRETS = ("SSH_PRIVATE_KEY_B64",)
 API_SECRETS = ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY")
 BASE_ENV = {"LC_ALL": "C.UTF-8"}
+# 每对象硬截止 D、清理保留 C=2 秒：业务只用 W=D-C，清理时间不挪用。
+CLEANUP_RESERVE = 2.0
+CALL_CAP = 60.0
+ROOT_PARENT = "/tmp"
 GIT_ENV = {
     "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": os.devnull,
     "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -88,6 +94,100 @@ class _Parser(argparse.ArgumentParser):
 
 def _utc():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class Cancelled(BaseException):
+    """信号取消：只由外层显式映射为 timeout/rc2，不被 except Exception 吞掉。"""
+
+
+_CANCEL = {"flag": False}
+_ACTIVE = set()
+
+
+def _check():
+    if _CANCEL["flag"]:
+        raise Cancelled()
+
+
+def _notify(fd, doc):
+    """单条固定小 JSON 记录写向继承的清理通知管道；失败只返回 False，不抛异常。"""
+    if fd is None:
+        return True
+    data = (json.dumps(doc, ensure_ascii=True) + "\n").encode("ascii")
+    try:
+        off = 0
+        while off < len(data):
+            off += os.write(fd, data[off:])
+    except OSError:
+        return False
+    return True
+
+
+def _on_signal(signum, frame):
+    """只保留取消标志并请求终止已登记的 SSH/auth-call；不在信号上下文抛异常。"""
+    _CANCEL["flag"] = True
+    for proc in list(_ACTIVE):
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+
+
+def _install_signals():
+    for name in ("SIGTERM", "SIGINT"):
+        number = getattr(signal, name, None)
+        if number is not None:
+            signal.signal(number, _on_signal)
+
+
+def _spawn(argv, **kwargs):
+    proc = subprocess.Popen(argv, **kwargs)
+    _ACTIVE.add(proc)
+    return proc
+
+
+def _reap(proc, until):
+    """有界收尾：terminate → 等待 → 必要时 kill；不使用无界 wait。返回是否已回收。"""
+    _ACTIVE.discard(proc)
+    if proc.poll() is not None:
+        return True
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=max(0.05, min(1.0, until - time.monotonic())))
+        return True
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=1.0)
+        return True
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def _stop_active(until):
+    for proc in list(_ACTIVE):
+        _reap(proc, until)
+
+
+class Deadline:
+    """每对象硬截止 D、工作截止 W=D-CLEANUP_RESERVE；业务取用一律只到 W。"""
+
+    def __init__(self, hard):
+        self.hard = hard
+        self.work = hard - CLEANUP_RESERVE
+
+    def left(self):
+        remaining = self.work - time.monotonic()
+        if remaining <= 0:
+            raise Fail("timeout")
+        return min(CALL_CAP, remaining)
 
 
 def _pairs(pairs):
@@ -190,23 +290,39 @@ def _need(name):
 
 
 class KeyRoot:
-    """含秘密临时物：固定 /tmp 下 mktemp -d 语义（700 根/600 文件），锚父 fd + nofollow 核身份。"""
+    """含秘密临时物：ROOT_PARENT 下 mktemp -d 语义（700 根/600 文件），锚父 fd + nofollow 核身份。
 
-    def __init__(self):
+    __init__ 只初始化状态；创建、登记身份与写钥由 create()/write() 在调用方 try/finally 内执行。
+    """
+
+    def __init__(self, notify_fd=None):
+        self.notify_fd = notify_fd
+        self.root = None
+        self.name = None
+        self.root_id = None
+        self.made = None
+        self.tmpfd = None
+        self.closed = False
+        self.residuals = []
+
+    def create(self):
+        """建根 → 同轴核身份 → 写钥前先向父通报确切根；通报失败就不写钥，直接 close。"""
         import tempfile
         try:
-            self.root = tempfile.mkdtemp(prefix="lh-collect-", dir="/tmp")
+            self.root = tempfile.mkdtemp(prefix="lh-collect-", dir=ROOT_PARENT)
+            self.tmpfd = _anchor(ROOT_PARENT)
         except OSError:
             raise Fail("unsafe_path") from None
-        self.tmpfd = _anchor("/tmp")
         self.name = os.path.basename(self.root)
-        self.root_id = None
         fd = self.root_fd()
         try:
             self.root_id = self._id(fd)
         finally:
             os.close(fd)
-        self.made = None
+        if not _notify(self.notify_fd, {"event": "key_root", "root": self.root}):
+            self.close()
+            raise Fail("internal_error")
+        return self.root
 
     def _id(self, fd):
         """同一已开 FD 上 fstat 取完整身份（dev/ino/mode），不归一 dev、不混 stat。"""
@@ -245,7 +361,7 @@ class KeyRoot:
         return os.path.join(self.root, "id")
 
     def root_fd(self):
-        """从已锚定的 /tmp fd 同轴重开根目录，nofollow 并核完整身份。"""
+        """从已锚定的父 fd 同轴重开根目录，nofollow 并核完整身份。"""
         try:
             fd = os.open(self.name, os.O_RDONLY | os.O_DIRECTORY
                          | getattr(os, "O_NOFOLLOW", 0), dir_fd=self.tmpfd)
@@ -257,11 +373,28 @@ class KeyRoot:
         return fd
 
     def close(self):
-        """删除前重核根与文件身份；不一致或失败交残留并报 cleanup_failed，不删未知项。"""
+        """删除前重核根与文件身份；失败列本根残留并报 cleanup_failed，不删未知项。"""
+        if self.closed:
+            return
+        ok = True
+        if self.root is not None:
+            try:
+                self._remove()
+            except (Fail, OSError):
+                ok = False
+                self.residuals = self._residuals()
+        self.closed = True
+        _notify(self.notify_fd, {"event": "cleanup", "residuals": self.residuals})
+        if not ok:
+            raise Fail("cleanup_failed")
+
+    def _remove(self):
         try:
             rfd = self.root_fd()
         except Fail:
-            self.tmpfd is not None and os.close(self.tmpfd)
+            if self.tmpfd is not None:
+                os.close(self.tmpfd)
+                self.tmpfd = None
             raise
         try:
             if self.made is not None:
@@ -277,15 +410,29 @@ class KeyRoot:
                     os.unlink("id", dir_fd=rfd)
             os.rmdir(self.name, dir_fd=self.tmpfd)
             self.made = None
-        except Fail:
-            raise
-        except OSError:
-            raise Fail("cleanup_failed") from None
         finally:
             os.close(rfd)
             if self.tmpfd is not None:
                 os.close(self.tmpfd)
                 self.tmpfd = None
+
+    def _residuals(self):
+        """只列本次登记的根与固定 id：删除/身份未核为 unverified，确定仍在为 remaining。"""
+        status = "unverified"
+        if self.root is not None and self.tmpfd is not None:
+            try:
+                fd = self.root_fd()
+            except (Fail, OSError):
+                fd = None
+            if fd is not None:
+                os.close(fd)
+                status = "remaining"
+        out = []
+        if self.root is not None:
+            out.append({"path": self.root, "status": status})
+            if self.made is not None and status == "remaining":
+                out.append({"path": os.path.join(self.root, "id"), "status": "remaining"})
+        return out
 
 
 def _anchor(path):
@@ -299,14 +446,6 @@ def _anchor(path):
     return fd
 
 
-def _keyring():
-    root = KeyRoot()
-    try:
-        return root, root.write(os.environ["SSH_PRIVATE_KEY_B64"])
-    except BaseException:
-        raise
-
-
 def _env():
     """最小白名单：只沿用调用方的 PATH（用于 ssh）与 TMPDIR，不继承其余变量。"""
     env = dict(BASE_ENV)
@@ -316,39 +455,53 @@ def _env():
     return env
 
 
-def _ssh_run(ssh, pg, keyfile, sql, variables, timeout):
+def _ssh_run(ssh, pg, keyfile, sql, variables, limits):
+    """OpenSSH 只把 host 之后各参数用空格拼成一个远端命令串，故整段按 shlex.join 编成一条。"""
+    remote = [
+        "docker", "exec", "-i", pg["container"],
+        "env", "-i", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "PGPASSFILE=/dev/null", "PGOPTIONS=-c default_transaction_read_only=on",
+        "PGCONNECT_TIMEOUT=20", "PGAPPNAME=lh-collect",
+        "psql", "-w", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
+        "-p", str(pg["port"]), "-U", pg["user"], "-d", pg["database"], "-f", "-",
+    ]
+    for name, value in variables:
+        remote.append("-v")
+        remote.append("%s=%s" % (name, value))
     argv = [
         "ssh", "-F", "none",
         "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
         "-o", "UserKnownHostsFile=" + ssh["knownHostsFile"],
         "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
         "-o", "ConnectTimeout=10", "-p", str(ssh["port"]), "-i", keyfile,
-        "--", "%s@%s" % (ssh["user"], ssh["host"]),
-        "docker", "exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on",
-        "-e", "PGCONNECT_TIMEOUT=20", "-e", "PGAPPNAME=lh-collect",
-        pg["container"],
+        "--", "%s@%s" % (ssh["user"], ssh["host"]), shlex.join(remote),
     ]
-    argv += ["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-h", "127.0.0.1",
-             "-p", str(pg["port"]), "-U", pg["user"], "-d", pg["database"], "-f", "-"]
-    for name, value in variables:
-        argv.append("-v")
-        argv.append("%s=%s" % (name, value))
+    _check()
     try:
-        proc = subprocess.run(argv, input=sql.encode("utf-8"), env=_env(),
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                              shell=False, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise Fail("timeout") from None
+        proc = _spawn(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL, env=_env(), shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("source_unverified", 3) from None
+    try:
+        out, _ = proc.communicate(sql.encode("utf-8"), timeout=limits.left())
+    except subprocess.TimeoutExpired:
+        _reap(proc, limits.hard)
+        _check()
+        raise Fail("timeout") from None
+    except (OSError, subprocess.SubprocessError):
+        _reap(proc, limits.hard)
+        raise Fail("source_unverified", 3) from None
+    finally:
+        _ACTIVE.discard(proc)
+    _check()
     if proc.returncode != 0:
         raise Fail("source_unverified", 3)
-    if len(proc.stdout) > MAX_SQL_OUT:
+    if len(out) > MAX_SQL_OUT:
         raise Fail("source_unverified", 3)
-    return proc.stdout
+    return out
 
 
-def _auth_call(repo, skill_id, path, timeout):
+def _auth_call(repo, skill_id, path, limits):
     argv = [sys.executable or "python3", "-I", "-B",
             os.path.join(repo, "tools", "auth-call.py"),
             "skill-resource", "--id", skill_id, "--path", path]
@@ -356,17 +509,27 @@ def _auth_call(repo, skill_id, path, timeout):
     for name in API_SECRETS:
         if os.environ.get(name):
             env[name] = os.environ[name]
+    _check()
     try:
-        proc = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              shell=False, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        raise Fail("timeout") from None
+        proc = _spawn(argv, env=env, stdin=subprocess.DEVNULL,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("resource_read_error") from None
     try:
-        out = proc.stdout.decode("utf-8")
-        err = proc.stderr.decode("utf-8")
+        out, err = proc.communicate(timeout=limits.left())
+    except subprocess.TimeoutExpired:
+        _reap(proc, limits.hard)
+        _check()
+        raise Fail("timeout") from None
+    except (OSError, subprocess.SubprocessError):
+        _reap(proc, limits.hard)
+        raise Fail("resource_read_error") from None
+    finally:
+        _ACTIVE.discard(proc)
+    _check()
+    try:
+        out = out.decode("utf-8")
+        err = err.decode("utf-8")
     except UnicodeDecodeError:
         raise Fail("resource_read_error") from None
     if proc.returncode not in (0, 2):
@@ -390,9 +553,9 @@ def _decode_field(value, field):
         raise Fail("source_unverified", 3) from None
 
 
-def _agent_projection(entry, lh_id, ssh, pg, keyfile, timeout):
+def _agent_projection(entry, lh_id, ssh, pg, keyfile, limits):
     """固定投影：id 与身份列、system_role（null 与空串严格区分）。"""
-    out = _ssh_run(ssh, pg, keyfile, AGENT_SQL, [("obj_id", lh_id)], timeout)
+    out = _ssh_run(ssh, pg, keyfile, AGENT_SQL, [("obj_id", lh_id)], limits)
     try:
         lines = [ln for ln in out.decode("utf-8").split("\n") if ln]
     except UnicodeDecodeError:
@@ -416,9 +579,9 @@ def _agent_projection(entry, lh_id, ssh, pg, keyfile, timeout):
     return _decode_field(row["system_role_b64"], "system_role")
 
 
-def _projection(entry, lh_id, ssh, pg, keyfile, timeout):
+def _projection(entry, lh_id, ssh, pg, keyfile, limits):
     sql = SKILL_SQL
-    out = _ssh_run(ssh, pg, keyfile, sql, [("obj_id", lh_id)], timeout)
+    out = _ssh_run(ssh, pg, keyfile, sql, [("obj_id", lh_id)], limits)
     try:
         lines = [ln for ln in out.decode("utf-8").split("\n") if ln]
     except UnicodeDecodeError:
@@ -468,17 +631,34 @@ def main(argv=None):
     parser.add_argument("--source-basis", required=True)
     parser.add_argument("--source-version", required=True, dest="source_version")
     parser.add_argument("--total-timeout", type=int, default=180)
+    parser.add_argument("--_parent-deadline", type=float, default=None,
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--_cleanup-fd", type=int, default=None, help=argparse.SUPPRESS)
     err = None
     summary = {"schemaVersion": 1, "status": "error", "objects": [], "errors": [],
-               "artifacts": [], "notCovered": [
+               "artifacts": [], "cleanupResiduals": [], "notCovered": [
                    "Agent 现场有效 systemRole 与存储 system_role 的等价由负责人人工核实",
                    "采集成功不表示与 Git 匹配",
                ]}
-    deadline = None
+    cleanup_fd = None
+    keyroots = []
     try:
         args = parser.parse_args(argv)
         if type(args.total_timeout) is not int or args.total_timeout <= 0:
             raise Fail("bad_args")
+        if args.total_timeout <= 2:
+            raise Fail("timeout")
+        if args._parent_deadline is not None and not (
+                isinstance(args._parent_deadline, float) and args._parent_deadline > 0):
+            raise Fail("bad_args")
+        if args._cleanup_fd is not None:
+            if args._cleanup_fd < 3:
+                raise Fail("bad_args")
+            try:
+                os.fstat(args._cleanup_fd)
+            except OSError:
+                raise Fail("bad_args") from None
+            cleanup_fd = args._cleanup_fd
         if not HEX40_RE.match(args.git_version):
             raise Fail("bad_args")
         for value in (args.instance_ref, args.source_basis, args.source_version):
@@ -494,6 +674,7 @@ def main(argv=None):
         selected = list(args.objects)
         if not selected or len(set(selected)) != len(selected):
             raise Fail("bad_args")
+        _install_signals()
         if _git(args.repo, ["cat-file", "-t", args.git_version]).strip() != b"commit":
             raise Fail("source_unverified", 3)
         registry = _registry(args.repo, args.git_version)
@@ -505,14 +686,6 @@ def main(argv=None):
             kind, lh_id = _classify(entry)
             plan.append((name, entry, kind, lh_id))
         ssh, pg = _target(sys.stdin.buffer.read())
-        deadline = time.monotonic() + args.total_timeout
-
-        def left():
-            """每对象总截止：剩余时间；已过截止即 timeout，不再启动读取。"""
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise Fail("timeout")
-            return min(60, remaining)
         for name in SSH_SECRETS:
             _need(name)
         if any(kind == "skill" for _, _, kind, _ in plan):
@@ -522,7 +695,6 @@ def main(argv=None):
         os.chmod(args.out_dir, 0o700)
         started = _utc()
         obs_id = "obs-" + binascii.hexlify(os.urandom(8)).decode("ascii")
-        keyroot, keyfile = _keyring()
         evidence = {"schemaVersion": 1, "observation": {
             "id": obs_id, "instanceRef": args.instance_ref,
             "sourceVersion": args.source_version, "startedAt": started,
@@ -531,10 +703,23 @@ def main(argv=None):
                       "objects": []}
         agents = {"schemaVersion": 1, "observation": evidence["observation"], "objects": []}
         failed = False
-        try:
-            for name, entry, kind, lh_id in plan:
+        read_failed = False
+        for name, entry, kind, lh_id in plan:
+            # 每对象硬截止 D=now+T（父给定则取 min）；钥根与期限同域，不跨对象共享。
+            hard = time.monotonic() + args.total_timeout
+            if args._parent_deadline is not None:
+                hard = min(hard, args._parent_deadline)
+            limits = Deadline(hard)
+            _check()
+            keyroot = KeyRoot(cleanup_fd)
+            keyroots.append(keyroot)
+            try:
+                keyroot.create()
+                _check()
+                keyfile = keyroot.write(os.environ["SSH_PRIVATE_KEY_B64"])
+                _check()
                 if kind == "agent":
-                    value = _agent_projection(entry, lh_id, ssh, pg, keyfile, left())
+                    value = _agent_projection(entry, lh_id, ssh, pg, keyfile, limits)
                     agents["objects"].append({
                         "object": name, "observationId": obs_id,
                         "instanceRef": args.instance_ref, "id": lh_id,
@@ -546,16 +731,17 @@ def main(argv=None):
                                                "status": "collected", "code": None,
                                                "changed": False})
                     continue
-                pre = _projection(entry, lh_id, ssh, pg, keyfile, left())
+                pre = _projection(entry, lh_id, ssh, pg, keyfile, limits)
                 text, actual = pre
                 source = entry["source"]
                 registered = [_rel(p, source) for p in entry.get("resources", [])]
                 calls = []
                 for rel in sorted(set(registered) & set(actual)):
-                    rc, out, errout = _auth_call(args.repo, lh_id, rel, left())
+                    rc, out, errout = _auth_call(args.repo, lh_id, rel, limits)
                     calls.append({"observationId": obs_id, "instanceRef": args.instance_ref,
                                   "request": {"id": lh_id, "path": rel},
                                   "exitCode": rc, "stdout": out, "stderr": errout})
+                failed_calls = [c for c in calls if c["exitCode"] == 2]
                 evidence["objects"].append({
                     "object": name, "observationId": obs_id,
                     "instanceRef": args.instance_ref,
@@ -569,17 +755,28 @@ def main(argv=None):
                     "description": text["description"],
                     "identifier": text["identifier"], "content": text["content"],
                     "resources": sorted(actual)})
-                summary["objects"].append({"object": name, "phase": "pre",
-                                           "status": "collected", "code": None,
-                                           "changed": False})
-        finally:
-            try:
-                keyroot.close()
-            except Fail:
-                failed = True
-                summary["objects"].append({"object": "-", "phase": "cleanup",
-                                           "status": "failed",
-                                           "code": "cleanup_failed", "changed": False})
+                summary["objects"].append({
+                    "object": name, "phase": "pre",
+                    "status": "failed" if failed_calls else "collected",
+                    "code": "resource_read_error" if failed_calls else None,
+                    "changed": False})
+                if failed_calls:
+                    read_failed = True
+                    if "resource_read_error" not in summary["errors"]:
+                        summary["errors"].append("resource_read_error")
+            finally:
+                # 同一路径收尾：先有界停止活动进程，再关闭本对象钥根并通报结果。
+                _stop_active(limits.hard)
+                try:
+                    keyroot.close()
+                except Fail:
+                    failed = True
+                    summary["cleanupResiduals"].extend(keyroot.residuals)
+                    summary["objects"].append({"object": name, "phase": "cleanup",
+                                               "status": "failed",
+                                               "code": "cleanup_failed", "changed": False})
+                    if "cleanup_failed" not in summary["errors"]:
+                        summary["errors"].append("cleanup_failed")
         evidence["observation"]["finishedAt"] = _utc()
         projection["observation"] = evidence["observation"]
         agents["observation"] = evidence["observation"]
@@ -597,8 +794,17 @@ def main(argv=None):
             os.close(outfd)
         summary["status"] = "collected" if not failed else "incomplete"
         if failed:
-            summary["errors"].append("cleanup_failed")
+            if "cleanup_failed" not in summary["errors"]:
+                summary["errors"].append("cleanup_failed")
             err = Fail("cleanup_failed", 2)
+        elif read_failed:
+            summary["status"] = "error"
+            err = Fail("resource_read_error", 2)
+    except Cancelled:
+        err = Fail("timeout", 2)
+        if "timeout" not in summary["errors"]:
+            summary["errors"].append("timeout")
+        summary["status"] = "error"
     except Fail as exc:
         err = exc
         if not summary["errors"] or summary["errors"][-1] != exc.code:
@@ -609,6 +815,9 @@ def main(argv=None):
         err = Fail("internal_error")
         summary["errors"].append("internal_error")
         summary["status"] = "error"
+    if cleanup_fd is not None and not any(k.closed for k in keyroots):
+        # 未创建钥根的失败出口：回报空残留，父仍能区分「已核无残留」与「缺确认」。
+        _notify(cleanup_fd, {"event": "cleanup", "residuals": []})
     sys.stdout.write(json.dumps(summary, ensure_ascii=True) + "\n")
     if err is None:
         return 0

@@ -7,6 +7,7 @@
 import base64
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -19,8 +20,16 @@ PY = sys.executable or "python3"
 
 FAKE_SSH = """#!/bin/sh
 here=$(dirname "$0")
-printf '%s\\n' "$@" > "$here/argv"
+printf '%s\n' "$@" > "$here/argv"
 cat > "$here/sql"
+cmd=
+for a in "$@"; do cmd=$a; done
+exec /bin/sh -c "$cmd"
+"""
+
+FAKE_DOCKER = """#!/bin/sh
+here=$(dirname "$0")
+printf '%s\n' "$@" > "$here/docker.argv"
 cat "$here/row"
 """
 
@@ -76,6 +85,9 @@ class Case(unittest.TestCase):
         for key in ("bin", "tmp", "home"):
             os.makedirs(os.path.join(self.tmp, key), exist_ok=True)
         self._write("tools/auth-call.py", FAKE_AUTH, 0o755)
+        with open(os.path.join(self.tmp, "bin", "docker"), "w", encoding="utf-8") as handle:
+            handle.write(FAKE_DOCKER)
+        os.chmod(os.path.join(self.tmp, "bin", "docker"), 0o755)
         self._write("skills/luno-ops/SKILL.md", "---\nname: luno-ops\ndescription: d\n---\nbody\n")
         self._write("skills/luno-ops/references/a.md", "a")
         registry = {"schemaVersion": 1, "objects": [{
@@ -158,9 +170,17 @@ class Case(unittest.TestCase):
             argv = handle.read().splitlines()
         self.assertEqual(argv.count("--"), 1)         # host 之后不再多一个 "--"
         self.assertEqual(argv[argv.index("--") + 1], "u@h.example")
-        self.assertEqual(argv[argv.index("--") + 2], "docker")  # 远端命令起点
-        self.assertIn("-F", argv)
-        self.assertIn("StrictHostKeyChecking=yes", argv)
+        # OpenSSH 把 host 之后全部参数以空格拼成一个远端命令串：只允许一个命令串 token。
+        self.assertEqual(len(argv) - argv.index("--") - 1, 2)
+        self.assertEqual(shlex.split(argv[argv.index("--") + 2])[0], "docker")
+        with open(os.path.join(self.tmp, "bin", "docker.argv"), encoding="utf-8") as handle:
+            dock = handle.read().splitlines()
+        self.assertEqual(dock[:3], ["exec", "-i", "db"])   # 经 /bin/sh 后 docker 实得 argv
+        self.assertIn("PGPASSFILE=/dev/null", dock)
+        self.assertIn("PGOPTIONS=-c default_transaction_read_only=on", dock)  # 单参数，未被拆开
+        self.assertIn("-w", dock)
+        self.assertIn("-X", dock)
+        self.assertEqual(dock[dock.index("env") + 1], "-i")
         with open(os.path.join(self.out, "projection-source.json"), encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("h.example", source)
@@ -182,7 +202,13 @@ class Case(unittest.TestCase):
         self.version = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"],
                                       capture_output=True, text=True, check=True).stdout.strip()
         proc = self.run_tool(self.creds(), objects=("example-skill",))
-        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.returncode, 2, proc.stderr)      # 读取错误是 rc2，不是成功
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["status"], "error")
+        self.assertEqual(summary["objects"][0]["status"], "failed")
+        self.assertEqual(summary["objects"][0]["code"], "resource_read_error")
+        self.assertIn("resource_read_error", summary["errors"])
+        self.assertEqual(json.loads(proc.stderr)["error"], "resource_read_error")
         with open(os.path.join(self.out, "skill-evidence.json"), encoding="utf-8") as handle:
             obj = json.load(handle)["objects"][0]
         calls = {c["request"]["path"]: c for c in obj["calls"]}
@@ -263,6 +289,12 @@ class Case(unittest.TestCase):
                               capture_output=True, timeout=120)
         self.assertEqual(proc.returncode, 2)
         self.assertEqual(json.loads(proc.stderr)["error"], "bad_args")
+        argv += ["--source-version", "test-build", "--total-timeout", "2"]
+        proc = subprocess.run(argv, input=json.dumps(TARGET).encode(), env=dict(self.env),
+                              capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(json.loads(proc.stderr)["error"], "timeout")
+        self.assertFalse(os.path.exists(self.out))
 
     def test_missing_variable_named(self):
         self.fake_ssh(row())

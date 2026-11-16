@@ -4,6 +4,7 @@
 覆盖：base 验收非 0 → 零写（含第二对象不启动）；写失败 → 不再补写、不报成功、changed=unknown；
 post 非 0 → rc≠0 且不报 completed；正常路径可过（负控：去掉阻断即转绿）；argv 原样传递。
 """
+import base64
 import json
 import os
 import shutil
@@ -14,6 +15,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "tools", "lh-deploy.py")
+TOOLS_DIR = os.path.join(os.path.dirname(HERE), "tools")
+TOOL_REAL_COLLECT = os.path.join(TOOLS_DIR, "lh-collect.py")
+TOOL_REAL_BODY = os.path.join(TOOLS_DIR, "body_contract.py")
 PY = sys.executable or "python3"
 
 STUB_COLLECT = """#!/usr/bin/env python3
@@ -30,6 +34,11 @@ if name.startswith("prompt/"):
            "objects": [{"object": name, "observationId": "obs-test",
                         "instanceRef": "inst-1", "id": "agt_1",
                         "field": "systemRole", "value": value}]}
+    if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".symlink")):
+        with open(os.path.join(out, "real.json"), "w", encoding="utf-8") as h:
+            h.write(json.dumps(doc) + "\\n")
+        os.symlink("real.json", os.path.join(out, "agent-evidence.json"))
+        sys.exit(0)
     with open(os.path.join(out, "agent-evidence.json"), "w", encoding="utf-8") as h:
         h.write(json.dumps(doc) + "\\n")
     sys.exit(0)
@@ -84,6 +93,29 @@ if os.path.exists(marker):
     rc = int(open(marker).read().strip())
 sys.exit(rc)
 """
+
+FAKE_SSH_SLOW = """#!/bin/sh
+exec sleep 5
+"""
+
+FAKE_SSH_OK = """#!/bin/sh
+cmd=
+for a in "$@"; do cmd=$a; done
+cat > /dev/null
+exec /bin/sh -c "$cmd"
+"""
+
+FAKE_DOCKER = """#!/bin/sh
+cat "$(dirname "$0")/row"
+"""
+
+
+def agent_row():
+    """真实 agents 固定投影契约：只 system_role 走 base64，身份列原文。"""
+    role = base64.encodebytes("x\n".encode()).decode()
+    return json.dumps({"id": "agt_1", "user_id": "usr_1", "workspace_id": None,
+                       "system_role_b64": role}, separators=(",", ":"))
+
 
 TARGET = {"ssh": {"host": "h.example", "port": 22, "user": "u",
                   "knownHostsFile": "/etc/ssh/ssh_known_hosts"},
@@ -168,15 +200,15 @@ class Case(unittest.TestCase):
         with open(os.path.join(self.repo, "tools", ".verdict." + phase), "w") as handle:
             handle.write(str(rc))
 
-    def run_tool(self, objects=("one",)):
+    def run_tool(self, objects=("one",), env=None, timeout="30"):
         argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--base", self.base,
                 "--merged", self.merged, "--out-dir", self.out,
                 "--instance-ref", "inst-1", "--source-basis", "basis-ref",
-                "--source-version", "2.3.3+testbuild", "--total-timeout", "30"]
+                "--source-version", "2.3.3+testbuild", "--total-timeout", timeout]
         for item in objects:
             argv += ["--object", item]
         return subprocess.run(argv, input=json.dumps(TARGET).encode(),
-                              env=dict(self.env), capture_output=True, timeout=120)
+                              env=dict(env or self.env), capture_output=True, timeout=120)
 
     def argv_log(self):
         path = os.path.join(self.bin, "lh.argv")
@@ -260,6 +292,31 @@ class Case(unittest.TestCase):
         self.assertEqual(self.argv_log(), [])
         self.assertFalse([p for p in os.listdir(self.out) if p.startswith("agent-")])
 
+    def test_missing_api_variable_blocks_before_cli(self):
+        """Agent 部署也须先核本次两个 API 变量：缺者 missing_variable:NAME rc3，零 CLI。"""
+        self.lh(0)
+        self.agent_content("x\n")
+        for missing in ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
+            with self.subTest(missing=missing):
+                env = dict(self.env)
+                del env[missing]
+                proc = self.run_tool(("prompt/X.md",), env=env)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertEqual(json.loads(proc.stderr)["error"], "missing_variable:" + missing)
+                self.assertFalse(os.path.exists(self.out))
+                self.assertEqual(self.argv_log(), [])
+
+    def test_agent_evidence_symlink_rejected(self):
+        """证据叶以 O_NOFOLLOW 在锚定 FD 上打开：软链证据直接 unsafe_path，不跟链读取。"""
+        self.lh(0)
+        self.agent_content("x\n")
+        with open(os.path.join(self.repo, "tools", ".symlink"), "w", encoding="utf-8"):
+            pass
+        proc = self.run_tool(("prompt/X.md",))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["objects"][0]["code"], "unsafe_path")
+        self.assertEqual(self.argv_log(), [])
+
     def test_agent_clean_path_edits_with_config_file(self):
         """Agent 正常链：pre 相等 → `lh agent edit ID --config-file` 传完整 systemRole → post 严格相等。"""
         self.lh(0)
@@ -278,6 +335,54 @@ class Case(unittest.TestCase):
         self.assertEqual(json.loads(raw.decode("utf-8")), {"systemRole": "x\n"})
         self.assertEqual(os.stat(cfg).st_mode & 0o777, 0o600)
         self.assertTrue(os.path.isdir(os.path.join(self.out, "post-0")))
+
+
+    def test_collect_hard_deadline_cleanup_and_recovery(self):
+        """R2 唯一新增回归：真实 deploy→collect 子进程的超时清理与恢复正控。
+
+        仅把 KeyRoot 的固定父目录改到本用例安全排他根（生产默认不变）；超时由子内 ssh 等待触发，
+        外层过 W 先 SIGTERM：断言可处理终止（timeout 而非 cli_error）、登记根/id 已删、无残留；
+        同用例改用正常 SSH 结果再跑一次，断言成功且同样无残留。
+        """
+        root = os.path.join(self.tmp, "keyroot")
+        os.makedirs(root, mode=0o700, exist_ok=True)
+        with open(TOOL_REAL_COLLECT, encoding="utf-8") as handle:
+            code = handle.read()
+        needle = 'ROOT_PARENT = "/tmp"'
+        self.assertIn(needle, code, "生产默认钥根父目录契约缺失")
+        self.write("tools/lh-collect.py", code.replace(needle, 'ROOT_PARENT = "%s"' % root))
+        shutil.copyfile(TOOL_REAL_BODY, os.path.join(self.repo, "tools", "body_contract.py"))
+        fake = os.path.join(self.bin, "ssh")
+        with open(fake, "w", encoding="utf-8") as handle:
+            handle.write(FAKE_SSH_SLOW)
+        os.chmod(fake, 0o755)
+        with open(os.path.join(self.bin, "row"), "w", encoding="utf-8") as handle:
+            handle.write(agent_row() + "\n")
+        docker = os.path.join(self.bin, "docker")
+        with open(docker, "w", encoding="utf-8") as handle:
+            handle.write(FAKE_DOCKER)
+        os.chmod(docker, 0o755)
+        env = dict(self.env, SSH_PRIVATE_KEY_B64=base64.b64encode(
+            b"synthetic-test-sentinel").decode())
+        self.lh(0)
+        proc = self.run_tool(("prompt/X.md",), env=env, timeout="3")
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(json.loads(proc.stderr)["error"], "timeout")
+        self.assertEqual(summary["objects"][0]["code"], "timeout")
+        self.assertEqual(summary["cleanupResiduals"], [])
+        self.assertEqual(os.listdir(root), [])
+        with open(fake, "w", encoding="utf-8") as handle:
+            handle.write(FAKE_SSH_OK)
+        os.chmod(fake, 0o755)
+        self.out = os.path.join(self.tmp, "out-recovery")   # 每次运行要新建 out 根
+        proc = self.run_tool(("prompt/X.md",), env=env, timeout="30")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["status"], "complete")
+        self.assertEqual(summary["cleanupResiduals"], [])
+        self.assertEqual(os.listdir(root), [])
+
 
 if __name__ == "__main__":
     unittest.main()
