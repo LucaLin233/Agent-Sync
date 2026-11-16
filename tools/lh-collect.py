@@ -734,6 +734,7 @@ def main(argv=None):
                 _check()
                 if kind == "agent":
                     value = _agent_projection(entry, lh_id, ssh, pg, keyfile, limits)
+                    limits.left()
                     agents["objects"].append({
                         "object": name, "observationId": obs_id,
                         "instanceRef": args.instance_ref, "id": lh_id,
@@ -755,6 +756,7 @@ def main(argv=None):
                     calls.append({"observationId": obs_id, "instanceRef": args.instance_ref,
                                   "request": {"id": lh_id, "path": rel},
                                   "exitCode": rc, "stdout": out, "stderr": errout})
+                limits.left()
                 failed_calls = [c for c in calls if c["exitCode"] == 2]
                 evidence["objects"].append({
                     "object": name, "observationId": obs_id,

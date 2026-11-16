@@ -6,6 +6,7 @@
 """
 import base64
 import importlib.util
+import io
 import json
 import os
 import shlex
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -361,6 +363,104 @@ class Case(unittest.TestCase):
             self.assertEqual(proc.entered, entered)                    # 期限先抛时未进入 communicate
             self.assertIn(proc, mod._ACTIVE)                          # 修前被 finally 无条件丢弃
             self.assertFalse(mod._stop_active(time.monotonic() + 3))  # 清理汇总可观察未回收
+
+
+    def test_per_object_deadline_not_overridden_by_next_object(self):
+        """首对象期限内返回、随后处理越过其 W 时，不得因下一对象换期限而 rc0/collected。"""
+        self.fake_ssh(row())
+        self._write("tools/sync-targets.json", json.dumps({"schemaVersion": 1, "objects": [
+            {"id": "luno-ops", "type": "skill", "source": "skills/luno-ops/SKILL.md",
+             "resources": ["skills/luno-ops/references/a.md"],
+             "ends": {"lobehub": {"present": True, "kind": "skill", "id": "skl_1"}}},
+            {"id": "prompt/A.md", "type": "prompt", "source": "prompt/A.md", "resources": [],
+             "ends": {"lobehub": {"present": True, "kind": "agent", "id": "agt_2",
+                                  "field": "systemRole"}}},
+            {"id": "prompt/B.md", "type": "prompt", "source": "prompt/B.md", "resources": [],
+             "ends": {"lobehub": {"present": True, "kind": "agent", "id": "agt_3",
+                                  "field": "systemRole"}}}]}))
+        subprocess.run(["git", "-C", self.repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@e",
+                        "commit", "-qm", "mixed"], check=True)
+        version = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"],
+                                 capture_output=True, text=True, check=True).stdout.strip()
+        os.environ["SSH_PRIVATE_KEY_B64"] = base64.b64encode(b"test-only").decode()
+        os.environ["LOBEHUB_SERVER"] = "https://example.invalid"
+        os.environ["LOBEHUB_CLI_API_KEY"] = "test-token-value"
+        resource = json.dumps({"ok": True, "action": "skill-resource", "resource": {
+            "content": "a", "encoding": "utf8", "fileHash": "", "fileType": "text/plain",
+            "path": "references/a.md", "size": 1}}).encode()
+        try:
+            runs = 0
+            for first, second in (("luno-ops", "prompt/A.md"), ("prompt/A.md", "prompt/B.md")):
+                for objects in ((first,), (first, second)):
+                    runs += 1
+                    spec = importlib.util.spec_from_file_location("lh_w%d" % runs, self.tool)
+                    mod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    clock = [0.0]
+                    ids = {}
+
+                    class Clock:
+                        monotonic = staticmethod(lambda: clock[0])
+
+                    class Done:
+                        returncode = 0
+
+                        def poll(self):
+                            return 0
+
+                        def communicate(self, data=None, timeout=None):
+                            if data is None:
+                                return resource, b""
+                            if b"FROM agents" in data:
+                                return (agent_row(agent_id=ids["id"]) + "\n").encode(), b""
+                            return (row() + "\n").encode(), b""
+
+                    def spawn(argv, _mod=mod, **kwargs):
+                        text = " ".join(argv)
+                        if "obj_id=agt" in text:
+                            ids["id"] = "agt" + text.split("obj_id=agt")[1].split()[0]
+                        proc = Done()
+                        _mod._ACTIVE.add(proc)
+                        return proc
+
+                    def after(real):
+                        def wrapper(*args, **kwargs):
+                            value = real(*args, **kwargs)
+                            clock[0] = 1.1          # T=3：首对象 W=1.0，处理/解码越 W
+                            return value
+                        return wrapper
+
+                    mod.time = Clock
+                    mod._install_signals = lambda: None
+                    mod._spawn = spawn
+                    if first == "luno-ops":
+                        mod._auth_call = after(mod._auth_call)     # 技能：资源循环结束、组装前
+                    else:
+                        mod._agent_projection = after(mod._agent_projection)  # Agent 返回后
+                    argv = ["--repo", self.repo, "--git-version", version,
+                            "--out-dir", os.path.join(self.tmp, "out-w%d" % runs),
+                            "--instance-ref", "synthetic", "--source-basis", "synthetic",
+                            "--source-version", "testbuild", "--total-timeout", "3"]
+                    for item in objects:
+                        argv += ["--object", item]
+                    keep = sys.stdin, sys.stdout, sys.stderr
+                    sys.stdin = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(TARGET).encode()))
+                    buf, errb = io.StringIO(), io.StringIO()
+                    sys.stdout, sys.stderr = buf, errb
+                    try:
+                        rc = mod.main(argv)
+                    finally:
+                        sys.stdin, sys.stdout, sys.stderr = keep
+                    doc = json.loads(buf.getvalue())
+                    # 单对象对照与两对象同判：首对象越 W 即 timeout/rc2，不能被下一对象期限覆盖。
+                    self.assertEqual(rc, 2, (objects, doc, errb.getvalue()))
+                    self.assertEqual(doc["status"], "error")
+                    self.assertIn("timeout", doc["errors"])
+                    self.assertFalse(mod._ACTIVE)
+        finally:
+            for name in ("SSH_PRIVATE_KEY_B64", "LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
+                os.environ.pop(name, None)
 
 
 if __name__ == "__main__":
