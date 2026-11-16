@@ -488,17 +488,19 @@ def _ssh_run(ssh, pg, keyfile, sql, variables, limits):
                       stderr=subprocess.DEVNULL, env=_env(), shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("source_unverified", 3) from None
+    reaped = True
     try:
         out, _ = proc.communicate(sql.encode("utf-8"), timeout=limits.left())
     except subprocess.TimeoutExpired:
-        _reap(proc, limits.hard)
+        reaped = _reap(proc, limits.hard)
         _check()
         raise Fail("timeout") from None
     except (OSError, subprocess.SubprocessError):
-        _reap(proc, limits.hard)
+        reaped = _reap(proc, limits.hard)
         raise Fail("source_unverified", 3) from None
     finally:
-        _ACTIVE.discard(proc)
+        if reaped:
+            _ACTIVE.discard(proc)
     _check()
     if proc.returncode != 0:
         raise Fail("source_unverified", 3)
@@ -521,17 +523,19 @@ def _auth_call(repo, skill_id, path, limits):
                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("resource_read_error") from None
+    reaped = True
     try:
         out, err = proc.communicate(timeout=limits.left())
     except subprocess.TimeoutExpired:
-        _reap(proc, limits.hard)
+        reaped = _reap(proc, limits.hard)
         _check()
         raise Fail("timeout") from None
     except (OSError, subprocess.SubprocessError):
-        _reap(proc, limits.hard)
+        reaped = _reap(proc, limits.hard)
         raise Fail("resource_read_error") from None
     finally:
-        _ACTIVE.discard(proc)
+        if reaped:
+            _ACTIVE.discard(proc)
     _check()
     try:
         out = out.decode("utf-8")

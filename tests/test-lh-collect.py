@@ -5,6 +5,7 @@
 原响应/失败调用与观察关联、Agent 未核准前提真实 rc3、缺失源行 rc3 不写证据。
 """
 import base64
+import importlib.util
 import json
 import os
 import shlex
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -312,6 +314,46 @@ class Case(unittest.TestCase):
         self.assertEqual(proc.returncode, 3)
         self.assertEqual(json.loads(proc.stderr)["error"],
                          "missing_variable:LOBEHUB_CLI_API_KEY")
+
+
+    def test_unreaped_child_stays_visible_to_cleanup(self):
+        """未回收的子进程须留在 _ACTIVE，清理汇总才能观察失败；两调用者同一接缝。"""
+        spec = importlib.util.spec_from_file_location("lh_collect_reap", self.tool)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        class Stuck:
+            """假子进程：communicate/wait 立即超时、poll 仍在跑；不制造真实不可中断进程。"""
+            returncode = None
+
+            def communicate(self, *args, **kwargs):
+                raise subprocess.TimeoutExpired("child", 0.1)
+
+            def terminate(self):
+                pass
+
+            def kill(self):
+                pass
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired("child", timeout)
+
+        callers = (lambda: mod._ssh_run(TARGET["ssh"], TARGET["postgres"], "/k", "", [],
+                                        mod.Deadline(time.monotonic() + 3)),
+                   lambda: mod._auth_call(self.repo, "skl_1", "references/a.md",
+                                          mod.Deadline(time.monotonic() + 3)))
+        for call in callers:
+            proc = Stuck()
+            mod._ACTIVE.clear()
+            mod._spawn = lambda argv, _proc=proc, **kwargs: (mod._ACTIVE.add(_proc), _proc)[1]
+            with self.assertRaises(mod.Fail) as caught:
+                call()
+            self.assertEqual(caught.exception.code, "timeout")
+            self.assertIn(proc, mod._ACTIVE)                          # 修前被 finally 无条件丢弃
+            self.assertFalse(mod._stop_active(time.monotonic() + 3))  # 清理汇总可观察未回收
 
 
 if __name__ == "__main__":
