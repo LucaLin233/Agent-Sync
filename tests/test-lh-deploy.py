@@ -267,6 +267,10 @@ class Case(unittest.TestCase):
         self.assertEqual(self.argv_log(), [
             "skill", "install", "https://github.com/o/r/tree/main/skills/one"])
         self.assertTrue(os.path.isdir(os.path.join(self.out, "post-0")))
+        # 未走尾 LF 纠正路径时不得列出并不存在的 fix 产物。
+        self.assertEqual(summary["artifacts"], [
+            "pre-0/skill-evidence.json", "post-0/skill-evidence.json",
+            "verify-pre-0.json", "verify-post-0.json"])
 
     def test_tail_lf_single_correction_uses_argv(self):
         """post 仅差 content 且现场==期望去一个尾 LF：按 argv 原样补一次全文再全量重采复验。"""
@@ -281,7 +285,15 @@ class Case(unittest.TestCase):
             "skill", "install", "https://github.com/o/r/tree/main/skills/one",
             "skill", "edit", "skill-one", "-c", "one\n"])
         self.assertTrue(os.path.isdir(os.path.join(self.out, "post-0-fix")))
-        self.assertEqual(json.loads(proc.stdout)["objects"][0]["changed"], True)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["objects"][0]["changed"], True)
+        # 最终复核成功的 fix 产物要进摘要索引，原 pre/post 四项照旧保留并指向已生成产物。
+        self.assertEqual(summary["artifacts"], [
+            "pre-0/skill-evidence.json", "post-0/skill-evidence.json",
+            "verify-pre-0.json", "verify-post-0.json",
+            "post-0-fix/skill-evidence.json", "verify-post-0-fix.json"])
+        for rel in summary["artifacts"]:
+            self.assertTrue(os.path.isfile(os.path.join(self.out, rel)), rel)
 
     def agent_content(self, value):
         with open(os.path.join(self.repo, "tools", ".agentcontent"), "w",

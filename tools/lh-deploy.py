@@ -645,6 +645,7 @@ def main(argv=None):
                 return limits.left()
 
             wrote = False
+            fixed = False
             try:
                 pre_dir = os.path.join(args.out_dir, "pre-%d" % index)
                 _collect(args.repo, name, args.base, pre_dir, args, target_raw, "pre",
@@ -728,6 +729,7 @@ def main(argv=None):
                         _write_artifact(args.out_dir, "verify-post-%d-fix.json" % index, vout, limits)
                         if vrc != 0:
                             raise Fail("post_difference", 1, "post", changed="unknown")
+                        fixed = True
                     else:
                         raise Fail("post_difference", 1, "post", changed="unknown")
                 left()
@@ -736,6 +738,9 @@ def main(argv=None):
                                          "post-%d/skill-evidence.json" % index,
                                          "verify-pre-%d.json" % index,
                                          "verify-post-%d.json" % index]
+                if fixed:
+                    summary["artifacts"] += ["post-%d-fix/skill-evidence.json" % index,
+                                             "verify-post-%d-fix.json" % index]
             except Fail as exc:
                 summary["cleanupResiduals"].extend(exc.residuals)
                 if wrote and not exc.changed:
