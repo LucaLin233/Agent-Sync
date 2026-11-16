@@ -238,18 +238,20 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 
 ```sh
 python3 -I -B tools/lh-collect.py --repo REPO --object ID [--object …] --git-version FULL_SHA \
-    --out-dir NEW_DIR --instance-ref LABEL --source-basis REF [--total-timeout 180] < target.json
+    --out-dir NEW_DIR --instance-ref LABEL --source-basis REF --source-version TEXT \
+    [--total-timeout 180] < target.json
 python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base FULL_SHA \
     --merged FULL_SHA --out-dir NEW_DIR --instance-ref LABEL --source-basis REF \
-    [--total-timeout 180] < target.json
+    --source-version TEXT [--total-timeout 180] < target.json
 ```
 
+- **来源版本**：两工具必填`--source-version TEXT`，提供调用方本批已核的实际应用来源版本；真实性与sourceBasis同由调用方负责。工具只转录，不自动发现或证明版本。不得以PG版本、待比较Git提交或固定历史版本代替；来源未核时不得启动现场执行。`lh-deploy` 把该值原样传给每次 pre/post 采集，`lh-collect` 原样写入 `observation.sourceVersion`，不被 `--git-version`/`--base`/`--merged` 覆盖。
 - **准入**：`--object` 取该提交 `tools/sync-targets.json` 的顶层 `id`；只接 `ends.lobehub.present=true`。技能须 `type=skill` 且 `ends.lobehub.kind=skill`，Agent 须 `type=prompt|subagent`、`kind=agent`、`field=systemRole`。`--git-version`/`--base`/`--merged` 只接受 40 位小写 hex 的本地 commit，不 fetch、不隐式解析 HEAD/tag/tree。`--out-dir` 必须不存在，排他建 700 目录、600 文件。`target.json` 只在内存使用（根键 `ssh`/`postgres`，固定子键，端口为 1..65535 整数），不落盘、不回显，不接收 query/command/凭据。
 - **采集**：只读事务内用固定列取技能的 `id/name/description/identifier/content` 与资源**实际完整键**，文本经 base64 还原严格 UTF-8（不 strip、不归一 CRLF 或尾 LF）；资源正文只按「登记 ∩ 实际」逐路径走 `tools/auth-call.py skill-resource`，原 `stdout`/`stderr`/`exitCode` 原样写入 `skill-evidence.json`（`schemaVersion=1` 全键），另一份 `projection-source.json` 只存安全投影。额外资源只报告、不读正文。
-- **Agent**：实际表列与身份归属绑定尚未核准，`lh-collect` 在读任何凭据前以 `schema_unverified`（rc3）停止，不生成 `agent-evidence.json`；`lh-deploy` 对 Agent 对象在 pre 阶段以 `unsupported`（rc3）阻断，不写。
+- **Agent**：`lh-collect` 对 `kind=agent` 的登记对象按 ID 取固定投影——`agents` 表的 `id/user_id/workspace_id/system_role`，谓词 `id = :'obj_id' AND is_deleted IS NOT TRUE`（软删除列可空，不用 `=false`），`system_role` 经 base64 严格还原 UTF-8 且保留 `null` 与空串差别，写入 `agent-evidence.json`（`schemaVersion=1/observation/objects`，对象固定 `object/observationId/instanceRef/id/field/value`，`field` 仅 `systemRole`）。不读取默认配置、知识关联或任何凭据列，不新增 scope/绑定参数。`lh-deploy` 对 Agent 先做完整 pre 采集并严格核唯一对象、ID、`field` 与观察关联，再按 `body_contract.body_bytes` 比较 UTF-8 bytes；不等即 `pre_difference` 零写。相等后只调用官方 `lh agent edit <id> --config-file <600 新文件>`（JSON 仅含 `systemRole`，正文按 argv 原样传），写后对 `merged` 重新采集并按 bytes 复核，相等才 `completed`；Agent 差异不自动纠正，也不进 `lh-verify` 比较器。**运行前提（人工，不由工具证明）**：同实例/账户 scope/所选 ID 归属，以及当前实例该 Agent 的有效 `systemRole` 与存储 `system_role` 等价，须由负责人本批核实并记录；本仓库只提供离线链，不声称当前实例已验证。
 - **部署**：无凭据阶段先核两版登记的身份、`type`、`kind`、LobeHub ID、`source`、`installSource` 相同、资源只增不减、旧 blob 完整可读，并匿名核安装分支 HEAD 等于 `--merged`；随后新建 pre 观察（`lh-collect` + `lh-verify`）对 `base` 验收，**任意非 0 零写**；通过后紧邻执行官方 `lh skill install <installSource>`；写后再核分支 HEAD，仍以新建 post 观察对 `merged` 验收。首错后其余对象 `not_run`，不自动重投、不回滚，只有 post 通过才 `completed`。
 - **退出码**：采集 0 完整 / 2 参数、格式、执行、不安全出口或读取错误 / 3 缺证或未核准前提。部署 0 全部 post 通过 / 1 确证差异 / 2 执行、格式、写失败、超时或清理失败 / 3 缺证或首版不支持，并存按 2>3>1>0。stdout 各一份摘要 JSON（`schemaVersion=1/status/objects/errors/artifacts/notCovered`），stderr 只固定码。
-- **未覆盖（首版明确不做）**：资源退役、删除重装、ID 变化、自动登记、新装未登记对象、任意 SQL/命令/HTTP、通用 SSH 框架、GH 合并、跨端聚合、持久发布状态机、自动回滚、行为评测；post 阶段「尾 LF 一次性纠正」例外也未实现，此类差异只报 `post_difference`，不报成功。首版没有平台 CAS，不保证不存在外部并发。
+- **未覆盖（首版明确不做）**：资源退役、删除重装、ID 变化、自动登记、新装未登记对象、任意 SQL/命令/HTTP、通用 SSH 框架、GH 合并、跨端聚合、持久发布状态机、自动回滚、行为评测；post 阶段唯一的纠正例外是：verify 原 JSON 的差异恰为 `content`、无错误/缺证/资源差异，且现场 `content` 的 bytes 恰等于期望正文去掉一个尾 LF 时，按 argv 原样传全文补一次 `lh skill edit`，随后全量重采并复验；其余差异只报 `post_difference`，不报成功。首版没有平台 CAS，不保证不存在外部并发。
 - **运行时前提**：SSH 只做代码内固定只读查询（`-F none`、`BatchMode=yes`、`StrictHostKeyChecking=yes`、`IdentitiesOnly=yes`、`IdentityAgent=none`、明确 `known_hosts` 与总截止时间），私钥只在获准的秘密落盘授权下用独占 `/tmp` 700 根/600 文件承载并在退场重核身份后清理；本次未使用任何秘密，也未连现场。结构化验收不证明现场安全或行为一致。
 
 专项测试（不进常跑）：`sh tests/run-tests.sh case test-lh-collect.py`、`sh tests/run-tests.sh case test-lh-deploy.py`；选路见 `tests/run-tests.sh` 头部。

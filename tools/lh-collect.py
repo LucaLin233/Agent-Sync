@@ -7,8 +7,9 @@
       [--total-timeout 180] < target.json
 
 范围：只采集该提交登记里 `ends.lobehub.present=true` 的技能与 Agent。技能投影五字段与资源**实际完整键**，
-资源正文经 tools/auth-call.py 的 skill-resource 逐路径读取，原 stdout/stderr/exitCode 原样入证；Agent 的
-实际表列与身份归属绑定尚未核准，本版在读取任何凭据前以 `schema_unverified` 停止（rc3），不猜字段。
+资源正文经 tools/auth-call.py 的 skill-resource 逐路径读取，原 stdout/stderr/exitCode 原样入证；Agent 只按
+登记 ID 取固定投影（id/user_id/workspace_id/system_role，`is_deleted IS NOT TRUE`），写入 `agent-evidence.json`，
+不读默认配置、知识关联或凭据列。
 
 目标 JSON 只在内存使用，不落盘、不回显：根键 ssh/postgres；不接收 query/command 或任何凭据。
 
@@ -24,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 NAME_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
@@ -47,13 +49,27 @@ SKILL_SQL = (
     "SET default_transaction_read_only = on;\n"
     "BEGIN READ ONLY;\n"
     "SELECT coalesce(json_build_object("
-    "'id', id, 'name', name, 'description', description, 'identifier', identifier, "
-    "'content', encode(convert_to(content, 'UTF8'), 'base64'), "
-    "'resources', (SELECT coalesce(json_agg(k ORDER BY k), '[]'::json) "
+    "'id', id, 'name', name, 'identifier', identifier, "
+    "'description_b64', encode(convert_to(description, 'UTF8'), 'base64'), "
+    "'content_b64', encode(convert_to(content, 'UTF8'), 'base64'), "
+    "'resource_keys', (SELECT coalesce(json_agg(k ORDER BY k), '[]'::json) "
     "FROM jsonb_object_keys(coalesce(resources, '{}'::jsonb)) AS k)"
-    ")::text, 'MISSING') FROM skills WHERE id = :'obj_id';\n"
+    ")::text, 'MISSING') FROM agent_skills WHERE id = :'obj_id';\n"
     "COMMIT;\n"
 )
+SQL_KEYS = ("id", "name", "identifier", "description_b64", "content_b64", "resource_keys")
+# Agent 固定只读投影：只取登记 ID 的对应有效行（is_deleted 可空，必须 IS NOT TRUE），不带当前用户/工作区。
+AGENT_SQL = (
+    "SET default_transaction_read_only = on;\n"
+    "BEGIN READ ONLY;\n"
+    "SELECT coalesce(json_build_object("
+    "'id', id, 'user_id', user_id, 'workspace_id', workspace_id, "
+    "'system_role_b64', encode(convert_to(system_role, 'UTF8'), 'base64')"
+    ")::text, 'MISSING') FROM agents "
+    "WHERE id = :'obj_id' AND is_deleted IS NOT TRUE;\n"
+    "COMMIT;\n"
+)
+AGENT_KEYS = ("id", "user_id", "workspace_id", "system_role_b64")
 
 
 class Fail(Exception):
@@ -174,74 +190,121 @@ def _need(name):
 
 
 class KeyRoot:
-    """私钥承载：独占 700 根 / 600 文件，排他创建，退场重核身份后清理。"""
+    """含秘密临时物：固定 /tmp 下 mktemp -d 语义（700 根/600 文件），锚父 fd + nofollow 核身份。"""
 
     def __init__(self):
-        base = os.environ.get("TMPDIR") or "/tmp"
-        self.root = tempfile_mkdtemp(base)
-        self.path = os.path.join(self.root, "id")
-        self.made = None
-        self.root_ident = self._ident(self.root, False)
-
-    def _ident(self, path, follow):
+        import tempfile
         try:
-            st = os.stat(path) if follow else os.lstat(path)
+            self.root = tempfile.mkdtemp(prefix="lh-collect-", dir="/tmp")
+        except OSError:
+            raise Fail("unsafe_path") from None
+        self.tmpfd = _anchor("/tmp")
+        self.name = os.path.basename(self.root)
+        self.root_id = None
+        fd = self.root_fd()
+        try:
+            self.root_id = self._id(fd)
+        finally:
+            os.close(fd)
+        self.made = None
+
+    def _id(self, fd):
+        """同一已开 FD 上 fstat 取完整身份（dev/ino/mode），不归一 dev、不混 stat。"""
+        try:
+            st = os.fstat(fd)
         except OSError:
             raise Fail("cleanup_failed") from None
-        return (st.st_dev, st.st_ino, st.st_mode & 0o170000)
+        return (st.st_dev, st.st_ino, st.st_mode)
 
     def write(self, material):
         try:
             material = base64.b64decode(material, validate=True)
         except (binascii.Error, ValueError):
+            self.close()
             raise Fail("missing_variable:SSH_PRIVATE_KEY_B64", 3) from None
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         try:
-            fd = os.open(self.path, flags, 0o600)
+            rfd = self.root_fd()
+            try:
+                fd = os.open("id", os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=rfd)
+                self.made = self._id(fd)
+                off = 0
+                while off < len(material):
+                    off += os.write(fd, material[off:])
+                os.fsync(fd)
+            finally:
+                os.close(rfd)
         except OSError:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            self.close()
             raise Fail("unsafe_path") from None
+        os.close(fd)
+        return os.path.join(self.root, "id")
+
+    def root_fd(self):
+        """从已锚定的 /tmp fd 同轴重开根目录，nofollow 并核完整身份。"""
         try:
-            os.write(fd, material)
-            os.fsync(fd)
-        finally:
+            fd = os.open(self.name, os.O_RDONLY | os.O_DIRECTORY
+                         | getattr(os, "O_NOFOLLOW", 0), dir_fd=self.tmpfd)
+        except OSError:
+            raise Fail("cleanup_failed") from None
+        if self.root_id is not None and self._id(fd) != self.root_id:
             os.close(fd)
-        self.made = self._ident(self.path, False)
-        return self.path
+            raise Fail("cleanup_failed")
+        return fd
 
     def close(self):
-        """重核仍是本单对象才删；任何不确定即报 cleanup_failed 并交出残留。"""
-        if self.made is None:
-            raise Fail("cleanup_failed")
+        """删除前重核根与文件身份；不一致或失败交残留并报 cleanup_failed，不删未知项。"""
         try:
-            if self._ident(self.path, False) != self.made \
-                    or self._ident(self.root, False) != self.root_ident:
-                raise Fail("cleanup_failed")
-            os.unlink(self.path)
-            os.rmdir(self.root)
+            rfd = self.root_fd()
+        except Fail:
+            self.tmpfd is not None and os.close(self.tmpfd)
+            raise
+        try:
+            if self.made is not None:
+                try:
+                    fid = os.open("id", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=rfd)
+                except OSError:
+                    fid = None
+                if fid is not None:
+                    same = self._id(fid) == self.made
+                    os.close(fid)
+                    if not same:
+                        raise Fail("cleanup_failed")
+                    os.unlink("id", dir_fd=rfd)
+            os.rmdir(self.name, dir_fd=self.tmpfd)
+            self.made = None
         except Fail:
             raise
         except OSError:
             raise Fail("cleanup_failed") from None
-        self.made = None
+        finally:
+            os.close(rfd)
+            if self.tmpfd is not None:
+                os.close(self.tmpfd)
+                self.tmpfd = None
 
 
-def tempfile_mkdtemp(base):
-    """mktemp -d 语义：独占 700 目录。"""
-    import tempfile
-    try:
-        path = tempfile.mkdtemp(prefix="lh-collect-", dir=base)
-    except OSError:
-        raise Fail("unsafe_path") from None
-    if (os.lstat(path).st_mode & 0o170000) != 0o040000:
-        raise Fail("unsafe_path")
-    return path
+def _anchor(path):
+    """从 / 逐组件 nofollow 打开目录（O_DIRECTORY|O_NOFOLLOW），返回 fd。"""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    for comp in [c for c in path.split("/") if c]:
+        nfd = os.open(comp, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+                      dir_fd=fd)
+        os.close(fd)
+        fd = nfd
+    return fd
 
 
 def _keyring():
     root = KeyRoot()
-    if root.root_ident[2] != 0o040000:
-        raise Fail("unsafe_path")
-    return root, root.write(os.environ["SSH_PRIVATE_KEY_B64"])
+    try:
+        return root, root.write(os.environ["SSH_PRIVATE_KEY_B64"])
+    except BaseException:
+        raise
 
 
 def _env():
@@ -260,7 +323,7 @@ def _ssh_run(ssh, pg, keyfile, sql, variables, timeout):
         "-o", "UserKnownHostsFile=" + ssh["knownHostsFile"],
         "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
         "-o", "ConnectTimeout=10", "-p", str(ssh["port"]), "-i", keyfile,
-        "--", "%s@%s" % (ssh["user"], ssh["host"]), "--",
+        "--", "%s@%s" % (ssh["user"], ssh["host"]),
         "docker", "exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on",
         "-e", "PGCONNECT_TIMEOUT=20", "-e", "PGAPPNAME=lh-collect",
         pg["container"],
@@ -316,14 +379,41 @@ def _decode_field(value, field):
         return None
     if not isinstance(value, str):
         raise Fail("source_unverified", 3)
+    # 固定 SQL 契约：encode(...,'base64') 每 76 字节插一个换行，只允许这些换行。
     try:
-        raw = base64.b64decode(value, validate=True)
+        raw = base64.b64decode(value.replace("\n", ""), validate=True)
     except (binascii.Error, ValueError):
         raise Fail("source_unverified", 3) from None
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         raise Fail("source_unverified", 3) from None
+
+
+def _agent_projection(entry, lh_id, ssh, pg, keyfile, timeout):
+    """固定投影：id 与身份列、system_role（null 与空串严格区分）。"""
+    out = _ssh_run(ssh, pg, keyfile, AGENT_SQL, [("obj_id", lh_id)], timeout)
+    try:
+        lines = [ln for ln in out.decode("utf-8").split("\n") if ln]
+    except UnicodeDecodeError:
+        raise Fail("source_unverified", 3) from None
+    if len(lines) != 1:
+        raise Fail("source_unverified", 3)
+    if lines[0] == "MISSING":
+        raise Fail("missing_evidence", 3)
+    try:
+        row = json.loads(lines[0], object_pairs_hook=_pairs)
+    except (ValueError, Fail):
+        raise Fail("source_unverified", 3) from None
+    if not isinstance(row, dict) or set(row) != set(AGENT_KEYS):
+        raise Fail("source_unverified", 3)
+    if not isinstance(row["id"], str) or row["id"] != lh_id:
+        raise Fail("identity_difference", 3)
+    if not isinstance(row["user_id"], str) or not row["user_id"]:
+        raise Fail("source_unverified", 3)
+    if row["workspace_id"] is not None and not isinstance(row["workspace_id"], str):
+        raise Fail("source_unverified", 3)
+    return _decode_field(row["system_role_b64"], "system_role")
 
 
 def _projection(entry, lh_id, ssh, pg, keyfile, timeout):
@@ -341,17 +431,20 @@ def _projection(entry, lh_id, ssh, pg, keyfile, timeout):
         row = json.loads(lines[0], object_pairs_hook=_pairs)
     except (ValueError, Fail):
         raise Fail("source_unverified", 3) from None
-    if not isinstance(row, dict) or set(row) != set(SKILL_FIELDS):
+    if not isinstance(row, dict) or set(row) != set(SQL_KEYS):
         raise Fail("source_unverified", 3)
     if not isinstance(row["id"], str) or row["id"] != lh_id:
         raise Fail("identity_difference", 3)
-    resources = row["resources"]
+    resources = row["resource_keys"]
     if not isinstance(resources, list) or not all(isinstance(p, str) for p in resources) \
             or len(set(resources)) != len(resources):
         raise Fail("source_unverified", 3)
-    text = {"id": row["id"]}
-    for key in ("name", "description", "identifier", "content"):
-        text[key] = _decode_field(row[key], key)
+    for key in ("name", "identifier"):
+        if row[key] is not None and not isinstance(row[key], str):
+            raise Fail("source_unverified", 3)
+    text = {"id": row["id"], "name": row["name"], "identifier": row["identifier"],
+            "description": _decode_field(row["description_b64"], "description"),
+            "content": _decode_field(row["content_b64"], "content")}
     return text, resources
 
 
@@ -373,11 +466,12 @@ def main(argv=None):
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--instance-ref", required=True)
     parser.add_argument("--source-basis", required=True)
+    parser.add_argument("--source-version", required=True, dest="source_version")
     parser.add_argument("--total-timeout", type=int, default=180)
     err = None
     summary = {"schemaVersion": 1, "status": "error", "objects": [], "errors": [],
                "artifacts": [], "notCovered": [
-                   "agent-evidence 源头 SQL 表列与身份绑定未核准",
+                   "Agent 现场有效 systemRole 与存储 system_role 的等价由负责人人工核实",
                    "采集成功不表示与 Git 匹配",
                ]}
     deadline = None
@@ -387,7 +481,7 @@ def main(argv=None):
             raise Fail("bad_args")
         if not HEX40_RE.match(args.git_version):
             raise Fail("bad_args")
-        for value in (args.instance_ref, args.source_basis):
+        for value in (args.instance_ref, args.source_basis, args.source_version):
             if not value or any(ord(ch) < 0x20 for ch in value):
                 raise Fail("bad_args")
         if not os.path.isabs(args.repo) or not os.path.isdir(args.repo):
@@ -397,9 +491,11 @@ def main(argv=None):
         parent = os.path.dirname(args.out_dir)
         if not os.path.isdir(parent) or os.path.islink(args.out_dir):
             raise Fail("unsafe_path")
-        selected = list(dict.fromkeys(args.objects))
-        if not selected:
+        selected = list(args.objects)
+        if not selected or len(set(selected)) != len(selected):
             raise Fail("bad_args")
+        if _git(args.repo, ["cat-file", "-t", args.git_version]).strip() != b"commit":
+            raise Fail("source_unverified", 3)
         registry = _registry(args.repo, args.git_version)
         plan = []
         for name in selected:
@@ -409,20 +505,19 @@ def main(argv=None):
             kind, lh_id = _classify(entry)
             plan.append((name, entry, kind, lh_id))
         ssh, pg = _target(sys.stdin.buffer.read())
-        deadline = args.total_timeout
-        # 未核准前提：Agent 实际表列/身份绑定缺证 → 读凭据前停（真实 rc3，不落空证据）。
-        if any(kind == "agent" for _, _, kind, _ in plan):
-            for name, _, kind, _ in plan:
-                summary["objects"].append({
-                    "object": name, "phase": "admission",
-                    "status": "failed" if kind == "agent" else "not_run",
-                    "code": "schema_unverified" if kind == "agent" else None,
-                    "changed": False})
-            summary["status"] = "incomplete"
-            summary["errors"].append("schema_unverified")
-            raise Fail("schema_unverified", 3)
-        for name in SSH_SECRETS + API_SECRETS:
+        deadline = time.monotonic() + args.total_timeout
+
+        def left():
+            """每对象总截止：剩余时间；已过截止即 timeout，不再启动读取。"""
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Fail("timeout")
+            return min(60, remaining)
+        for name in SSH_SECRETS:
             _need(name)
+        if any(kind == "skill" for _, _, kind, _ in plan):
+            for name in API_SECRETS:
+                _need(name)
         os.mkdir(args.out_dir, 0o700)
         os.chmod(args.out_dir, 0o700)
         started = _utc()
@@ -430,21 +525,34 @@ def main(argv=None):
         keyroot, keyfile = _keyring()
         evidence = {"schemaVersion": 1, "observation": {
             "id": obs_id, "instanceRef": args.instance_ref,
-            "sourceVersion": args.git_version, "startedAt": started,
+            "sourceVersion": args.source_version, "startedAt": started,
             "finishedAt": started, "sourceBasis": args.source_basis}, "objects": []}
         projection = {"schemaVersion": 1, "observation": evidence["observation"],
                       "objects": []}
+        agents = {"schemaVersion": 1, "observation": evidence["observation"], "objects": []}
         failed = False
         try:
             for name, entry, kind, lh_id in plan:
-                pre = _projection(entry, lh_id, ssh, pg, keyfile,
-                                  min(60, deadline))
+                if kind == "agent":
+                    value = _agent_projection(entry, lh_id, ssh, pg, keyfile, left())
+                    agents["objects"].append({
+                        "object": name, "observationId": obs_id,
+                        "instanceRef": args.instance_ref, "id": lh_id,
+                        "field": "systemRole", "value": value})
+                    projection["objects"].append({
+                        "object": name, "id": lh_id, "field": "systemRole",
+                        "value": value, "resources": []})
+                    summary["objects"].append({"object": name, "phase": "pre",
+                                               "status": "collected", "code": None,
+                                               "changed": False})
+                    continue
+                pre = _projection(entry, lh_id, ssh, pg, keyfile, left())
                 text, actual = pre
                 source = entry["source"]
                 registered = [_rel(p, source) for p in entry.get("resources", [])]
                 calls = []
                 for rel in sorted(set(registered) & set(actual)):
-                    rc, out, errout = _auth_call(args.repo, lh_id, rel, min(60, deadline))
+                    rc, out, errout = _auth_call(args.repo, lh_id, rel, left())
                     calls.append({"observationId": obs_id, "instanceRef": args.instance_ref,
                                   "request": {"id": lh_id, "path": rel},
                                   "exitCode": rc, "stdout": out, "stderr": errout})
@@ -474,9 +582,19 @@ def main(argv=None):
                                            "code": "cleanup_failed", "changed": False})
         evidence["observation"]["finishedAt"] = _utc()
         projection["observation"] = evidence["observation"]
-        _write_json(os.path.join(args.out_dir, "skill-evidence.json"), evidence)
-        _write_json(os.path.join(args.out_dir, "projection-source.json"), projection)
-        summary["artifacts"] = ["skill-evidence.json", "projection-source.json"]
+        agents["observation"] = evidence["observation"]
+        outfd = _anchor(args.out_dir)
+        try:
+            if evidence["objects"]:
+                _write_json(outfd, "skill-evidence.json", evidence)
+                summary["artifacts"].append("skill-evidence.json")
+            if agents["objects"]:
+                _write_json(outfd, "agent-evidence.json", agents)
+                summary["artifacts"].append("agent-evidence.json")
+            _write_json(outfd, "projection-source.json", projection)
+            summary["artifacts"].append("projection-source.json")
+        finally:
+            os.close(outfd)
         summary["status"] = "collected" if not failed else "incomplete"
         if failed:
             summary["errors"].append("cleanup_failed")
@@ -498,20 +616,28 @@ def main(argv=None):
     return err.exit
 
 
-def _write_json(path, doc):
-    """600、排他创建、整份回读核对长度与结构。"""
+def _write_json(dir_fd, name, doc):
+    """600、在已锚定的 out-dir fd 上排他创建；同一 fd 回读判等（不按路径重开）。"""
     raw = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags, 0o600)
+        fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
     except OSError:
         raise Fail("unsafe_path") from None
     try:
-        os.write(fd, raw)
+        off = 0
+        while off < len(raw):
+            off += os.write(fd, raw[off:])
+        os.fsync(fd)
+        os.lseek(fd, 0, os.SEEK_SET)
+        back = b""
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            back += chunk
     finally:
         os.close(fd)
-    with open(path, "rb") as handle:
-        back = handle.read()
     if back != raw:
         raise Fail("unsafe_path")
 

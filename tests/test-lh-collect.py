@@ -18,19 +18,22 @@ TOOL = os.path.join(os.path.dirname(HERE), "tools", "lh-collect.py")
 PY = sys.executable or "python3"
 
 FAKE_SSH = """#!/bin/sh
-cat > /dev/null
-cat "$(dirname "$0")/row"
+here=$(dirname "$0")
+printf '%s\\n' "$@" > "$here/argv"
+cat > "$here/sql"
+cat "$here/row"
 """
 
 FAKE_AUTH = """#!/usr/bin/env python3
-import hashlib, json, sys
+import hashlib, json, os, sys
 args = sys.argv[1:]
 path = args[args.index("--path") + 1]
 if path == "references/fail.md":
     sys.stdout.write("")
     sys.stderr.write(json.dumps({"ok": False, "error": "transport_error"}) + "\\n")
     sys.exit(2)
-blob = b"resource:" + path.encode()
+here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+blob = open(os.path.join(here, "skills", "luno-ops", path), "rb").read()
 doc = {"ok": True, "action": "skill-resource", "resource": {
     "content": blob.decode(), "encoding": "utf8", "fileHash": hashlib.sha256(blob).hexdigest(),
     "fileType": "text/plain", "path": path, "size": len(blob)}}
@@ -42,12 +45,23 @@ TARGET = {"ssh": {"host": "h.example", "port": 22, "user": "u",
           "postgres": {"container": "db", "database": "lob", "port": 5432, "user": "lob"}}
 
 
-def row(skill_id="skill-example", content="body\n", name=None, resources=("references/a.md",)):
+def row(skill_id="skl_1", content="body\n", name="luno-ops",
+        description="d", identifier=None, resources=("references/a.md",)):
+    """按真实 SQL 契约（agent_skills）造行：只有 *_b64 字段是 base64。"""
     def b64(value):
-        return base64.b64encode(value.encode()).decode()
-    return json.dumps({"id": skill_id, "name": name, "description": "",
-                       "identifier": None, "content": b64(content),
-                       "resources": list(resources)}, separators=(",", ":"))
+        # 真实 PostgreSQL encode(...,'base64') 每 76 字节插换行：夹具按同一编码契约造行。
+        return base64.encodebytes(value.encode()).decode()
+    return json.dumps({"id": skill_id, "name": name, "identifier": identifier,
+                       "description_b64": b64(description), "content_b64": b64(content),
+                       "resource_keys": list(resources)}, separators=(",", ":"))
+
+
+def agent_row(agent_id="agt_1", role="hello\n", user_id="usr_1", workspace_id=None):
+    """按真实 agents 契约造行：只 system_role 走 base64，身份列原文，workspace_id 可 null。"""
+    def b64(value):
+        return None if value is None else base64.encodebytes(value.encode()).decode()
+    return json.dumps({"id": agent_id, "user_id": user_id, "workspace_id": workspace_id,
+                       "system_role_b64": b64(role)}, separators=(",", ":"))
 
 
 class Case(unittest.TestCase):
@@ -55,21 +69,20 @@ class Case(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="lh-collect-test-")
         self.repo = os.path.join(self.tmp, "repo")
         os.makedirs(os.path.join(self.repo, "tools"))
-        os.makedirs(os.path.join(self.repo, "skills", "example-skill", "references"))
+        os.makedirs(os.path.join(self.repo, "skills", "luno-ops", "references"))
         self.env = {"PATH": os.path.join(self.tmp, "bin") + ":/usr/bin:/bin",
                     "TMPDIR": os.path.join(self.tmp, "tmp"), "LC_ALL": "C.UTF-8",
                     "HOME": os.path.join(self.tmp, "home")}
         for key in ("bin", "tmp", "home"):
             os.makedirs(os.path.join(self.tmp, key), exist_ok=True)
         self._write("tools/auth-call.py", FAKE_AUTH, 0o755)
-        self._write("skills/example-skill/SKILL.md", "---\nname: example-skill\n---\nbody\n")
-        self._write("skills/example-skill/references/a.md", "a")
+        self._write("skills/luno-ops/SKILL.md", "---\nname: luno-ops\ndescription: d\n---\nbody\n")
+        self._write("skills/luno-ops/references/a.md", "a")
         registry = {"schemaVersion": 1, "objects": [{
-            "id": "example-skill", "type": "skill", "source": "skills/example-skill/SKILL.md",
-            "resources": ["skills/example-skill/SKILL.md",
-                          "skills/example-skill/references/a.md"],
-            "installSource": "https://github.com/o/r/tree/main/skills/example-skill",
-            "ends": {"lobehub": {"present": True, "kind": "skill", "id": "skill-example"}}}]}
+            "id": "luno-ops", "type": "skill", "source": "skills/luno-ops/SKILL.md",
+            "resources": ["skills/luno-ops/references/a.md"],
+            "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-ops",
+            "ends": {"lobehub": {"present": True, "kind": "skill", "id": "skl_1"}}}]}
         self._write("tools/sync-targets.json", json.dumps(registry))
         subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
         subprocess.run(["git", "-C", self.repo, "add", "."], check=True)
@@ -96,10 +109,11 @@ class Case(unittest.TestCase):
         with open(os.path.join(self.tmp, "bin", "row"), "w", encoding="utf-8") as handle:
             handle.write(output + "\n")
 
-    def run_tool(self, extra_env=None, objects=("example-skill",), target=TARGET):
+    def run_tool(self, extra_env=None, objects=("luno-ops",), target=TARGET):
         argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--git-version", self.version,
                 "--out-dir", self.out, "--instance-ref", "inst-1",
-                "--source-basis", "basis-ref", "--total-timeout", "30"]
+                "--source-basis", "basis-ref", "--source-version", "2.3.3+testbuild",
+                "--total-timeout", "30"]
         for item in objects:
             argv += ["--object", item]
         env = dict(self.env)
@@ -114,7 +128,8 @@ class Case(unittest.TestCase):
 
     def test_evidence_whitelist_and_actual_keys(self):
         # 实际键含未登记的 references/extra.md：只报告、不取正文；调用只覆盖登记∩实际。
-        self.fake_ssh(row(resources=("references/a.md", "references/extra.md")))
+        self.fake_ssh(row(name=None, description="", content="正文" * 30 + "\n",
+                          resources=("references/a.md", "references/extra.md")))
         proc = self.run_tool(self.creds())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         with open(os.path.join(self.out, "skill-evidence.json"), encoding="utf-8") as handle:
@@ -131,14 +146,29 @@ class Case(unittest.TestCase):
         self.assertTrue(obj["calls"][0]["stdout"].endswith("\n"))
         self.assertIsNone(obj["projection"]["name"])          # null 与空串区分
         self.assertEqual(obj["projection"]["description"], "")
-        self.assertEqual(obj["projection"]["content"], "body\n")  # 尾 LF 保留
+        self.assertEqual(obj["projection"]["content"], "正文" * 30 + "\n")  # 长多字节正文与尾 LF 原样还原
+        self.assertEqual(obj["projection"]["identifier"], None)
+        with open(os.path.join(self.tmp, "bin", "sql"), encoding="utf-8") as handle:
+            sql = handle.read()
+        self.assertIn("FROM agent_skills", sql)      # 真实表（probe5.sh 已核）
+        for key in ("name", "identifier", "description_b64", "content_b64", "resource_keys"):
+            self.assertIn(key, sql)
+        self.assertNotIn("FROM skills", sql)
+        with open(os.path.join(self.tmp, "bin", "argv"), encoding="utf-8") as handle:
+            argv = handle.read().splitlines()
+        self.assertEqual(argv.count("--"), 1)         # host 之后不再多一个 "--"
+        self.assertEqual(argv[argv.index("--") + 1], "u@h.example")
+        self.assertEqual(argv[argv.index("--") + 2], "docker")  # 远端命令起点
+        self.assertIn("-F", argv)
+        self.assertIn("StrictHostKeyChecking=yes", argv)
         with open(os.path.join(self.out, "projection-source.json"), encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn("h.example", source)
         self.assertNotIn("test-token-value", proc.stdout.decode())
 
     def test_failed_call_kept_with_association(self):
-        self.fake_ssh(row(resources=("references/a.md", "references/fail.md")))
+        self.fake_ssh(row(skill_id="skill-example",
+                          resources=("references/a.md", "references/fail.md")))
         self._write("tools/sync-targets.json", json.dumps({"schemaVersion": 1, "objects": [{
             "id": "example-skill", "type": "skill",
             "source": "skills/example-skill/SKILL.md",
@@ -151,7 +181,7 @@ class Case(unittest.TestCase):
                         "commit", "-qm", "two"], check=True)
         self.version = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"],
                                       capture_output=True, text=True, check=True).stdout.strip()
-        proc = self.run_tool(self.creds())
+        proc = self.run_tool(self.creds(), objects=("example-skill",))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         with open(os.path.join(self.out, "skill-evidence.json"), encoding="utf-8") as handle:
             obj = json.load(handle)["objects"][0]
@@ -163,7 +193,30 @@ class Case(unittest.TestCase):
         self.assertEqual(calls["references/fail.md"]["observationId"],
                          obj["observationId"])
 
-    def test_agent_blocked_before_credentials(self):
+    def test_real_verify_consumes_collect_evidence(self):
+        """真实 collect 输出交现役 lh-verify 消费：禁止双方恒 0 互证。"""
+        tools = os.path.join(os.path.dirname(HERE), "tools")
+        shutil.copyfile(os.path.join(tools, "body_contract.py"),
+                        os.path.join(self.repo, "tools", "body_contract.py"))
+        subprocess.run(["git", "-C", self.repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@e",
+                        "commit", "-qm", "contract"], check=True)
+        self.version = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"],
+                                      capture_output=True, text=True, check=True).stdout.strip()
+        self.fake_ssh(row(identifier="lucalin233-agent-sync-luno-ops"))
+        proc = self.run_tool(self.creds())
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        real_verify = os.path.join(os.path.dirname(HERE), "tools", "lh-verify.py")
+        argv = [PY, "-I", "-B", real_verify, "--repo", self.repo, "--git-version", self.version,
+                "--object", "luno-ops", "--evidence",
+                os.path.join(self.out, "skill-evidence.json")]
+        out = subprocess.run(argv, capture_output=True, env={"PATH": "/usr/bin:/bin",
+                                                            "HOME": self.tmp, "LC_ALL": "C.UTF-8"},
+                             timeout=120)
+        self.assertEqual(out.returncode, 0, (out.stdout, out.stderr))
+
+    def test_agent_projection_and_evidence(self):
+        """Agent 固定投影：agents 表 + is_deleted IS NOT TRUE，只取 systemRole 与身份列，独立证据文件。"""
         self._write("tools/sync-targets.json", json.dumps({"schemaVersion": 1, "objects": [{
             "id": "prompt/X.md", "type": "prompt", "source": "prompt/X.md", "resources": [],
             "ends": {"lobehub": {"present": True, "kind": "agent", "id": "agt_1",
@@ -173,18 +226,43 @@ class Case(unittest.TestCase):
                         "commit", "-qm", "agent"], check=True)
         self.version = subprocess.run(["git", "-C", self.repo, "rev-parse", "HEAD"],
                                       capture_output=True, text=True, check=True).stdout.strip()
-        proc = self.run_tool(objects=("prompt/X.md",))  # 无任何凭据变量
-        self.assertEqual(proc.returncode, 3)
-        summary = json.loads(proc.stdout)
-        self.assertEqual(summary["status"], "incomplete")
-        self.assertEqual(summary["objects"][0]["code"], "schema_unverified")
-        self.assertFalse(os.path.exists(os.path.join(self.out, "agent-evidence.json")))
+        self.fake_ssh(agent_row())
+        proc = self.run_tool(self.creds(), objects=("prompt/X.md",))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(self.out, "agent-evidence.json"), encoding="utf-8") as handle:
+            doc = json.load(handle)
+        self.assertEqual(sorted(doc), ["objects", "observation", "schemaVersion"])
+        obj = doc["objects"][0]
+        self.assertEqual(sorted(obj), ["field", "id", "instanceRef", "object",
+                                       "observationId", "value"])
+        self.assertEqual(obj["field"], "systemRole")
+        self.assertEqual(obj["id"], "agt_1")
+        self.assertEqual(obj["value"], "hello\n")          # 正文原样，不加尾 LF
+        self.assertEqual(obj["observationId"], doc["observation"]["id"])
+        self.assertFalse(os.path.exists(os.path.join(self.out, "skill-evidence.json")))
+        with open(os.path.join(self.tmp, "bin", "sql"), encoding="utf-8") as handle:
+            sql = handle.read()
+        self.assertIn("FROM agents", sql)
+        self.assertIn("is_deleted IS NOT TRUE", sql)        # 软删除列可空，必须 IS NOT TRUE
+        for column in ("id", "user_id", "workspace_id", "system_role"):
+            self.assertIn(column, sql)
 
     def test_missing_row_is_rc3_without_evidence(self):
         self.fake_ssh("MISSING")
         proc = self.run_tool(self.creds())
         self.assertEqual(proc.returncode, 3)
         self.assertFalse(os.path.exists(os.path.join(self.out, "skill-evidence.json")))
+
+    def test_source_version_required(self):
+        """调用方人工核实的来源版本必填；缺参在看凭据前 rc2。"""
+        self.fake_ssh(row())
+        argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--git-version", self.version,
+                "--out-dir", self.out, "--instance-ref", "inst-1",
+                "--source-basis", "basis-ref", "--object", "luno-ops"]
+        proc = subprocess.run(argv, input=json.dumps(TARGET).encode(), env=dict(self.env),
+                              capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(json.loads(proc.stderr)["error"], "bad_args")
 
     def test_missing_variable_named(self):
         self.fake_ssh(row())
