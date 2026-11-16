@@ -245,7 +245,19 @@ for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set
 [ -z "$leak" ] && echo probe:ok || { echo "probe:leak$leak"; exit 1; }
 ''')
 ROWS=('lint|smoke|echo lint:ran|1','eat|g1|cat >/dev/null; echo eat:ran|1','probe|g1|sh tests/probe.sh|1',
-      'bad|g2|echo bad:ran; exit 1|0')
+      'bad|g2|echo bad:ran; exit 1|0','long|g1|sh tests/long.sh|1','unit|g1|cd tests && python3 -B -m unittest -v unitdemo|1',
+      'unitbad|g2|cd tests && python3 -B -m unittest -v unitbad|0','slow|g3|sh -c "sleep 30"|0')
+(FIX/'tests/long.sh').write_text(''.join('echo %s%s\n'%(m,c*200) for m,c in (('LONGHEAD','A'),('LONGMID','M'),('LONGTAIL','T'))))
+(FIX/'tests/unitdemo.py').write_text('''import unittest
+class T(unittest.TestCase):
+    def test_ok(self): pass
+    @unittest.skip('synthetic')
+    def test_skip(self): pass
+''')
+(FIX/'tests/unitbad.py').write_text('''import unittest
+class T(unittest.TestCase):
+    def test_boom(self): self.fail('synthetic-boom')
+''')
 FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:]
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
 HOSTILE=dict(os.environ,HOME=str(FIX/'home'),TMPDIR=str(FIX/'tmp'),PYTHONPATH=str(FIX/'poison'),
@@ -264,7 +276,7 @@ for label,args,stdin,rc,want in (
     code,out=rt(*args,stdin=stdin)
     check('runner %s：rc=%d 且只跑 %s'%(label,rc,want),code==rc and ran(out)==want and out.count('probe:ok')<=1,
           'rc=%d ran=%s\n%s'%(code,ran(out),out[-400:]))
-check('runner 失败入口附错误尾段','| bad:ran' in out)
+check('runner 失败入口保留完整原文与原始退出码','bad:ran' in out and 'END bad exit 1' in out,out[-200:])
 for label,args,stdin in (('未知组',('group','nope'),None),
                          ('选不到入口的 selector',('select',),'[["full"],["group","nope"]]'),
                          ('非法 selector JSON',('select',),'{"full":1}'),('空 selector',('select',),'[]'),
@@ -272,16 +284,87 @@ for label,args,stdin in (('未知组',('group','nope'),None),
     code,out=rt(*args,stdin=stdin)
     check('runner 拒绝%s（rc=2，未跑任何入口）'%label,code==2 and not ran(out),'rc=%d\n%s'%(code,out[-300:]))
 code,out=rt('select-paths',stdin='tests/run-tests.sh\0tools/check-rules.py\0')
-check('select-paths：full 与同批定向组并存，且不受 PYTHONPATH 影响',
-      code==0 and out.strip()=='[["full"], ["group", "gate"]]',out)
+check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["group", "auth"], ["group", "identity"], ["group", "verify"], ["group", "minis-verify"], ["group", "lh-wiring"], ["group", "gate"]]',out)
+def expand(doc):
+    got=set()
+    for k,a in doc:
+        if k=='case':got.add(a)
+        elif k=='full':got|={c[0] for c in REAL_CASES if c[3]=='1'}
+        elif k=='smoke':got|={c[0] for c in REAL_CASES if c[1]=='smoke'}
+        else:got|={c[0] for c in REAL_CASES if c[1]==a}
+    return got
+for pth in ('tests/run-tests.sh','tests/test_paths.py','.github/workflows/tests.yml'):
+    check('select：%s 展开全 12 入口各一次'%pth,expand(P.select([pth]))==names,str(P.select([pth])))
+check('select：普通未映射正文只 smoke',P.select(['README.md'])==[['smoke']])
+check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) for p,x in (('skills/luno-core/references/review.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-minis-verify.py']),('skills/luno-surge/references/plugin-authoring.md',['case','test-surge-package.py']))) and P.select(['skills/luno-core/references/review.md'])!=P.select(['README.md']))
+check('select：collect 双消费者',{['case','test-lh-collect.py'],['case','test-lh-deploy.py']}<=set(map(list,P.select(['tools/lh-collect.py']))))
+try:P.select(['tests/nope.py']);ok=False
+except ValueError:ok=True
+check('select：未知 tests 路径拒绝',ok)
+code,out=rt('select-paths',stdin='tests/test-pack-skill-zip.py\0tests/test_paths.py\0')
+check('select-paths：重命名的旧新两路径都参与选路',code==0 and out.count('["full"]')==1 and '["group", "auth"]' in out,out)
 check('select-paths：无命中只给 smoke',P.select([])==[['smoke']])
 code,out=rt('select-paths',stdin='tests/unregistered.py\0')
 check('select-paths：未登记测试路径拒绝',code==2,out)
-# 负控：去掉 env -i 后探针必须报泄漏，证明隔离断言不是空转
-assert FIXED.count('env -i ')==1
-(FIX/'tests/run-tests.sh').write_text(FIXED.replace('env -i ','env '),encoding='utf-8')
+code,out=rt('select',stdin='[["full"],["case","long"],["case","unit"],["case","unitbad"]]')
+check('runner 长输出保留首中尾原文且只打一次',all(('LONG%s'%m)+c*200 in out for m,c in (('HEAD','A'),('MID','M'),('TAIL','T'))) and out.count('LONGHEAD')==1,out[-200:])
+check('runner 失败 traceback 原文保留',"self.fail('synthetic-boom')" in out and 'AssertionError' in out)
+check('runner 用例数/skip/原退出码/耗时取自摘要',all(re.search(x,out) for x in (r'END unit exit 0 tests 2 skipped 1 \d+\.\d\ds',r'END unitbad exit 1 tests 1 skipped 0 ',r'END long exit 0 tests N/A skipped N/A ')),out[-300:])
+check('runner 失败不被后继 PASS 抹掉',code==1 and 'FAIL 1' in out)
+# 负控：环境白名单构造点改为继承调用方环境后，探针必须报泄漏（不是只数文本）
+assert FIXED.count('child_env = build_child_env()')==1
+(FIX/'tests/run-tests.sh').write_text(FIXED.replace('child_env = build_child_env()','child_env = dict(os.environ)'),encoding='utf-8')
 code,out=rt('case','probe')
-check('负控：撤掉 env -i 后探针报泄漏',code==1 and 'probe:leak PYTHONPATH SYNTH_SECRET SYNTH_EMPTY' in out,out[-300:])
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('负控：改用继承环境后探针报泄漏',code==1 and all(v in out for v in ('PYTHONPATH','SYNTH_SECRET','SYNTH_EMPTY')),out[-300:])
+
+# ── CI workflow 运行段：抽取标界内的真实代码，在合成 Git 仓里跑，不复制选路算法 ──
+WF=(ROOT/'.github/workflows/tests.yml').read_text(encoding='utf-8');MK='          # >>> CI_SELECT\n'
+CI=textwrap.dedent(WF[WF.index(MK)+len(MK):WF.index('          # <<<\n')])
+G=dict(os.environ,GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_AUTHOR_NAME='f',GIT_AUTHOR_EMAIL='f@e',GIT_COMMITTER_NAME='f',GIT_COMMITTER_EMAIL='f@e')
+R2=TMP/'ci';R2.mkdir()
+def g(*a):
+    r=subprocess.run(('git',)+a,cwd=str(R2),env=G,capture_output=True,text=True)
+    assert r.returncode==0,r.stderr
+    return r.stdout.strip()
+def cm(m):
+    g('add','-A');g('commit','-q','-m',m);return g('rev-parse','HEAD')
+def ci(ev,**kw):
+    env=dict(G,PATH=os.environ['PATH'],HOME=str(TMP/'h'),TMPDIR=str(TMP/'t'),EVENT_NAME=ev);env.update(kw)
+    (R2/'tests/selected.json').unlink(missing_ok=True)
+    return subprocess.run([sys.executable,'-I','-B','-'],input=CI,cwd=str(R2),env=env,capture_output=True,text=True,timeout=120)
+def plan(r):return [l[9:] for l in r.stdout.splitlines() if l.startswith('selector ')][-1]
+(R2/'tests').mkdir();shutil.copyfile(ROOT/'tests/test_paths.py',R2/'tests/test_paths.py')
+(R2/'tests/run-tests.sh').write_text('cat > tests/selected.json\n')
+g('init','-q','-b','main');(R2/'README.md').write_text('b\n');C1=cm('c1')
+(R2/'tools').mkdir();(R2/'tools/check-rules.py').write_text('g\n');C2=cm('c2')
+g('checkout','-q','-b','feat',C1);(R2/'skills/luno-core/references').mkdir(parents=True)
+(R2/'skills/luno-core/references/review.md').write_text('f\n');C3=cm('c3')
+g('checkout','-q','main');g('merge','-q','--no-ff','-m','m','feat');MM=g('rev-parse','HEAD')
+r=ci('pull_request',BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA=MM)
+check('CI：PR 测 B→M，base 前进不算 PR 变化',r.returncode==0 and plan(r)=='[["smoke"], ["group", "identity"]]' and 'identity' in (R2/'tests/selected.json').read_text(),r.stdout[-300:]+r.stderr[-300:])
+g('checkout','-q','-b','feat2',C1);(R2/'tools/lh-verify.py').write_text('v\n');cm('d1')
+(R2/'skills/luno-platform/references').mkdir(parents=True);(R2/'skills/luno-platform/references/minis.md').write_text('m\n');D2=cm('d2')
+r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
+check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py','test-minis-verify.py')),r.stdout[-300:])
+for kw,label in ((dict(BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA='a'*40),'缺对象'),(dict(BEFORE_SHA='0'*40,AFTER_SHA=D2),'全零')):
+    r=ci('push' if 'BEFORE_SHA' in kw else 'pull_request',**kw)
+    check('CI：%s阻断且不得到成功 smoke'%label,r.returncode==2 and 'smoke' not in r.stdout and not (R2/'tests/selected.json').exists(),r.stderr[-200:])
+
+# ── 收尾：正常/失败/TERM 都只观察夹具自建的精确路径，不扫 /tmp ──
+left=lambda:sorted(p.name for p in (FIX/'tmp').iterdir())
+check('清理：正常与失败轮均删本轮 WORK 根',not left(),str(left()))
+p=subprocess.Popen(['sh','tests/run-tests.sh','case','slow'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+time.sleep(3);p.terminate();o=p.communicate(timeout=120)[0].decode('utf-8','replace')
+check('清理：TERM 停本轮进程组、删根并以 143 退出',p.returncode==143 and not left() and 'cleanup 完成' in o,'rc=%d %s'%(p.returncode,left()))
+S=TMP/'sentinel';S.mkdir();(S/'keep').write_text('x')
+MOD=FIXED.replace('        shutil.rmtree(NAME, dir_fd=PFD)','        os.rename(NAME, NAME+"-moved", src_dir_fd=PFD, dst_dir_fd=PFD)\n        os.symlink(%r, NAME, dir_fd=PFD)\n        shutil.rmtree(NAME, dir_fd=PFD)'%str(S))
+assert MOD!=FIXED
+(FIX/'tests/run-tests.sh').write_text(MOD,encoding='utf-8');code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('清理：根被换成外部链接时非零、披露残留、不误删哨兵',code==2 and 'cleanup 失败' in out and (S/'keep').read_text()=='x',out[-300:])
+for d in list((FIX/'tmp').iterdir()):
+    shutil.rmtree(d) if not d.is_symlink() else d.unlink()
 
 def tree(b):
     fs=[f for t in ('skills','prompt','subagents') for f in (b/t).rglob('*')]+[b/'tools/sync-targets.json']
