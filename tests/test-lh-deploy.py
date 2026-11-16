@@ -3,7 +3,7 @@
 
 覆盖：base 验收非 0 → 零写（含第二对象不启动）；写失败 → 不再补写、不报成功、changed=unknown；
 post 非 0 → rc≠0 且不报 completed；正常路径可过（负控：去掉阻断即转绿）；argv 原样传递。
-成本：Minis/iSH 本批 runner 实测 10.17s（秒级汇总11s），直接模块9.661s；真实总截止/信号/KeyRoot清理回归及恢复正控不可用mock或删断言降级。仅opt-in，父已接受本批小幅超10秒例外；如需提速另行证明等价。
+成本：Minis/iSH 本批 runner 实测 10.29s（秒级汇总10s），直接模块9.857s；真实总截止/信号/KeyRoot清理回归及恢复正控不可用mock或删断言降级。仅opt-in，父已接受本批小幅超10秒例外；如需提速另行证明等价。
 """
 import base64
 import json
@@ -24,6 +24,10 @@ PY = sys.executable or "python3"
 STUB_COLLECT = """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+def ack():
+    if "--_cleanup-fd" in args:
+        os.write(int(args[args.index("--_cleanup-fd") + 1]),
+                 b'{"event":"cleanup","residuals":[]}' + bytes([10]))
 out = args[args.index("--out-dir") + 1]
 os.mkdir(out, 0o700)
 name = args[args.index("--object") + 1]
@@ -39,9 +43,11 @@ if name.startswith("prompt/"):
         with open(os.path.join(out, "real.json"), "w", encoding="utf-8") as h:
             h.write(json.dumps(doc) + "\\n")
         os.symlink("real.json", os.path.join(out, "agent-evidence.json"))
+        ack()
         sys.exit(0)
     with open(os.path.join(out, "agent-evidence.json"), "w", encoding="utf-8") as h:
         h.write(json.dumps(doc) + "\\n")
+    ack()
     sys.exit(0)
 content = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".postcontent")
 value = open(content, encoding="utf-8").read() if os.path.exists(content) else ""
@@ -49,6 +55,7 @@ with open(os.path.join(out, "skill-evidence.json"), "w", encoding="utf-8") as h:
     h.write(json.dumps({"objects": [{"projection": {"content": value}}]}) + "\\n")
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".collect.log"), "a") as h:
     h.write(args[args.index("--git-version") + 1] + "\\n")
+ack()
 """
 
 STUB_VERIFY = """#!/usr/bin/env python3
@@ -384,6 +391,19 @@ class Case(unittest.TestCase):
         self.assertEqual(summary["cleanupResiduals"], [])
         self.assertEqual(os.listdir(root), [])
 
+
+    def test_collect_without_cleanup_ack_fails_before_write(self):
+        """R2-A 直接回归：真实父子接缝，子 rc0 但不发任何 cleanup 事件 → cleanup_failed 且零写。"""
+        self.write("tools/lh-collect.py", "import sys\nsys.exit(0)\n")
+        self.lh(0)
+        proc = self.run_tool(("one",))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(json.loads(proc.stderr)["error"], "cleanup_failed")
+        self.assertEqual(summary["objects"][0]["code"], "cleanup_failed")
+        self.assertEqual(summary["cleanupResiduals"], [])   # 无根记录：路径未知，不代表已清
+        self.assertEqual(self.argv_log(), [])
+        self.assertFalse(os.path.isdir(os.path.join(self.out, "pre-0")))
 
 if __name__ == "__main__":
     unittest.main()

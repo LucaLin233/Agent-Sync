@@ -147,16 +147,17 @@ def _spawn(argv, **kwargs):
 
 
 def _reap(proc, until):
-    """有界收尾：terminate → 等待 → 必要时 kill；不使用无界 wait。返回是否已回收。"""
-    _ACTIVE.discard(proc)
+    """有界收尾：terminate → 等待 → 必要时 kill；等待一律夹到 D，未回收不算已核。"""
     if proc.poll() is not None:
+        _ACTIVE.discard(proc)
         return True
     try:
         proc.terminate()
     except OSError:
         pass
     try:
-        proc.wait(timeout=max(0.05, min(1.0, until - time.monotonic())))
+        proc.wait(timeout=max(0.0, until - time.monotonic()))
+        _ACTIVE.discard(proc)
         return True
     except subprocess.TimeoutExpired:
         pass
@@ -165,15 +166,20 @@ def _reap(proc, until):
     except OSError:
         pass
     try:
-        proc.wait(timeout=1.0)
+        proc.wait(timeout=max(0.0, until - time.monotonic()))
+        _ACTIVE.discard(proc)
         return True
     except subprocess.TimeoutExpired:
         return False
 
 
 def _stop_active(until):
+    """返回是否全部回收；未回收的进程留在 _ACTIVE，不得据此声称已清。"""
+    reaped = True
     for proc in list(_ACTIVE):
-        _reap(proc, until)
+        if not _reap(proc, until):
+            reaped = False
+    return reaped
 
 
 class Deadline:
@@ -704,12 +710,14 @@ def main(argv=None):
         agents = {"schemaVersion": 1, "observation": evidence["observation"], "objects": []}
         failed = False
         read_failed = False
+        limits_last = None
         for name, entry, kind, lh_id in plan:
             # 每对象硬截止 D=now+T（父给定则取 min）；钥根与期限同域，不跨对象共享。
             hard = time.monotonic() + args.total_timeout
             if args._parent_deadline is not None:
                 hard = min(hard, args._parent_deadline)
             limits = Deadline(hard)
+            limits_last = limits
             _check()
             keyroot = KeyRoot(cleanup_fd)
             keyroots.append(keyroot)
@@ -765,8 +773,8 @@ def main(argv=None):
                     if "resource_read_error" not in summary["errors"]:
                         summary["errors"].append("resource_read_error")
             finally:
-                # 同一路径收尾：先有界停止活动进程，再关闭本对象钥根并通报结果。
-                _stop_active(limits.hard)
+                # 同一路径收尾：先有界停止活动进程（未回收即未核），再关闭本对象钥根。
+                stopped = _stop_active(limits.hard)
                 try:
                     keyroot.close()
                 except Fail:
@@ -777,17 +785,35 @@ def main(argv=None):
                                                "code": "cleanup_failed", "changed": False})
                     if "cleanup_failed" not in summary["errors"]:
                         summary["errors"].append("cleanup_failed")
+                if not stopped:
+                    failed = True
+                    if keyroot.root is not None:
+                        summary["cleanupResiduals"].append(
+                            {"path": keyroot.root, "status": "unverified"})
+                    summary["objects"].append({"object": name, "phase": "cleanup",
+                                               "status": "failed",
+                                               "code": "cleanup_failed", "changed": False})
+                    if "cleanup_failed" not in summary["errors"]:
+                        summary["errors"].append("cleanup_failed")
         evidence["observation"]["finishedAt"] = _utc()
         projection["observation"] = evidence["observation"]
         agents["observation"] = evidence["observation"]
+        if limits_last is not None:
+            limits_last.left()   # 落盘同样只用 W：耗尽即 timeout
         outfd = _anchor(args.out_dir)
         try:
             if evidence["objects"]:
+                if limits_last is not None:
+                    limits_last.left()
                 _write_json(outfd, "skill-evidence.json", evidence)
                 summary["artifacts"].append("skill-evidence.json")
             if agents["objects"]:
+                if limits_last is not None:
+                    limits_last.left()
                 _write_json(outfd, "agent-evidence.json", agents)
                 summary["artifacts"].append("agent-evidence.json")
+            if limits_last is not None:
+                limits_last.left()
             _write_json(outfd, "projection-source.json", projection)
             summary["artifacts"].append("projection-source.json")
         finally:

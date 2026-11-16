@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 import re
+import select
 import signal
 import stat
 import subprocess
@@ -294,9 +295,10 @@ def _load_body():
     return module
 
 
-def _body_bytes(repo, version, path):
+def _body_bytes(repo, version, path, limits):
     body = _load_body()
-    proc = _git(repo, ["cat-file", "blob", "%s:%s" % (version, path)])
+    proc = _git(repo, ["cat-file", "blob", "%s:%s" % (version, path)],
+                timeout=limits.left())
     if proc.returncode != 0:
         raise Fail("source_unverified", 3)
     try:
@@ -402,9 +404,16 @@ def _signal_group(proc, number):
             pass
 
 
-def _drain(fd):
+def _drain(fd, until):
+    """有截止读取：到 D 只返回已收到的数据，不在未回收进程上等 EOF。"""
     chunks = []
     while True:
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            break
+        ready, _, _ = select.select([fd], [], [], remaining)
+        if not ready:
+            break
         chunk = os.read(fd, 65536)
         if not chunk:
             break
@@ -444,6 +453,7 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
             pass
         terminated = False
         killed = False
+        unreaped = False
         try:
             proc.wait(timeout=max(0.0, limits.work - time.monotonic()))
         except subprocess.TimeoutExpired:
@@ -455,10 +465,10 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
                 killed = True
                 _signal_group(proc, signal.SIGKILL)
                 try:
-                    proc.wait(timeout=1.0)
+                    proc.wait(timeout=max(0.0, limits.hard - time.monotonic()))
                 except subprocess.TimeoutExpired:
-                    pass
-        buf = _drain(read_fd)
+                    unreaped = True
+        buf = _drain(read_fd, limits.hard)
     finally:
         os.close(read_fd)
         if write_fd is not None:
@@ -484,14 +494,15 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
         # 缺 cleanup 确认（如强杀）：只按先前根记录列根与固定 id，不扫描、不猜名、不补删。
         residuals = [{"path": root, "status": "unverified"},
                      {"path": os.path.join(root, "id"), "status": "unverified"}]
-    if terminated or killed or proc.returncode != 0 or residuals:
-        if terminated or killed:
+    if not confirmed or unreaped or terminated or killed or proc.returncode != 0 \
+            or residuals:
+        if terminated or killed or unreaped:
             code, exit_code = "timeout", 2
         elif proc.returncode == 3:
             code, exit_code = "missing_evidence", 3
         else:
             code, exit_code = "cli_error", 2
-        if not confirmed or residuals:
+        if not confirmed or unreaped or residuals:
             code, exit_code = "cleanup_failed", 2
         exc = Fail(code, exit_code, phase)
         exc.residuals = residuals
@@ -627,16 +638,18 @@ def main(argv=None):
                          limits)
                 if kind == "agent":
                     value = _agent_value(pre_dir, name, lh_id)
-                    expected = _body_bytes(args.repo, args.base, old["source"])
+                    expected = _body_bytes(args.repo, args.base, old["source"], limits)
                     if _agent_bytes(value) != expected:
                         raise Fail("pre_difference", 1, "pre")
                     entry.update(phase="write", status="running")
                     wrote = True
                     entry["changed"] = "unknown"
                     cfg = os.path.join(args.out_dir, "agent-%d-config.json" % index)
+                    left()
                     _write_artifact(args.out_dir, os.path.basename(cfg),
                                     (json.dumps({"systemRole": _body_bytes(
-                                        args.repo, args.merged, new["source"]).decode("utf-8")},
+                                        args.repo, args.merged, new["source"],
+                                        limits).decode("utf-8")},
                                         ensure_ascii=False) + "\n").encode("utf-8"))
                     rc = _cli(api_env, ["lh", "agent", "edit", lh_id,
                                         "--config-file", cfg], left(), "write")
@@ -646,9 +659,10 @@ def main(argv=None):
                     _collect(args.repo, name, args.merged, post_dir, args, target_raw,
                              "post", limits)
                     got = _agent_value(post_dir, name, lh_id)
-                    want = _body_bytes(args.repo, args.merged, new["source"])
+                    want = _body_bytes(args.repo, args.merged, new["source"], limits)
                     if _agent_bytes(got) != want:
                         raise Fail("post_difference", 1, "post", changed="unknown")
+                    left()
                     entry.update(phase="post", status="completed", code=None, changed=True)
                     summary["artifacts"] += ["pre-%d/agent-evidence.json" % index,
                                              "post-%d/agent-evidence.json" % index,
@@ -657,6 +671,7 @@ def main(argv=None):
                 vrc, vout = _verify(args.repo, name, args.base,
                                     os.path.join(pre_dir, "skill-evidence.json"),
                                     args, "pre", left())
+                left()
                 _write_artifact(args.out_dir, "verify-pre-%d.json" % index, vout)
                 if vrc != 0:
                     raise Fail("pre_difference", 1, "pre")
@@ -673,11 +688,12 @@ def main(argv=None):
                 vrc, vout = _verify(args.repo, name, args.merged,
                                     os.path.join(post_dir, "skill-evidence.json"),
                                     args, "post", left())
+                left()
                 _write_artifact(args.out_dir, "verify-post-%d.json" % index, vout)
                 if vrc != 0:
                     # 规格 6 唯一纠正例外：仅当 verify 原 JSON 的差异恰为 content，
                     # 且现场 content 恰等于期望正文 + 一个尾 LF，才以 argv 原样补一次全文。
-                    expected = _body_bytes(args.repo, args.merged, new["source"])
+                    expected = _body_bytes(args.repo, args.merged, new["source"], limits)
                     if kind == "skill" and _tail_lf_only(
                             vout, os.path.join(post_dir, "skill-evidence.json"), expected):
                         try:
@@ -701,6 +717,7 @@ def main(argv=None):
                             raise Fail("post_difference", 1, "post", changed="unknown")
                     else:
                         raise Fail("post_difference", 1, "post", changed="unknown")
+                left()
                 entry.update(phase="post", status="completed", code=None, changed=True)
                 summary["artifacts"] += ["pre-%d/skill-evidence.json" % index,
                                          "post-%d/skill-evidence.json" % index,
