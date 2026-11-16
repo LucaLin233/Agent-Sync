@@ -44,6 +44,18 @@ PATHS_RULES = (
      ('case', 'test-minis-verify.py'), '正文契约变更 → Minis 验收消费者'),
     (('tools/sync-targets.json',),
      ('case', 'test-minis-verify.py'), '对象登记变更 → Minis 验收消费者'),
+    # 窄采集/部署接线（首版不默认进常跑）：各自测试 → 各自 case；collect 依赖固定认证读取。
+    (('tools/lh-collect.py', 'tests/test-lh-collect.py'),
+     ('case', 'test-lh-collect.py'), 'LH 窄采集工具或工具测试 → 采集'),
+    (('tools/auth-call.py', 'tests/test-auth-call.py'),
+     ('case', 'test-lh-collect.py'), '固定认证读取变更 → 采集消费者'),
+    (('tools/lh-deploy.py', 'tests/test-lh-deploy.py'),
+     ('case', 'test-lh-deploy.py'), 'LH 窄部署工具或工具测试 → 部署'),
+    (('tools/lh-verify.py', 'tests/test-lh-verify.py',
+      'tools/body_contract.py', 'tests/test-body-contract.py'),
+     ('case', 'test-lh-deploy.py'), '离线验收或正文契约变更 → 部署消费者'),
+    (('tools/sync-targets.json',),
+     ('case', 'test-lh-deploy.py'), '对象登记变更 → 部署消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
     (('tests/run-tests.sh', 'tests/test_paths.py', 'tools/sync-all.sh',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),

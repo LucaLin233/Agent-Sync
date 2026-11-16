@@ -20,6 +20,11 @@
 #   Minis 本端验收工具或工具测试 → minis-verify
 #   正文契约变更 → Minis 验收消费者
 #   对象登记变更 → Minis 验收消费者
+#   LH 窄采集工具或工具测试 → 采集
+#   固定认证读取变更 → 采集消费者
+#   LH 窄部署工具或工具测试 → 部署
+#   离线验收或正文契约变更 → 部署消费者
+#   对象登记变更 → 部署消费者
 #   运行器与聚合入口 → full
 # <<<
 set -u
@@ -44,6 +49,8 @@ test-surge-scripts.py|surge|cd tests && python3 -B -m unittest -v test-surge-scr
 test-commit-identities.py|identity|cd tests && python3 -B -m unittest -v test-commit-identities|0
 test-lh-verify.py|verify|cd tests && python3 -B -m unittest -v test-lh-verify|0
 test-minis-verify.py|minis-verify|cd tests && python3 -B -m unittest -v test-minis-verify|0
+test-lh-collect.py|lh-wiring|cd tests && python3 -B -m unittest -v test-lh-collect|0
+test-lh-deploy.py|lh-wiring|cd tests && python3 -B -m unittest -v test-lh-deploy|0
 '
 
 mode=${1:-smoke}
