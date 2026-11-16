@@ -76,6 +76,14 @@ def agent_row(agent_id="agt_1", role="hello\n", user_id="usr_1", workspace_id=No
 class Case(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="lh-collect-test-")
+        # 合成钥根只放本用例独占安全根；生产脚本默认 /tmp 不变。
+        with open(TOOL, encoding="utf-8") as handle:
+            code = handle.read()
+        needle = 'ROOT_PARENT = "/tmp"'
+        self.assertEqual(code.count(needle), 1)
+        self.tool = os.path.join(self.tmp, "lh-collect.py")
+        with open(self.tool, "w", encoding="utf-8") as handle:
+            handle.write(code.replace(needle, 'ROOT_PARENT = ' + repr(self.tmp)))
         self.repo = os.path.join(self.tmp, "repo")
         os.makedirs(os.path.join(self.repo, "tools"))
         os.makedirs(os.path.join(self.repo, "skills", "luno-ops", "references"))
@@ -122,7 +130,7 @@ class Case(unittest.TestCase):
             handle.write(output + "\n")
 
     def run_tool(self, extra_env=None, objects=("luno-ops",), target=TARGET):
-        argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--git-version", self.version,
+        argv = [PY, "-I", "-B", self.tool, "--repo", self.repo, "--git-version", self.version,
                 "--out-dir", self.out, "--instance-ref", "inst-1",
                 "--source-basis", "basis-ref", "--source-version", "2.3.3+testbuild",
                 "--total-timeout", "30"]
@@ -282,7 +290,7 @@ class Case(unittest.TestCase):
     def test_source_version_required(self):
         """调用方人工核实的来源版本必填；缺参在看凭据前 rc2。"""
         self.fake_ssh(row())
-        argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--git-version", self.version,
+        argv = [PY, "-I", "-B", self.tool, "--repo", self.repo, "--git-version", self.version,
                 "--out-dir", self.out, "--instance-ref", "inst-1",
                 "--source-basis", "basis-ref", "--object", "luno-ops"]
         proc = subprocess.run(argv, input=json.dumps(TARGET).encode(), env=dict(self.env),

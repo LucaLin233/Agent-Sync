@@ -805,19 +805,21 @@ def main(argv=None):
             if evidence["objects"]:
                 if limits_last is not None:
                     limits_last.left()
-                _write_json(outfd, "skill-evidence.json", evidence)
+                _write_json(outfd, "skill-evidence.json", evidence, limits_last)
                 summary["artifacts"].append("skill-evidence.json")
             if agents["objects"]:
                 if limits_last is not None:
                     limits_last.left()
-                _write_json(outfd, "agent-evidence.json", agents)
+                _write_json(outfd, "agent-evidence.json", agents, limits_last)
                 summary["artifacts"].append("agent-evidence.json")
             if limits_last is not None:
                 limits_last.left()
-            _write_json(outfd, "projection-source.json", projection)
+            _write_json(outfd, "projection-source.json", projection, limits_last)
             summary["artifacts"].append("projection-source.json")
         finally:
             os.close(outfd)
+        if limits_last is not None:
+            limits_last.left()
         summary["status"] = "collected" if not failed else "incomplete"
         if failed:
             if "cleanup_failed" not in summary["errors"]:
@@ -851,8 +853,8 @@ def main(argv=None):
     return err.exit
 
 
-def _write_json(dir_fd, name, doc):
-    """600、在已锚定的 out-dir fd 上排他创建；同一 fd 回读判等（不按路径重开）。"""
+def _write_json(dir_fd, name, doc, limits):
+    """600、锚定 FD 排他创建；写入与回读均受同一工作期限约束。"""
     raw = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -862,17 +864,22 @@ def _write_json(dir_fd, name, doc):
     try:
         off = 0
         while off < len(raw):
+            limits.left()
             off += os.write(fd, raw[off:])
+        limits.left()
         os.fsync(fd)
+        limits.left()
         os.lseek(fd, 0, os.SEEK_SET)
         back = b""
         while True:
+            limits.left()
             chunk = os.read(fd, 65536)
             if not chunk:
                 break
             back += chunk
     finally:
         os.close(fd)
+    limits.left()
     if back != raw:
         raise Fail("unsafe_path")
 

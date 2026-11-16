@@ -184,8 +184,8 @@ def _outfd(path):
         raise
 
 
-def _write_raw(dir_fd, name, data):
-    """排他写后在同一 FD 全文回读判等；不一致即 unsafe_path。"""
+def _write_raw(dir_fd, name, data, limits):
+    """排他写后在同一 FD 全文回读判等；写读循环共用同一工作期限 W。"""
     flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(name, flags, 0o600, dir_fd=dir_fd)
@@ -194,17 +194,22 @@ def _write_raw(dir_fd, name, data):
     try:
         off = 0
         while off < len(data):
+            limits.left()
             off += os.write(fd, data[off:])
+        limits.left()
         os.fsync(fd)
+        limits.left()
         os.lseek(fd, 0, os.SEEK_SET)
         back = b""
         while True:
+            limits.left()
             chunk = os.read(fd, 65536)
             if not chunk:
                 break
             back += chunk
     finally:
         os.close(fd)
+    limits.left()
     if back != data:
         raise Fail("unsafe_path", 2)
 
@@ -278,11 +283,11 @@ def _agent_bytes(value):
     return None if value is None else value.encode("utf-8")
 
 
-def _write_artifact(path, name, data):
+def _write_artifact(path, name, data, limits):
     """在已锚定的 out-dir fd 上排他写，写完关闭 fd（不按路径重开）。"""
     fd = _outfd(path)
     try:
-        _write_raw(fd, name, data)
+        _write_raw(fd, name, data, limits)
     finally:
         os.close(fd)
 
@@ -405,19 +410,27 @@ def _signal_group(proc, number):
 
 
 def _drain(fd, until):
-    """有截止读取：到 D 只返回已收到的数据，不在未回收进程上等 EOF。"""
+    """有截止读取：先取已排队字节；仅当暂无数据且 D 未到时等剩余量，EOF 即止。"""
+    os.set_blocking(fd, False)
     chunks = []
     while True:
+        try:
+            chunk = os.read(fd, 65536)
+        except BlockingIOError:
+            chunk = None
+        except OSError:
+            break
+        if chunk == b"":
+            break                      # 写端全关
+        if chunk:
+            chunks.append(chunk)
+            continue
         remaining = until - time.monotonic()
         if remaining <= 0:
-            break
+            break                      # 到 D 且暂无数据：立即返回已收内容
         ready, _, _ = select.select([fd], [], [], remaining)
         if not ready:
             break
-        chunk = os.read(fd, 65536)
-        if not chunk:
-            break
-        chunks.append(chunk)
     return b"".join(chunks)
 
 
@@ -650,7 +663,7 @@ def main(argv=None):
                                     (json.dumps({"systemRole": _body_bytes(
                                         args.repo, args.merged, new["source"],
                                         limits).decode("utf-8")},
-                                        ensure_ascii=False) + "\n").encode("utf-8"))
+                                        ensure_ascii=False) + "\n").encode("utf-8"), limits)
                     rc = _cli(api_env, ["lh", "agent", "edit", lh_id,
                                         "--config-file", cfg], left(), "write")
                     if rc != 0:
@@ -672,7 +685,7 @@ def main(argv=None):
                                     os.path.join(pre_dir, "skill-evidence.json"),
                                     args, "pre", left())
                 left()
-                _write_artifact(args.out_dir, "verify-pre-%d.json" % index, vout)
+                _write_artifact(args.out_dir, "verify-pre-%d.json" % index, vout, limits)
                 if vrc != 0:
                     raise Fail("pre_difference", 1, "pre")
                 entry.update(phase="write", status="running")
@@ -689,7 +702,7 @@ def main(argv=None):
                                     os.path.join(post_dir, "skill-evidence.json"),
                                     args, "post", left())
                 left()
-                _write_artifact(args.out_dir, "verify-post-%d.json" % index, vout)
+                _write_artifact(args.out_dir, "verify-post-%d.json" % index, vout, limits)
                 if vrc != 0:
                     # 规格 6 唯一纠正例外：仅当 verify 原 JSON 的差异恰为 content，
                     # 且现场 content 恰等于期望正文 + 一个尾 LF，才以 argv 原样补一次全文。
@@ -712,7 +725,7 @@ def main(argv=None):
                         vrc, vout = _verify(args.repo, name, args.merged,
                                             os.path.join(post2, "skill-evidence.json"),
                                             args, "post", left())
-                        _write_artifact(args.out_dir, "verify-post-%d-fix.json" % index, vout)
+                        _write_artifact(args.out_dir, "verify-post-%d-fix.json" % index, vout, limits)
                         if vrc != 0:
                             raise Fail("post_difference", 1, "post", changed="unknown")
                     else:
