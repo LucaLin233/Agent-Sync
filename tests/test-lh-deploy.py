@@ -3,6 +3,7 @@
 
 覆盖：base 验收非 0 → 零写（含第二对象不启动）；写失败 → 不再补写、不报成功、changed=unknown；
 post 非 0 → rc≠0 且不报 completed；正常路径可过（负控：去掉阻断即转绿）；argv 原样传递。
+成本：Minis/iSH 本批 runner 实测 10.17s（秒级汇总11s），直接模块9.661s；真实总截止/信号/KeyRoot清理回归及恢复正控不可用mock或删断言降级。仅opt-in，父已接受本批小幅超10秒例外；如需提速另行证明等价。
 """
 import base64
 import json
