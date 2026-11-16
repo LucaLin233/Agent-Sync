@@ -4,7 +4,7 @@ description: 跨任务记忆读写、更正、事故复发与规则固化（共�
 ---
 # LUNO｜平台配置、运行时与本端记忆
 
-CCHP控制面完整读 `references/cchp.md`；Minis配置/运行时完整读 `references/minis.md`〔分支 minis〕；已部署LobeHub 2.x CE完整读 `references/lobehub.md`〔分支 lobehub〕。跨产品取并集。记忆读写、检索、更正、事故或复发、固化候选和疑似规则缺口（包括非平台任务）先完整读取 `references/memory-common.md`〔分支 memory-common〕，再按原触发读取共同维护/纠正及本端资源。以下各项仅适用于标明的产品，不跨用能力、入口、实例或凭据。
+CCHP控制面完整读 `references/cchp.md`；Minis配置/运行时完整读 `references/minis.md`〔分支 minis〕；已部署LobeHub 2.x CE完整读 `references/lobehub.md`〔分支 lobehub〕。跨产品取并集。记忆读写、检索、更正、事故或复发、固化候选和疑似规则缺口（包括非平台任务）先完整读取 `references/memory-common.md`〔分支 memory-common〕，再按原触发读取共同维护/纠正及本端资源。LobeHub 新话题的 GLOBAL 首次读取，完整读取 `references/lobehub.md`〔分支 lobehub〕 和 `references/lobehub-knowledge.md`〔分支 knowledge〕，按其中的私人副本规则处理；这不是原生记忆导入。以下各项仅适用于标明的产品，不跨用能力、入口、实例或凭据。
 
 ## 实例与端点
 
