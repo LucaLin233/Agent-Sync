@@ -232,6 +232,33 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 
 写前选明确历史旧提交，写后选合并提交并重新观察。不得拿旧投影冒充写后结果；字节等价的不同提交、伪造且一致的标签不能据此识别。失败不自动重试、采集、修复或改权限。
 
+## LobeHub 窄采集与窄部署（首版）
+
+两个薄工具，`python3 -I -B`、仅标准库；它们只覆盖已登记对象的采集与部署，不是通用同步、通用 SSH/SQL/HTTP 入口。
+
+```sh
+python3 -I -B tools/lh-collect.py --repo REPO --object ID [--object …] --git-version FULL_SHA \
+    --out-dir NEW_DIR --instance-ref LABEL --source-basis REF --source-version TEXT \
+    [--total-timeout 180] < target.json
+python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base FULL_SHA \
+    --merged FULL_SHA --out-dir NEW_DIR --instance-ref LABEL --source-basis REF \
+    --source-version TEXT [--total-timeout 180] < target.json
+```
+
+- **来源版本**：两工具必填`--source-version TEXT`，提供调用方本批已核的实际应用来源版本；真实性与sourceBasis同由调用方负责。工具只转录，不自动发现或证明版本。不得以PG版本、待比较Git提交或固定历史版本代替；来源未核时不得启动现场执行。`lh-deploy` 把该值原样传给每次 pre/post 采集，`lh-collect` 原样写入 `observation.sourceVersion`，不被 `--git-version`/`--base`/`--merged` 覆盖。
+- **准入**：`--object` 取该提交 `tools/sync-targets.json` 的顶层 `id`；只接 `ends.lobehub.present=true`。技能须 `type=skill` 且 `ends.lobehub.kind=skill`，Agent 须 `type=prompt|subagent`、`kind=agent`、`field=systemRole`。`--git-version`/`--base`/`--merged` 只接受 40 位小写 hex 的本地 commit，不 fetch、不隐式解析 HEAD/tag/tree。`--out-dir` 必须不存在，排他建 700 目录、600 文件。`target.json` 只在内存使用（根键 `ssh`/`postgres`，固定子键，端口为 1..65535 整数），不落盘、不回显，不接收 query/command/凭据。
+- **采集**：只读事务内用固定列取技能的 `id/name/description/identifier/content` 与资源**实际完整键**，文本经 base64 还原严格 UTF-8（不 strip、不归一 CRLF 或尾 LF）；资源正文只按「登记 ∩ 实际」逐路径走 `tools/auth-call.py skill-resource`，原 `stdout`/`stderr`/`exitCode` 原样写入 `skill-evidence.json`（`schemaVersion=1` 全键），另一份 `projection-source.json` 只存安全投影。额外资源只报告、不读正文。
+- **Agent**：`lh-collect` 对 `kind=agent` 的登记对象按 ID 取固定投影——`agents` 表的 `id/user_id/workspace_id/system_role`，谓词 `id = :'obj_id' AND is_deleted IS NOT TRUE`（软删除列可空，不用 `=false`），`system_role` 经 base64 严格还原 UTF-8 且保留 `null` 与空串差别，写入 `agent-evidence.json`（`schemaVersion=1/observation/objects`，对象固定 `object/observationId/instanceRef/id/field/value`，`field` 仅 `systemRole`）。不读取默认配置、知识关联或任何凭据列，不新增 scope/绑定参数。`lh-deploy` 对 Agent 先做完整 pre 采集并严格核唯一对象、ID、`field` 与观察关联，再按 `body_contract.body_bytes` 比较 UTF-8 bytes；不等即 `pre_difference` 零写。相等后只调用官方 `lh agent edit <id> --config-file <600 新文件>`（JSON 仅含 `systemRole`，正文按 argv 原样传），写后对 `merged` 重新采集并按 bytes 复核，相等才 `completed`；Agent 差异不自动纠正，也不进 `lh-verify` 比较器。**运行前提（人工，不由工具证明）**：同实例/账户 scope/所选 ID 归属，以及当前实例该 Agent 的有效 `systemRole` 与存储 `system_role` 等价，须由负责人本批核实并记录；本仓库只提供离线链，不声称当前实例已验证。
+- **部署**：无凭据阶段先核两版登记的身份、`type`、`kind`、LobeHub ID、`source`、`installSource` 相同、资源只增不减、旧 blob 完整可读，并匿名核安装分支 HEAD 等于 `--merged`；随后新建 pre 观察（`lh-collect` + `lh-verify`）对 `base` 验收，**任意非 0 零写**；通过后紧邻执行官方 `lh skill install <installSource>`；写后再核分支 HEAD，仍以新建 post 观察对 `merged` 验收。首错后其余对象 `not_run`，不自动重投、不回滚，只有 post 通过才 `completed`。
+- **退出码**：采集 0 完整 / 2 参数、格式、执行、不安全出口或读取错误 / 3 缺证或未核准前提。部署 0 全部 post 通过 / 1 确证差异 / 2 执行、格式、写失败、超时或清理失败 / 3 缺证或首版不支持，并存按 2>3>1>0。stdout 各一份摘要 JSON（`schemaVersion=1/status/objects/errors/artifacts/cleanupResiduals/notCovered`），stderr 只固定码。
+- **截止与清理**：每对象硬截止 `D=开始+T`，采集、验收、写入只用 `W=D-2`（2 秒固定留给清理，不挪用）；`T<=2` 仍是合法输入，但在读凭据值、建钥根或起子进程前返回 `timeout`/rc2。`lh-deploy` 调 `lh-collect` 时另传两个**工具内部私有参数**，不是用户绑定接口（帮助不列出，调用方不得依赖）：`--_parent-deadline D`（子对象硬截止取 `min(自身开始+T, D)`）与 `--_cleanup-fd N`（只继承本次清理通知管道写端，子进程里 ssh/postgres 的 stdin 不变）。子进程只在根已创建且核定身份后、写钥之前发一条 `{"event":"key_root","root":"…"}`，清理完成后发一条 `{"event":"cleanup","residuals":[…]}`。父进程执行超过 W 先发 SIGTERM 等子清理到 D，仍不退才强杀本次独占进程组；强杀或缺 `cleanup` 确认不声称已清理。子进程对 SIGTERM/SIGINT 只记取消标志并终止已登记的活动 ssh/auth-call，在安全检查点以内部 `Cancelled` 结束并映射 `timeout`/rc2，不被普通异常处理吞掉；每对象先进入 `try/finally` 再建根、写钥，并在同一路径关闭钥根后才处理下一对象。
+- **新增摘要字段**：两工具摘要只新增默认空数组 `cleanupResiduals`，元素固定 `{"path": "/tmp 下本次随机根或其 id", "status": "remaining|unverified"}`：`remaining` 表示确定仍在用，`unverified` 表示身份、删除或清理未核，已确认删除的不列入。只含本次登记的非秘密临时路径，不含材料或连接坐标；父强杀且缺 `cleanup` 确认时按先前的根记录列根与 id 为 `unverified`，不扫描 `/tmp`、不猜名、不代删。`cleanup_failed` 且 `cleanupResiduals` 为空表示根登记前就异常终止（该窗口尚未写钥），清理未核且未取得根路径。
+
+- **未覆盖（首版明确不做）**：资源退役、删除重装、ID 变化、自动登记、新装未登记对象、任意 SQL/命令/HTTP、通用 SSH 框架、GH 合并、跨端聚合、持久发布状态机、自动回滚、行为评测；post 阶段唯一的纠正例外是：verify 原 JSON 的差异恰为 `content`、无错误/缺证/资源差异，且现场 `content` 的 bytes 恰等于期望正文去掉一个尾 LF 时，按 argv 原样传全文补一次 `lh skill edit`，随后全量重采并复验；其余差异只报 `post_difference`，不报成功。首版没有平台 CAS，不保证不存在外部并发。
+- **运行时前提**：SSH 只做代码内固定只读查询（`-F none`、`BatchMode=yes`、`StrictHostKeyChecking=yes`、`IdentitiesOnly=yes`、`IdentityAgent=none`、明确 `known_hosts` 与总截止时间），私钥只在获准的秘密落盘授权下用独占 `/tmp` 700 根/600 文件承载并在退场重核身份后清理；本次未使用任何秘密，也未连现场。结构化验收不证明现场安全或行为一致。
+
+专项测试（不进常跑）：`sh tests/run-tests.sh case test-lh-collect.py`、`sh tests/run-tests.sh case test-lh-deploy.py`；选路见 `tests/run-tests.sh` 头部。
+
 ## 测试与历史
 
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。
