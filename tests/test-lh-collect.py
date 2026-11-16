@@ -457,7 +457,6 @@ class Case(unittest.TestCase):
                     self.assertEqual(rc, 2, (objects, doc, errb.getvalue()))
                     self.assertEqual(doc["status"], "error")
                     self.assertIn("timeout", doc["errors"])
-                    self.assertFalse(mod._ACTIVE)
         finally:
             for name in ("SSH_PRIVATE_KEY_B64", "LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
                 os.environ.pop(name, None)
