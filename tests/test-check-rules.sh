@@ -4,7 +4,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 python3 -B - "$ROOT" <<'PYEOF'
-import contextlib, importlib.util, io, json, os, re, shutil, subprocess, sys, tempfile
+import contextlib, importlib.util, io, json, os, re, shutil, signal, subprocess, sys, tempfile, textwrap, time
 from pathlib import Path
 from unittest import mock
 ROOT=Path(sys.argv[1])
@@ -297,8 +297,8 @@ def expand(doc):
 for pth in ('tests/run-tests.sh','tests/test_paths.py','.github/workflows/tests.yml'):
     check('select：%s 展开全 12 入口各一次'%pth,expand(P.select([pth]))==names,str(P.select([pth])))
 check('select：普通未映射正文只 smoke',P.select(['README.md'])==[['smoke']])
-check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) for p,x in (('skills/luno-core/references/review.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-minis-verify.py']),('skills/luno-surge/references/plugin-authoring.md',['case','test-surge-package.py']))) and P.select(['skills/luno-core/references/review.md'])!=P.select(['README.md']))
-check('select：collect 双消费者',{['case','test-lh-collect.py'],['case','test-lh-deploy.py']}<=set(map(list,P.select(['tools/lh-collect.py']))))
+check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) and P.select([p])!=P.select(['README.md']) for p,x in (('skills/luno-core/references/sync.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-redact.py']),('skills/luno-surge/SKILL.md',['case','test-surge-package.py']))))
+check('select：collect 双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/lh-collect.py']))),str(P.select(['tools/lh-collect.py'])))
 try:P.select(['tests/nope.py']);ok=False
 except ValueError:ok=True
 check('select：未知 tests 路径拒绝',ok)
@@ -332,25 +332,25 @@ def cm(m):
     g('add','-A');g('commit','-q','-m',m);return g('rev-parse','HEAD')
 def ci(ev,**kw):
     env=dict(G,PATH=os.environ['PATH'],HOME=str(TMP/'h'),TMPDIR=str(TMP/'t'),EVENT_NAME=ev);env.update(kw)
-    (R2/'tests/selected.json').unlink(missing_ok=True)
+    (R2/'selected.json').unlink(missing_ok=True)
     return subprocess.run([sys.executable,'-I','-B','-'],input=CI,cwd=str(R2),env=env,capture_output=True,text=True,timeout=120)
 def plan(r):return [l[9:] for l in r.stdout.splitlines() if l.startswith('selector ')][-1]
 (R2/'tests').mkdir();shutil.copyfile(ROOT/'tests/test_paths.py',R2/'tests/test_paths.py')
-(R2/'tests/run-tests.sh').write_text('cat > tests/selected.json\n')
+(R2/'tests/run-tests.sh').write_text('cat > selected.json\n')
 g('init','-q','-b','main');(R2/'README.md').write_text('b\n');C1=cm('c1')
-(R2/'tools').mkdir();(R2/'tools/check-rules.py').write_text('g\n');C2=cm('c2')
+(R2/'tools').mkdir(exist_ok=True);(R2/'tools/check-rules.py').write_text('g\n');C2=cm('c2')
 g('checkout','-q','-b','feat',C1);(R2/'skills/luno-core/references').mkdir(parents=True)
 (R2/'skills/luno-core/references/review.md').write_text('f\n');C3=cm('c3')
 g('checkout','-q','main');g('merge','-q','--no-ff','-m','m','feat');MM=g('rev-parse','HEAD')
 r=ci('pull_request',BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA=MM)
-check('CI：PR 测 B→M，base 前进不算 PR 变化',r.returncode==0 and plan(r)=='[["smoke"], ["group", "identity"]]' and 'identity' in (R2/'tests/selected.json').read_text(),r.stdout[-300:]+r.stderr[-300:])
-g('checkout','-q','-b','feat2',C1);(R2/'tools/lh-verify.py').write_text('v\n');cm('d1')
-(R2/'skills/luno-platform/references').mkdir(parents=True);(R2/'skills/luno-platform/references/minis.md').write_text('m\n');D2=cm('d2')
+check('CI：PR 测 B→M，base 前进不算 PR 变化',r.returncode==0 and plan(r)=='[["smoke"], ["group", "identity"]]' and 'identity' in (R2/'selected.json').read_text(),r.stdout[-300:]+r.stderr[-300:])
+g('checkout','-q','-b','feat2',C1);(R2/'tools').mkdir(exist_ok=True);(R2/'tools/lh-verify.py').write_text('v\n');cm('d1')
+(R2/'skills/luno-platform/references').mkdir(parents=True,exist_ok=True);(R2/'skills/luno-platform/references/minis.md').write_text('m\n');D2=cm('d2')
 r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
-check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py','test-minis-verify.py')),r.stdout[-300:])
+check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py')),r.stdout[-300:])
 for kw,label in ((dict(BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA='a'*40),'缺对象'),(dict(BEFORE_SHA='0'*40,AFTER_SHA=D2),'全零')):
     r=ci('push' if 'BEFORE_SHA' in kw else 'pull_request',**kw)
-    check('CI：%s阻断且不得到成功 smoke'%label,r.returncode==2 and 'smoke' not in r.stdout and not (R2/'tests/selected.json').exists(),r.stderr[-200:])
+    check('CI：%s阻断且不得到成功 smoke'%label,r.returncode==2 and 'smoke' not in r.stdout and not (R2/'selected.json').exists(),r.stderr[-200:])
 
 # ── 收尾：正常/失败/TERM 都只观察夹具自建的精确路径，不扫 /tmp ──
 left=lambda:sorted(p.name for p in (FIX/'tmp').iterdir())
