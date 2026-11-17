@@ -252,7 +252,7 @@ for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set
 ROWS=('lint|smoke|echo lint:ran|1','eat|g1|cat >/dev/null; echo eat:ran|1','probe|g1|sh tests/probe.sh|1',
       'bad|g2|echo bad:ran; exit 1|0','long|g1|sh tests/long.sh|1','unit|g1|cd tests && python3 -B -m unittest -v unitdemo|1',
       'unitbad|g2|cd tests && python3 -B -m unittest -v unitbad|0','slow|g3|sh -c "sleep 30"|0',
-      'spawn|g4|python3 -B tests/spawn.py|0')
+      'spawn|g4|python3 -B tests/spawn.py & exit 0|0')
 (FIX/'tests/long.sh').write_text(''.join('echo %s%s\n'%(m,c*200) for m,c in (('LONGHEAD','A'),('LONGMID','M'),('LONGTAIL','T'))))
 (FIX/'tests/unitdemo.py').write_text('''import unittest
 class T(unittest.TestCase):
@@ -264,7 +264,8 @@ class T(unittest.TestCase):
 class T(unittest.TestCase):
     def test_boom(self): self.fail('synthetic-boom')
 ''')
-# R2 夹具：leader（shell→python）先退，同组后代忽略 TERM 继续写 heartbeat。
+# R2 夹具：leader（shell）收 TERM 即退，同组后代忽略 TERM 继续写 heartbeat；
+# python 是该后代的真实直接父进程，延迟后 kill+wait 回收自己 fork 的子进程（不留孤儿/zombie 冒充 live）。
 (FIX/'tests/spawn.py').write_text('''import json, os, signal, time
 pid = os.fork()
 if pid == 0:
@@ -278,6 +279,9 @@ ended = [False]
 signal.signal(signal.SIGTERM, lambda *a: ended.__setitem__(0, True))
 end = time.monotonic() + 5
 while not ended[0] and time.monotonic() < end: time.sleep(0.01)
+time.sleep(1)
+os.kill(pid, signal.SIGKILL)
+os.waitpid(pid, 0)
 os._exit(0)
 ''')
 FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:]
@@ -397,7 +401,9 @@ check('清理：正常与失败轮均删本轮 WORK 根',not left(),str(left()))
 p=subprocess.Popen(['sh','tests/run-tests.sh','case','slow'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 time.sleep(3);p.terminate();o=p.communicate(timeout=120)[0].decode('utf-8','replace')
 check('清理：TERM 停本轮进程组、删根并以 143 退出',p.returncode==143 and not left() and 'cleanup 完成' in o,'rc=%d %s'%(p.returncode,left()))
-# R2 直接回归：leader 已退、同组后代仍在 → 不得删根、不得报完成（未确证停止 = 保留 + 2）
+# R2 直接回归：leader 已退、同组后代仍在。只接受契约的两条路线：确证停止 → 143 + cleanup 完成
+# + 精确根删除，且后代已确证不再存活；无法确证 → 2 + 保留根 + 披露。删根时点的精确 PID 状态另记，
+# 禁止用 leader 退出冒充组停止。
 for f in ('child.json','heartbeat'):
     if (FIX/f).exists():(FIX/f).unlink()
 p=subprocess.Popen(['sh','tests/run-tests.sh','case','spawn'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
@@ -408,23 +414,48 @@ for _ in range(300):
         except ValueError:pass
     time.sleep(0.02)
 assert info,'夹具子进程未就绪'
+def alive(pid):
+    try:os.kill(pid,0);return True
+    except ProcessLookupError:return False
+assert alive(info['pid']),'夹具后代未就绪'
 a=(FIX/'heartbeat').stat().st_size
-p.terminate();o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
-b=(FIX/'heartbeat').stat().st_size
-try:os.kill(info['pid'],0);alive=True
-except ProcessLookupError:alive=False
-check('清理：leader 先退但同组后代仍在时 rc=2、保留根并披露（不冒称已停）',
-      p.returncode==2 and alive and b>a and left() and '本轮进程组' in o and 'cleanup 完成' not in o,
-      'rc=%d alive=%s grew=%s left=%s\n%s'%(p.returncode,alive,b>a,left(),o[-500:]))
-# 由夹具自己的直接父进程回收该精确组，再核精确 PID 消失与精确根路径
-try:os.killpg(info['pgid'],signal.SIGKILL)
-except ProcessLookupError:pass
-gone=False
-for _ in range(100):
-    try:os.kill(info['pid'],0)
-    except ProcessLookupError:gone=True;break
+assert a>0,'夹具后代未写 heartbeat'
+p.terminate()
+gone_samples=[]
+while p.poll() is None:
+    if not left() and not gone_samples:gone_samples.append(alive(info['pid']))
+    time.sleep(0.02)
+o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
+grew=(FIX/'heartbeat').stat().st_size>a
+live=alive(info['pid'])
+root_gone=not left()
+if not gone_samples:gone_samples.append(live)
+stopped='cleanup 完成' in o
+stop_ok=(p.returncode==143 and stopped and root_gone and not live and gone_samples==[False])
+fail_closed=(p.returncode==2 and not stopped and not root_gone and '本轮进程组' in o)
+check('清理：leader 先退但同组后代仍在时按契约收尾（确证停→143+清根且后代已停；否则2+保留/披露）',
+      stop_ok or fail_closed,
+      'rc=%d stopped=%s grew=%s live=%s gone_samples=%s left=%s\n%s'%(p.returncode,stopped,grew,live,gone_samples,left(),o[-500:]))
+# 精确 PID 消失由夹具的直接父进程 kill+wait 兑现：只等这一条精确 PID，不扫进程表
+for _ in range(200):
+    if not alive(info['pid']):break
     time.sleep(0.05)
-check('夹具回收：同组后代按精确 PID 确证消失',gone,'pid=%d'%info['pid'])
+check('夹具回收：同组后代按精确 PID 确证消失（直接父进程 wait）',not alive(info['pid']),'pid=%d'%info['pid'])
+# 生命周期：已确证消失的本轮组不得保留到轮末（否则轮末会拿历史 PID 盲发信号）
+ACTIVE_MUT=FIXED.replace('finally:\n    if not stop_own():',"finally:\n    say('ACTIVE-RESID=%d' % len(ACTIVE))\n    if not stop_own():",1)
+assert ACTIVE_MUT!=FIXED
+(FIX/'tests/run-tests.sh').write_text(ACTIVE_MUT,encoding='utf-8');code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('生命周期：已确证消失的本轮组不保留到轮末（ACTIVE 退役）',code==0 and 'ACTIVE-RESID=0' in out,out[-300:])
+# fail-closed 直接检查：无法确证停止时（普通退出也一样）必须 2 + 保留根 + 披露，不冒称完成
+NOCONF=FIXED.replace('def confirm_stopped(pgid, sig):\n    """按登记组兑现停止','def confirm_stopped(pgid, sig):\n    return False\n    """按登记组兑现停止',1)
+NOCONF=NOCONF.replace('def group_gone(pgid):\n    """只用 signal 0','def group_gone(pgid):\n    return False\n    """只用 signal 0',1)
+assert NOCONF.count('def confirm_stopped(pgid, sig):\n    return False')==1
+(FIX/'tests/run-tests.sh').write_text(NOCONF,encoding='utf-8');code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('清理：无法确证停止时 rc=2、保留根并披露，不冒称完成',
+      code==2 and left() and '本轮进程组' in out and 'cleanup 完成' not in out,
+      'rc=%d left=%s\n%s'%(code,left(),out[-400:]))
 for d in list((FIX/'tmp').iterdir()):
     shutil.rmtree(d) if not d.is_symlink() else d.unlink()
 S=TMP/'sentinel';S.mkdir();(S/'keep').write_text('x')

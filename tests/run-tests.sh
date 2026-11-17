@@ -343,6 +343,15 @@ def confirm_stopped(pgid, sig):
     return group_gone(pgid)
 
 
+def retire_own(p):
+    """入口已结束且 leader 已回收：组确证消失就不再保留登记，避免轮末拿历史 PID 盲发信号。"""
+    if group_gone(p.pid):
+        try:
+            ACTIVE.remove(p)
+        except ValueError:
+            pass
+
+
 def stop_own():
     """只终止本轮 Popen（start_new_session 的进程组）：INT/TERM，5 秒未退则 KILL 并 wait。
 
@@ -401,6 +410,7 @@ def run_entry(cmd):
         elif p.poll() is not None:
             continue
     rc = p.wait()
+    retire_own(p)
     return rc, b''.join(chunks)
 
 
