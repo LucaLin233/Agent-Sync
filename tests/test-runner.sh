@@ -1,7 +1,8 @@
 #!/bin/sh
 # tests/run-tests.sh 的运行器、信号与选路回归：真实 runner + 合成用例表 + 合成 Git 仓跑 CI 选路段。
-# 从 test-check-rules.sh 按对象拆出（结构守卫与登记一致性留在 gate）：既有断言、真实进程边界、
-# 后代夹具与收尾契约原样迁移，未删任何判据；只由 tests/run-tests.sh、tests/test_paths.py、
+# 从 test-check-rules.sh 按对象拆出（结构守卫与登记一致性留在 gate）：既有断言与真实进程边界随用例迁移，
+# 未删判据；拆出后又按定向复审补了两处：C01「入口已退但后代持 stdout」用例改为登记精确 PID/PGID、
+# 按本轮 WORK 判定，并恢复「外部 TERM→143＋清根」原场景。只由 tests/run-tests.sh、tests/test_paths.py、
 # .github/workflows/tests.yml 与本文件自身的变更命中（见 tests/test_paths.py 的 runner 规则）。
 # 成本事实（2026-11-17 本机 iSH/aarch64）：拆出后本入口仍是重入口，实测耗时见 PR；超单入口 10 s 设计预算，
 # 因为合成 Git 仓里的真实 runner 与 workflow 选路段必须在真实子进程上跑。
@@ -78,13 +79,21 @@ os.waitpid(pid, 0)
 os._exit(0)
 ''')
 # C01 夹具：leader 立即退出，孙进程持有 stdout 直到被信号停止（旧实现只有 select 空转 → 挂死）。
-(FIX/'tests/hold.py').write_text('''import os, signal, time
+(FIX/'tests/hold.py').write_text('''import json, os, signal, time
 pid = os.fork()
 if pid == 0:
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    with open('held.json', 'w') as f: json.dump({'pid': os.getpid(), 'pgid': os.getpgrp()}, f)
     os.write(1, b'HELD-LIVE\\n')
-    time.sleep(15)
+    time.sleep(60)                      # 远长于用例的判别期限：旧实现只能空转挂死
     os._exit(0)
+stop = [False]
+def term(*_a):
+    stop[0] = True
+signal.signal(signal.SIGTERM, term)
+while not stop[0]: time.sleep(0.02)
+os.kill(pid, signal.SIGKILL)
+os.waitpid(pid, 0)                     # 只回收本夹具自己的登记后代
 os._exit(0)
 ''')
 FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:]
@@ -205,9 +214,15 @@ check('清理：正常与失败轮均删本轮 WORK 根',not left(),str(left()))
 p=subprocess.Popen(['sh','tests/run-tests.sh','case','slow'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 time.sleep(3);p.terminate();o=p.communicate(timeout=120)[0].decode('utf-8','replace')
 check('清理：TERM 停本轮进程组、删根并以 143 退出',p.returncode==143 and not left() and 'cleanup 完成' in o,'rc=%d %s'%(p.returncode,left()))
-# R2 直接回归：leader 已退、同组后代仍在（spawn 夹具的后代已关闭 stdout，因此不走 C01 的持流路径）。
-# C01 修复后这一情形由 run_entry 自身按登记组兑现停止，本轮以 rc=0 正常收尾；仍要求 cleanup 完成、
-# 精确根删除、后代确证不再存活，禁止用 leader 退出冒充组停止。无法确证停止时仍须 2 + 保留根 + 披露。
+def work_of(out):
+    """从本轮输出取本轮独占 WORK 的确切路径（不靠列举共享目录证明本轮保留）。"""
+    m=re.search(r'==== WORK (\S+?)（',out)
+    return m.group(1) if m else None
+def drop(m):
+    """只删本轮输出绑定的 WORK 路径；路径不明就不动。"""
+    if m and os.path.exists(m):shutil.rmtree(m,ignore_errors=True)
+# R2 原场景（恢复）：leader 已退、同组后代仍在（spawn 后代忽略 TERM），外部 TERM 停本轮进程组。
+# 契约为两条路线：确证停 → 143 + cleanup 完成 + 删本轮根 + 后代已停；无法确证 → 2 + 保留本轮根 + 披露。
 for f in ('child.json','heartbeat'):
     if (FIX/f).exists():(FIX/f).unlink()
 p=subprocess.Popen(['sh','tests/run-tests.sh','case','spawn'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
@@ -224,31 +239,64 @@ def alive(pid):
 assert alive(info['pid']),'夹具后代未就绪'
 a=(FIX/'heartbeat').stat().st_size
 assert a>0,'夹具后代未写 heartbeat'
+p.terminate()
 o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
 grew=(FIX/'heartbeat').stat().st_size>a
 live=alive(info['pid'])
-root_gone=not left()
-stopped='cleanup 完成' in o
-self_ok=(p.returncode==0 and stopped and root_gone and not live)
-fail_closed=(p.returncode==2 and not stopped and not root_gone and '本轮进程组' in o)
-check('清理：leader 先退但同组后代仍在时按契约收尾（自身确证停→rc=0+清根且后代已停；否则2+保留/披露）',
-      self_ok or fail_closed,
-      'rc=%d stopped=%s grew=%s live=%s left=%s\n%s'%(p.returncode,stopped,grew,live,left(),o[-500:]))
-# C01 定向回归：入口进程已退出、同组后代仍持 stdout。旧实现在 select 空转（elif p.poll(): continue）
-# 永久挂死；新实现每轮读取后先按登记组 confirm_stopped，再限时 drain 到 EOF，任一失败保留 WORK。
+w=work_of(o)
+stop_ok=(p.returncode==143 and 'cleanup 完成' in o and w is not None and not os.path.exists(w) and not live)
+fail_closed=(p.returncode==2 and '本轮进程组' in o and w is not None and os.path.exists(w))
+drop(w)
+check('清理（R2 原场景）：外部 TERM 停本轮进程组（leader 已退、后代持流）→143+清本轮根；无法确证→2+保留/披露',
+      stop_ok or fail_closed,
+      'rc=%d live=%s grew=%s work=%s\n%s'%(p.returncode,live,grew,w,o[-500:]))
+# R2 自然退出场景：同样输入但不注入外部信号；修复后由 run_entry 自身确证停止并正常收尾。
+# 本机（iSH）孤儿僵尸无法被回收时按契约 2 + 保留 + 披露。iSH 聚合 rc2 的归因未证实，不放宽断言。
+for f in ('child.json','heartbeat'):
+    if (FIX/f).exists():(FIX/f).unlink()
+p=subprocess.Popen(['sh','tests/run-tests.sh','case','spawn'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+info=None
+for _ in range(300):
+    if (FIX/'child.json').exists():
+        try:info=json.loads((FIX/'child.json').read_text());break
+        except ValueError:pass
+    time.sleep(0.02)
+assert info,'夹具子进程未就绪'
+o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
+live=alive(info['pid']);w=work_of(o)
+self_ok=(p.returncode==0 and 'cleanup 完成' in o and w is not None and not os.path.exists(w) and not live)
+early_closed=(p.returncode==2 and '本轮进程组' in o and w is not None and os.path.exists(w))
+drop(w)
+check('清理（自然退出）：leader 先退但同组后代仍在时按契约收尾（自身确证停→rc=0+清本轮根；否则2+保留/披露）',
+      self_ok or early_closed,
+      'rc=%d live=%s work=%s\n%s'%(p.returncode,live,w,o[-500:]))
+# C01 定向回归：入口已退出、同组后代（寿命 60s）仍持 stdout。旧实现在 select 空转永久挂死；
+# 修复后每轮读取后先按登记组 confirm_stopped，再限时 drain 到 EOF。判别期 40s < 后代寿命 60s。
+for f in ('held.json',):
+    if (FIX/f).exists():(FIX/f).unlink()
+held_timeout=False
 try:
-    code,out=rt('case','hold',timeout=25)
-    held_timeout=False
-except subprocess.TimeoutExpired:
-    code,out,held_timeout=None,'TIMEOUT',True
-held_ok=(code==0 and 'HELD-LIVE' in out and 'cleanup 完成' in out and not left())
-held_closed=(code==2 and 'HELD-LIVE' in out and '本轮进程组' in out and left())
-check('runner：入口已退但后代持 stdout 时不空转挂死（确证停→读到 EOF→rc=0 删根；无法确证→rc=2 保留并披露）',
+    code,out=rt('case','hold',timeout=40)
+except subprocess.TimeoutExpired as exc:
+    raw=exc.stdout or b''
+    out=raw.decode('utf-8','replace') if isinstance(raw,bytes) else (raw or '')
+    code,held_timeout=None,True
+held_info=None
+if (FIX/'held.json').exists():
+    try:held_info=json.loads((FIX/'held.json').read_text())
+    except ValueError:held_info=None
+if held_timeout and held_info is not None:      # 超时只停本夹具登记的进程组
+    try:os.killpg(held_info['pgid'],signal.SIGKILL)
+    except OSError:pass
+work=work_of(out)
+held_ok=(code==0 and 'HELD-LIVE' in out and 'cleanup 完成' in out and work is not None and not os.path.exists(work))
+held_closed=(code==2 and 'HELD-LIVE' in out and '本轮进程组' in out and work is not None and os.path.exists(work))
+drop(work)
+check('runner：入口已退但后代持 stdout（后代 60s、判期 40s）不空转挂死（确证停→rc=0 删本轮根；无法确证→rc=2 保留并披露）',
       not held_timeout and (held_ok or held_closed),
-      'timeout=%s rc=%r left=%s\n%s'%(held_timeout,code,left(),out[-400:]))
-if left():
-    for _d in list((FIX/'tmp').iterdir()):
-        shutil.rmtree(_d) if not _d.is_symlink() else _d.unlink()
+      'timeout=%s rc=%r work=%s held=%s\n%s'%(held_timeout,code,work,held_info,out[-400:]))
+check('C01 夹具登记：精确 PID/PGID 已记录，且该后代已不在',
+      held_info is not None and not alive(held_info['pid']),'held=%s'%(held_info,))
 # 精确 PID 消失由夹具的直接父进程 kill+wait 兑现：只等这一条精确 PID，不扫进程表
 for _ in range(200):
     if not alive(info['pid']):break

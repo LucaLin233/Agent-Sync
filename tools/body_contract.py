@@ -14,8 +14,8 @@
 """
 try:
     import yaml
-except ImportError:                                   # 依赖缺失即停，不回退
-    raise SystemExit("body_contract：缺少 PyYAML（系统包 py3-yaml），缺依赖即停，不静默回退")
+except ImportError:                                   # 缺依赖抛 ImportError，由各 CLI 转成自己的执行错误码
+    raise ImportError("body_contract：缺少 PyYAML（系统包 py3-yaml），缺依赖即停，不静默回退") from None
 
 
 BOM = b"\xef\xbb\xbf"
@@ -99,17 +99,34 @@ def body_bytes(raw):
     return raw if span is None else raw[span[1]:]
 
 
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
 class _UniqueKeyLoader(yaml.SafeLoader):
     """与 safe_load 相同，但同一映射内的重复键按 DUPLICATE_KEY 拒绝（不取后值）。"""
 
     def construct_mapping(self, node, deep=False):
+        self._reject_duplicates(node)
+        return super().construct_mapping(node, deep=deep)
+
+    @staticmethod
+    def _reject_duplicates(node):
+        """只用原始 key 节点判重：先于 merge(`<<`)/value 标签展开与键的哈希化。
+
+        `<<` 是 SafeLoader 的特殊键（可多次出现，由 flatten_mapping 处理），不参与判重；
+        其余键按 (tag, value) 比较，非标量键无法判重且 SafeLoader 会因不可哈希报错，这里直接归入
+        UNSUPPORTED_YAML。merge 源映射本身也是映射节点，构造时同样经过本检查。
+        """
         seen = set()
         for key_node, _value_node in node.value:
-            key = self.construct_object(key_node, deep=deep)
+            if getattr(key_node, "tag", None) == _MERGE_TAG:
+                continue
+            if not isinstance(key_node, yaml.ScalarNode):
+                raise ContractError("UNSUPPORTED_YAML", "frontmatter 键不是标量，无法判定重复")
+            key = (key_node.tag, key_node.value)
             if key in seen:
-                raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % key)
+                raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % key_node.value)
             seen.add(key)
-        return super().construct_mapping(node, deep=deep)
 
 
 def _fm_inner(raw):

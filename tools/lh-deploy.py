@@ -315,7 +315,10 @@ def _load_body():
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location("lh_body", os.path.join(here, "body_contract.py"))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError:
+        raise Fail("dependency_missing", 2) from None
     return module
 
 

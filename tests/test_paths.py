@@ -80,7 +80,7 @@ PATHS_RULES = (
     (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
      ('case', 'test-runner.sh'), '运行器、选路表或 CI 测试 workflow → runner 消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
-    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml', 'tools/sync-all.sh',
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),
      ('full',), '运行器与聚合入口 → full'),
 )

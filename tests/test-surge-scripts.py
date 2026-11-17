@@ -874,12 +874,12 @@ class PackerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='surge-cli-') as tmp:
             skill, script, _module = self.isolated(tmp)
             out = Path(tmp) / 'release.zip'
-            def deny(source, target):
-                raise PermissionError('synthetic-replace-denied')
-            with mock.patch.object(os, 'replace', deny):
+            def deny(source, target, **kwargs):
+                raise PermissionError('synthetic-link-denied')
+            with mock.patch.object(os, 'link', deny):
                 r = self.pack(script, out)
-            self.assertNotEqual(0, r.returncode)
-            self.assertIn('PermissionError', r.stderr)
+            self.assertEqual(1, r.returncode)
+            self.assertTrue(r.stderr.startswith('Output cannot be published exclusively:'), r.stderr)
             self.assertFalse(out.exists(), '替换失败不得留下半成品')
             self.assertEqual([], self.leftovers(out))
             # 既有产物默认拒绝覆盖：报错、原字节与模式不变、不留临时物。
@@ -908,6 +908,22 @@ class PackerTest(unittest.TestCase):
             r = self.pack(script, inside)
             self.assertEqual((1, 'Output ZIP must be outside the Skill directory\n'), (r.returncode, r.stderr))
             self.assertFalse(inside.exists())
+
+    def test_publish_refuses_target_appearing_at_publish_time(self):
+        """lexists 之后目标才出现：link 必须原子失败，不覆盖既有字节/模式，不留临时目录。"""
+        with tempfile.TemporaryDirectory(prefix='surge-race-') as tmp:
+            skill, _script, module = self.isolated(tmp)
+            out = Path(tmp) / 'release.zip'
+            out.write_bytes(b'RACED-IN')
+            out.chmod(0o640)
+            before = (out.read_bytes(), out.stat().st_mode & 0o777)
+            blob = module.build(module.collect(skill))
+            with mock.patch.object(os.path, 'lexists', lambda path: False):
+                with self.assertRaises(module.ReleaseError) as caught:
+                    module.publish(blob, out)
+            self.assertEqual('Output already exists: %s' % out, str(caught.exception))
+            self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
+            self.assertEqual([], self.leftovers(out))
 
     def test_whole_official_files_and_logo_are_rejected(self):
         for name in ('references/upstream-SKILL.md', 'references/upstream-command-reference.md', 'assets/logo.png'):

@@ -140,7 +140,13 @@ def publish(blob,output):
         if os.path.lexists(output):
             raise ReleaseError(f"Output already exists: {output}")
         os.chmod(tmp,0o644)
-        os.replace(tmp,output)
+        # 排他发布：link 在目标已存在时原子失败（不覆盖），比 replace 的“检查后覆盖”少一个竞争窗口。
+        try:
+            os.link(tmp,output,follow_symlinks=False)
+        except FileExistsError:
+            raise ReleaseError(f"Output already exists: {output}") from None
+        except OSError as exc:
+            raise ReleaseError(f"Output cannot be published exclusively: {exc.strerror}") from None
 
 
 def main():

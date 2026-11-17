@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Existing body_contract regressions moved intact from the retired deployment suite.
-Kept in full because exact body/field bytes remain the live cross-end contract.
-No new test assertions are introduced.
+"""body_contract 回归：正文/字段字节仍是跨端生效契约，故整套进 full。
+
+本文件含既有回归与新增定向判据（PyYAML 取值语义、merge 重复键、不可哈希键），新增判据在用例名与
+注释中逐条标明；正文提取仍只做字节切片，不 strip、不归一换行。
 """
 import importlib.util
 import unittest
@@ -51,6 +52,24 @@ class BodyContract(unittest.TestCase):
         self.assertEqual(f["folded"], "line one\nline two\n")
         self.assertEqual(f["nested"], {"meta": {"deeper": "value"}})
         self.assertEqual(BC.body_bytes(raw), b"body")
+
+    def test_merge_keys_follow_safeloader_semantics(self):
+        """`<<` 按 SafeLoader 处理：合法 merge 不误判，显式 override 合法，merge 源内重复键仍拒绝。"""
+        raw = (b"---\nbase: &b\n  a: 1\n  b: two\n"
+               b"skill:\n  <<: *b\n  a: 2\n---\nbody")
+        f = BC.fm_fields(raw)
+        self.assertEqual(f["skill"], {"a": 2, "b": "two"}, "显式键覆盖 merge 源")
+        self.assertEqual(f["base"], {"a": 1, "b": "two"})
+        multi = b"---\nx: &a\n  p: 1\ny: &c\n  q: 2\nm:\n  <<: [*a, *c]\n---\n"
+        self.assertEqual(BC.fm_fields(multi)["m"], {"p": 1, "q": 2})
+        # merge 源映射内部重复键：构造该映射时同样判重
+        self.assertEqual(self.code(BC.fm_fields, b"---\nx: &b\n  a: 1\n  a: 2\n---\n"),
+                         "DUPLICATE_KEY")
+
+    def test_unhashable_key_is_a_contract_error(self):
+        """不可哈希键（序列/映射键）归 UNSUPPORTED_YAML，不逸出未捕获的 TypeError。"""
+        self.assertEqual(self.code(BC.fm_fields, b"---\n? [a]\n: b\n---\n"), "UNSUPPORTED_YAML")
+        self.assertEqual(self.code(BC.fm_fields, b"---\n? {a: b}\n: c\n---\n"), "UNSUPPORTED_YAML")
 
     def test_block_scalar_chomping_follows_pyyaml(self):
         """`|`/`|+`/`|-` 的 chomping 与折叠空行都交给 PyYAML，不自制拼装。"""

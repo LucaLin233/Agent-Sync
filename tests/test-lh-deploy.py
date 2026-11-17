@@ -431,5 +431,20 @@ class Case(unittest.TestCase):
         self.assertEqual(self.argv_log(), [])
         self.assertFalse(os.path.isdir(os.path.join(self.out, "pre-0")))
 
+class DependencySeamTest(unittest.TestCase):
+    """只注入「yaml 导入缺失」：正文契约缺依赖必须归执行错误 rc2，不得当成 source_unverified 或缺证。"""
+
+    def test_missing_pyyaml_is_execution_error(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("lh_deploy_dep", TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            with self.assertRaises(module.Fail) as caught:
+                module._load_body()
+        self.assertEqual(("dependency_missing", 2), (caught.exception.code, caught.exception.exit))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LH 技能专项离线验收：观察记录 ↔ 同一提交的仓库原字节（只读、无网络、无写入）。
 
-用法（Minis/iSH 已审副本，仅标准库）：
+用法（Minis/iSH 已审副本，仅标准库；正文契约 `body_contract.py` 另需 PyYAML，缺依赖按执行错误 rc2 停止）：
   python3 -I -B tools/lh-verify.py --repo PATH --git-version <40位小写hex> \
       --object <ID> [--object <ID> ...] --evidence FILE
 
@@ -81,7 +81,10 @@ def _load(name, filename):
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location(name, os.path.join(here, filename))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError:
+        raise Reject("dependency_missing") from None
     _CACHE[name] = module
     return module
 
