@@ -272,6 +272,20 @@ class Case(unittest.TestCase):
             "pre-0/skill-evidence.json", "post-0/skill-evidence.json",
             "verify-pre-0.json", "verify-post-0.json"])
 
+    def test_body_containing_blob_word_is_full_read(self):
+        """正文含 ` blob ` 子串时按头部长度跳过正文，不得据此判旧 blob 不完整（source_unverified）。"""
+        self.lh(0)
+        self.write("skills/one/SKILL.md", "one blob inside blob\n")
+        subprocess.run(["git", "-C", self.repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@e",
+                        "commit", "-qm", "blob word"], check=True)
+        self.base = self.merged = self.git("rev-parse", "HEAD")
+        with open(os.path.join(self.bin, "head"), "w", encoding="utf-8") as handle:
+            handle.write(self.merged)
+        proc = self.run_tool(("one",))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["status"], "complete")
+
     def test_tail_lf_single_correction_uses_argv(self):
         """post 仅差 content 且现场==期望去一个尾 LF：按 argv 原样补一次全文再全量重采复验。"""
         self.lh(0)
@@ -416,6 +430,21 @@ class Case(unittest.TestCase):
         self.assertEqual(summary["cleanupResiduals"], [])   # 无根记录：路径未知，不代表已清
         self.assertEqual(self.argv_log(), [])
         self.assertFalse(os.path.isdir(os.path.join(self.out, "pre-0")))
+
+class DependencySeamTest(unittest.TestCase):
+    """只注入「yaml 导入缺失」：正文契约缺依赖必须归执行错误 rc2，不得当成 source_unverified 或缺证。"""
+
+    def test_missing_pyyaml_is_execution_error(self):
+        import importlib.util
+        from unittest import mock
+        spec = importlib.util.spec_from_file_location("lh_deploy_dep", TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            with self.assertRaises(module.Fail) as caught:
+                module._load_body()
+        self.assertEqual(("dependency_missing", 2), (caught.exception.code, caught.exception.exit))
+
 
 if __name__ == "__main__":
     unittest.main()

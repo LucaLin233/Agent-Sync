@@ -9,7 +9,7 @@ paths inside the Skill directory are rejected). Entries sit at the ZIP root, the
 file, so scanned bytes are archived bytes. The standalone release archive uses both.
 """
 from __future__ import annotations
-import hashlib, io, json, os, re, stat, sys, zipfile
+import hashlib, io, json, os, re, stat, sys, tempfile, zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -120,6 +120,36 @@ def build(entries):
     return buf.getvalue()
 
 
+def publish(blob,output):
+    """排他发布：OUTPUT.parent 下独占临时目录写入并回读，再用排他 link 发布到 OUTPUT（目标已存在即失败）。
+
+    OUTPUT 已存在即拒绝（默认不覆盖，不存在“检查后覆盖”的窗口）；临时目录随发布结束删除，
+    失败不留 `.tmp` 固定名残件。
+    """
+    output=Path(output)
+    output.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent,prefix="package-release-") as tmpdir:
+        os.chmod(tmpdir,0o700)
+        tmp=Path(tmpdir)/"release.zip"
+        fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,"wb") as handle:
+            handle.write(blob)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if tmp.read_bytes()!=blob:
+            raise ReleaseError("Read-back mismatch before publishing")
+        if os.path.lexists(output):
+            raise ReleaseError(f"Output already exists: {output}")
+        os.chmod(tmp,0o644)
+        # 排他发布：link 在目标已存在时原子失败（不覆盖），比 replace 的“检查后覆盖”少一个竞争窗口。
+        try:
+            os.link(tmp,output,follow_symlinks=False)
+        except FileExistsError:
+            raise ReleaseError(f"Output already exists: {output}") from None
+        except OSError as exc:
+            raise ReleaseError(f"Output cannot be published exclusively: {exc.strerror}") from None
+
+
 def main():
     try:
         OUTPUT.resolve().relative_to(SOURCE.resolve())
@@ -130,15 +160,9 @@ def main():
     try:
         entries=collect(SOURCE)
         blob=build(entries)
+        publish(blob,OUTPUT)
     except ReleaseError as exc:
         raise SystemExit(str(exc))
-    OUTPUT.parent.mkdir(parents=True,exist_ok=True)
-    tmp=OUTPUT.with_suffix(OUTPUT.suffix+".tmp")
-    try:
-        tmp.write_bytes(blob)
-        tmp.replace(OUTPUT)
-    finally:
-        tmp.unlink(missing_ok=True)
     print(OUTPUT)
     print(digest(blob))
     print(f"files={len(entries)} bytes={OUTPUT.stat().st_size}")

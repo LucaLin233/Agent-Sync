@@ -290,7 +290,7 @@ def check_commit(rules, sha, webflow, allow_squash=False):
             continue
         if not admitted(rules, m.group(1), m.group(2)):
             problems.append((label, '身份不在署名表内'))
-        # squash 的 Author 是 PR 内最后一个提交的作者，收口者逐个写尾行时必然与之重合
+        # squash 允许尾行与 Author 相同
         if kind != 'squash' and (m.group(1), m.group(2)) == author:
             problems.append((label, '与 Author 相同'))
     return problems, kind

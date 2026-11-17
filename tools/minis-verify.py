@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minis 本端只读验收：所选登记对象 ↔ 同一提交的仓库原字节与生效字段安全投影。
 
-用法（Minis/iSH 已审副本，仅标准库）：
+用法（Minis/iSH 已审副本，仅标准库；正文契约 `body_contract.py` 另需 PyYAML，缺依赖按执行错误 rc2 停止）：
   python3 -I -B tools/minis-verify.py --repo PATH --git-version <40位小写hex> \
       --object ID [--object ID ...] [--root /] [--projection FILE]
 
@@ -45,7 +45,7 @@ CODES = {
     "duplicate_item": ("error", 2), "unselected_object": ("error", 2),
     "field_binding": ("error", 2), "git_error": ("error", 2),
     "unsupported_git_mode": ("error", 2), "expected_contract_error": ("error", 2),
-    "internal_error": ("error", 2),
+    "internal_error": ("error", 2), "dependency_missing": ("error", 2),
     "missing_projection": ("missing_evidence", 3), "missing_field": ("missing_evidence", 3),
     "missing_object": ("missing_evidence", 3), "identity_unverifiable": ("missing_evidence", 3),
     "unsafe_path": ("missing_evidence", 3), "not_readable": ("missing_evidence", 3),
@@ -113,7 +113,10 @@ def _load_body():
     spec = importlib.util.spec_from_file_location(
         "minis_body_contract", os.path.join(here, "body_contract.py"))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError:
+        raise Reject("dependency_missing") from None
     return module
 
 

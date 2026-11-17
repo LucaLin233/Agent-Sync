@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "tools", "minis-verify.py")
@@ -607,6 +608,20 @@ class MinisVerify(unittest.TestCase):
             os.close(fd)
         os.remove(os.path.join(self.dir, "references", "probe.md"))
         self.assertNotEqual(before, after)
+
+class DependencySeamTest(unittest.TestCase):
+    """只注入「yaml 导入缺失」：正文契约的依赖缺失必须转成执行错误，不能逸出成 Exit 或差异。"""
+
+    def test_missing_pyyaml_is_an_execution_error(self):
+        spec = importlib.util.spec_from_file_location("minis_verify_dep", TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            with self.assertRaises(module.Reject) as caught:
+                module._load_body()
+        self.assertEqual("dependency_missing", caught.exception.code)
+        self.assertEqual(("error", 2), module.CODES["dependency_missing"])
+
 
 if __name__ == "__main__":
     unittest.main()

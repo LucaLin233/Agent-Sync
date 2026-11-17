@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Existing body_contract regressions moved intact from the retired deployment suite.
-Kept in full because exact body/field bytes remain the live cross-end contract.
-No new test assertions are introduced.
+"""body_contract 回归：正文/字段字节仍是跨端生效契约，故整套进 full。
+
+本文件含既有回归与新增定向判据（PyYAML 取值语义、merge 重复键、不可哈希键），新增判据在用例名与
+注释中逐条标明；正文提取仍只做字节切片，不 strip、不归一换行。
 """
 import importlib.util
 import unittest
@@ -38,9 +39,57 @@ class BodyContract(unittest.TestCase):
         self.assertEqual(self.code(BC.body_bytes, b"x\xff"), "INVALID_UTF8")
         self.assertEqual(self.code(BC.fm_fields, b"---\nname: \xff\n---\n"), "INVALID_UTF8")
         self.assertEqual(self.code(BC.body_bytes, b"\xef\xbb\xbfno frontmatter"), "BOM_FORBIDDEN")
-        for raw in (b"---\nt: [a]\n---\n", b"---\nt: &a x\n---\n", b"---\n- a\n---\n",
-                    b"---\nm:\n  a:\n    b: c\n---\n"):
+        # PyYAML 语义下真正非法的 frontmatter：根不是映射、流式/引号未闭合、未知标签都 fail-closed。
+        for raw in (b"---\n- a\n---\n", b"---\nt: [a\n---\n", b'---\nt: "a\n---\n',
+                    b"---\nt: !tag x\n---\n", b"---\nt: |2x\n  a\n---\n"):
             self.assertEqual(self.code(BC.fm_fields, raw), "UNSUPPORTED_YAML", raw)
+
+    def test_folded_and_deep_indentation_follow_pyyaml(self):
+        """折叠标量含空行、缩进超过一层的前置字段，取值按 YAML 语义（期望值是 yaml.safe_load 的结果）。"""
+        raw = (b"---\nfolded: >\n  line one\n\n  line two\n"
+               b"nested:\n  meta:\n    deeper: value\n---\nbody")
+        f = BC.fm_fields(raw)
+        self.assertEqual(f["folded"], "line one\nline two\n")
+        self.assertEqual(f["nested"], {"meta": {"deeper": "value"}})
+        self.assertEqual(BC.body_bytes(raw), b"body")
+
+    def test_merge_keys_follow_safeloader_semantics(self):
+        """`<<` 按 SafeLoader 处理：查重在 merge 展开前按原始节点图进行，不误判也不漏判。"""
+        raw = (b"---\nbase: &b\n  a: 1\n  b: two\n"
+               b"skill:\n  <<: *b\n  a: 2\n---\nbody")
+        f = BC.fm_fields(raw)
+        self.assertEqual(f["skill"], {"a": 2, "b": "two"}, "显式键覆盖 merge 源")
+        self.assertEqual(f["base"], {"a": 1, "b": "two"})
+        multi = b"---\nx: &a\n  p: 1\ny: &c\n  q: 2\nm:\n  <<: [*a, *c]\n---\n"
+        self.assertEqual(BC.fm_fields(multi)["m"], {"p": 1, "q": 2})
+        # 定向判据①：内联 merge 源（不经别名）内的重复键同样拒绝。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nmerged: {<<: {x: 1, x: 2}, z: w}\n---\n"),
+                         "DUPLICATE_KEY")
+        # 定向判据②：merge 源经别名再次构造不得误报（SafeLoader 两处都是 {'x': 2}）。
+        alias = b"---\nfirst: {<<: &b {<<: {x: 1}, x: 2}}\nbase: *b\n---\nbody"
+        got = BC.fm_fields(alias)
+        self.assertEqual((got["first"], got["base"]), ({"x": 2}, {"x": 2}))
+        # 定向判据③：标量键按 SafeLoader 等值判定，1 与 01 是同一个键。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nm: {1: a, 01: b}\n---\n"), "DUPLICATE_KEY")
+        # 定向判据④：真实被 << 引用的 merge 源内重复键。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nbase: &b\n  a: 1\n  a: 2\nuse:\n  <<: *b\n---\n"),
+                         "DUPLICATE_KEY")
+
+    def test_unhashable_key_is_a_contract_error(self):
+        """不可哈希键（序列/映射键）归 UNSUPPORTED_YAML，不逸出未捕获的 TypeError。"""
+        self.assertEqual(self.code(BC.fm_fields, b"---\n? [a]\n: b\n---\n"), "UNSUPPORTED_YAML")
+        self.assertEqual(self.code(BC.fm_fields, b"---\n? {a: b}\n: c\n---\n"), "UNSUPPORTED_YAML")
+        # 定向判据：特殊标量标签作键（构造出 list/dict/set 等不可哈希值）仍归 UNSUPPORTED_YAML。
+        for tag in ("seq", "map", "set", "omap", "pairs"):
+            with self.subTest(tag=tag):
+                raw = ("---\n? !!%s foo\n: bar\n---\n" % tag).encode()
+                self.assertEqual(self.code(BC.fm_fields, raw), "UNSUPPORTED_YAML")
+
+    def test_block_scalar_chomping_follows_pyyaml(self):
+        """`|`/`|+`/`|-` 的 chomping 与折叠空行都交给 PyYAML，不自制拼装。"""
+        raw = b"---\na: |\n  x\n\n  y\nkeep: |+\n  k\n\nstrip: |-\n  s\n---\n"
+        f = BC.fm_fields(raw)
+        self.assertEqual((f["a"], f["keep"], f["strip"]), ("x\n\ny\n", "k\n\n", "s"))
 
 
 if __name__ == "__main__":

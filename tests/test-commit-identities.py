@@ -538,7 +538,9 @@ class EnvironmentTest(Base):
         self.verdict(proc, 2, '浅克隆')
 
 
-class FamilyRulesTest(RulesTest):
+class FamilyRulesTest(Base):
+    run_rules = RulesTest.run_rules
+
     def test_missing_duplicate_or_malformed_families_fail_closed(self):
         gpt = '`GPT(?:[ -][A-Za-z0-9]+(?:[ .-][A-Za-z0-9]+)*)? <noreply@openai.com>`'
         self.assertIn(gpt, rule_text())
