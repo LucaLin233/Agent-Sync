@@ -1,6 +1,11 @@
 #!/bin/sh
 # 结构守卫 tools/check-rules.py 的反例回归（固定 rc 0/1/2/3 与错误类别），
 # 以及 tests/run-tests.sh 的选路、失败传播、环境隔离与登记一致性回归（真实 runner + 合成用例表）。
+# 成本事实（2026-11-17 本机 iSH/aarch64 实测约 49 s）：超单入口 10 s 设计预算，超过部分是同族直接回归——
+# 真实 runner 与 CI/runner 边界要在合成 Git 仓里实跑 workflow 标界段和收尾契约，无法用更廉价的桩替代；
+# 绝对成本仍低于 1 min，拆文件或削断言不降低绝对成本，故不拆、不削。
+# 降级条件：未来减少本入口运行频率或提速，须单独提交等价性证明（退出码与 stdout 断言不变；
+# 改为进程内执行时每个入口至少保留一个真实子进程用例），不得在本文件内以删判据换速度。
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 python3 -B - "$ROOT" <<'PYEOF'
@@ -364,6 +369,59 @@ assert MOD!=FIXED
 (FIX/'tests/run-tests.sh').write_text(MOD,encoding='utf-8');code,out=rt('case','lint')
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
 check('清理：根被换成外部链接时非零、披露残留、不误删哨兵',code==2 and 'cleanup 失败' in out and (S/'keep').read_text()=='x',out[-300:])
+# 清理：只比两个旧持有 fd 不够——按当前 NAME 从锚定父 fd 真重开核等。改名原根 + 普通目录替身（含哨兵）必须不被触碰。
+SWAP=('        os.rename(NAME, NAME + \'-orig\', src_dir_fd=PFD, dst_dir_fd=PFD)\n'
+      '        os.mkdir(NAME, 0o700, dir_fd=PFD)\n'
+      '        _sx = os.open(NAME + \'/standin\', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=PFD)\n'
+      '        os.close(_sx)\n'
+      '        recheck(TMP, ANC)\n'
+      '        cur = reopen_current()\n')
+SWAP_AT='        recheck(TMP, ANC)\n        cur = reopen_current()'
+assert FIXED.count(SWAP_AT)==1
+def roots():
+    ns=sorted(p.name for p in (FIX/'tmp').iterdir())
+    return ns,[n for n in ns if not n.endswith('-orig')],[n for n in ns if n.endswith('-orig')]
+def wipe_tmp():
+    for d in list((FIX/'tmp').iterdir()):
+        shutil.rmtree(d) if not d.is_symlink() else d.unlink()
+wipe_tmp()
+(FIX/'tests/run-tests.sh').write_text(FIXED.replace(SWAP_AT,SWAP),encoding='utf-8')
+code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+ns,now,orig=roots()
+check('清理：原根改名+普通目录替身时 rc=2、披露原根/现路径、替身与哨兵未被触碰',
+      code==2 and '替身未触碰' in out and '原根 dev/ino' in out and len(now)==1 and len(orig)==1
+      and (FIX/'tmp'/now[0]/'standin').is_file(),'rc=%d %s'%(code,ns))
+wipe_tmp()
+# 有效负控：两处核等都禁用后同一注入才可达替身（证明上面的断言非空转）
+MUT=FIXED.replace('if b != a:','if False:').replace('if b2 != a2:','if False:')
+assert MUT.count('if False:')==2 and MUT!=FIXED
+(FIX/'tests/run-tests.sh').write_text(MUT.replace(SWAP_AT,SWAP),encoding='utf-8')
+code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+ns,now,orig=roots()
+check('负控：两处核等禁用后替身被删（正控断言可达、不空转）',
+      code==0 and not now and len(orig)==1 and not (FIX/'tmp'/orig[0]/'standin').exists(),'rc=%d %s'%(code,ns))
+wipe_tmp()
+# 创建后直接可达的基础设施异常：rc=2、异常原文保留、WORK 按规则真实收尾
+assert FIXED.count('        t0 = time.monotonic()')==1
+(FIX/'tests/run-tests.sh').write_text(
+    FIXED.replace('        t0 = time.monotonic()','        raise RuntimeError("synthetic-infra")',1),encoding='utf-8')
+code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('runner 创建后基础设施异常：rc=2、保留原文、WORK 安全收尾无残留',
+      code==2 and '基础设施异常' in out and 'RuntimeError: synthetic-infra' in out and 'cleanup 完成' in out and not left(),
+      'rc=%d %s\n%s'%(code,left(),out[-400:]))
+# trackedState：先判退出码。git status 非 0 且 stdout 为空时必须 unknown，不能打印 clean
+assert FIXED.count("    _st = git('status', '--porcelain', '--untracked-files=normal')")==1
+(FIX/'tests/run-tests.sh').write_text(FIXED.replace(
+    "    _st = git('status', '--porcelain', '--untracked-files=normal')",
+    "    class _F:\n        returncode = 128\n        stdout = b''\n    _st = _F()",1),encoding='utf-8')
+code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('runner trackedState：git status 失败且空 stdout 记 unknown 而非 clean',
+      code==0 and '==== trackedState unknown' in out and '==== trackedState clean' not in out and not left(),
+      'rc=%d\n%s'%(code,out[-300:]))
 for d in list((FIX/'tmp').iterdir()):
     shutil.rmtree(d) if not d.is_symlink() else d.unlink()
 

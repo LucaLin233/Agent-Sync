@@ -128,7 +128,7 @@ esac
 command -v python3 >/dev/null 2>&1 || { echo "运行基础设施不可用：缺少 python3" >&2; exit 2; }
 # 监督段：独占 WORK 的创建/信号/清理与逐例原证都在这一个内联标准库进程里，不落持久日志。
 exec python3 -I -B - "$mode" "$arg" "$want" "$CASES" "$ROOT" <<'PYEOF'
-import os, re, select, shutil, signal, stat, subprocess, sys, time
+import os, re, select, shutil, signal, stat, subprocess, sys, time, traceback
 
 MODE, ARG, WANT, CASES, ROOT = sys.argv[1:6]
 OUT = sys.stdout.buffer
@@ -201,6 +201,14 @@ def recheck(path, held):
             os.close(fd)
 
 
+def reopen_current():
+    """从已锚定父 fd 按当前 NAME 真重开（O_DIRECTORY|O_NOFOLLOW）；打不开返回 None。"""
+    try:
+        return os.open(NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=PFD)
+    except OSError:
+        return None
+
+
 ANC = chain(TMP)
 PFD = ANC[-1]
 recheck(TMP, ANC)
@@ -246,7 +254,7 @@ def build_child_env():
     }
 
 
-child_env = build_child_env()
+child_env = None
 
 
 def git(*args):
@@ -259,13 +267,21 @@ def gitval(*args):
     return r.stdout.decode('utf-8', 'replace').strip() if r.returncode == 0 else 'unavailable'
 
 
-say('==== 运行 mode=%s%s → %s' % (MODE, (' ' + ARG) if ARG else '', ' '.join(want)))
-say('==== HEAD %s' % gitval('rev-parse', 'HEAD'))
-say('==== tree %s' % gitval('rev-parse', 'HEAD^{tree}'))
-say('==== git %s' % gitval('--version').replace('git version ', ''))
-_st = git('status', '--porcelain', '--untracked-files=normal')
-say('==== trackedState %s' % ('clean' if not _st.stdout.strip() else 'dirty' if _st.returncode == 0 else 'unknown'))
-say('==== WORK %s（本轮独占，收尾删除）' % WORK)
+def emit_header():
+    """轮首版本与状态：trackedState 先看退出码，Git 失败一律 unknown，不冒充该提交字节。"""
+    say('==== 运行 mode=%s%s → %s' % (MODE, (' ' + ARG) if ARG else '', ' '.join(want)))
+    say('==== HEAD %s' % gitval('rev-parse', 'HEAD'))
+    say('==== tree %s' % gitval('rev-parse', 'HEAD^{tree}'))
+    say('==== git %s' % gitval('--version').replace('git version ', ''))
+    _st = git('status', '--porcelain', '--untracked-files=normal')
+    if _st.returncode != 0:
+        _state = 'unknown'
+    elif _st.stdout.strip():
+        _state = 'dirty'
+    else:
+        _state = 'clean'
+    say('==== trackedState %s' % _state)
+    say('==== WORK %s（本轮独占，收尾删除）' % WORK)
 
 RAN_RE = re.compile(rb'^Ran (\d+) tests? in ', re.M)
 SKIP_RE = re.compile(rb'skipped=(\d+)')
@@ -318,9 +334,43 @@ def halt(p):
         die('无法确认本轮执行已停，保留 WORK %s' % WORK, 2)
 
 
+ACTIVE = []
+
+
+def stop_own():
+    """只终止本轮 Popen（start_new_session 的进程组）：INT/TERM，5 秒未退则 KILL 并 wait。
+
+    无法确认已停就返回 False，调用方据此保留 WORK，不无条件删除。
+    """
+    ok = True
+    sig = STOP[0] if STOP else signal.SIGTERM
+    for p in ACTIVE:
+        if p.poll() is not None:
+            p.wait()
+            continue
+        try:
+            os.killpg(os.getpgid(p.pid), sig)
+        except OSError:
+            pass
+        end = time.monotonic() + 5
+        while time.monotonic() < end and p.poll() is None:
+            time.sleep(0.05)
+        if p.poll() is None:
+            try:
+                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            ok = False
+    return ok
+
+
 def run_entry(cmd):
     p = subprocess.Popen(['sh', '-c', cmd], cwd=ROOT, env=child_env, stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    ACTIVE.append(p)
     fd = p.stdout.fileno()
     chunks = []
     while True:
@@ -370,21 +420,42 @@ def inspect_tree(fd):
 def cleanup():
     try:
         recheck(TMP, ANC)
-        if ident(RF1) != ident(RF2):
-            say('==== cleanup 停止：WORK 身份变化，保留 %s' % WORK)
+        cur = reopen_current()
+        if cur is None:
+            say('==== cleanup 停止：进入清理时当前 %s 无法 nofollow 重开，替身未触碰，保留 %s' % (NAME, NAME))
             return False
-        st = os.fstat(RF1)
-        if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o700:
-            say('==== cleanup 停止：WORK 属主/模式变化，保留 %s' % WORK)
+        a, b = ident(RF1), ident(cur)
+        if b != a:
+            os.close(cur)
+            say('==== cleanup 停止：进入清理时当前 %s 非仍持有原根（原根 dev/ino %d/%d，现路径 dev/ino %d/%d），'
+                '替身未触碰，保留 %s' % (NAME, a[0], a[1], b[0], b[1], NAME))
             return False
-        bad = inspect_tree(RF1)
-        if bad:
-            say('==== cleanup 停止：根内归属/类型不明（%s），保留 %s' % (' '.join(bad[:5]), WORK))
-            return False
+        try:
+            st = os.fstat(cur)
+            if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o700:
+                say('==== cleanup 停止：WORK 属主/模式变化，保留 %s' % WORK)
+                return False
+            bad = inspect_tree(cur)
+            if bad:
+                say('==== cleanup 停止：根内归属/类型不明（%s），保留 %s' % (' '.join(bad[:5]), WORK))
+                return False
+        finally:
+            os.close(cur)
         if not getattr(shutil.rmtree, 'avoids_symlink_attacks', False) \
                 or os.unlink not in os.supports_dir_fd or os.rmdir not in os.supports_dir_fd:
             say('==== cleanup 停止：标准库 rmtree 不支持 dir_fd/防符号链接，保留 %s' % WORK)
             return False
+        cur2 = reopen_current()
+        if cur2 is None:
+            say('==== cleanup 停止：删除前当前 %s 无法 nofollow 重开，替身未触碰，保留 %s' % (NAME, NAME))
+            return False
+        a2, b2 = ident(RF1), ident(cur2)
+        if b2 != a2:
+            os.close(cur2)
+            say('==== cleanup 停止：删除前当前 %s 非仍持有原根（原根 dev/ino %d/%d，现路径 dev/ino %d/%d），'
+                '替身未触碰，保留 %s' % (NAME, a2[0], a2[1], b2[0], b2[1], NAME))
+            return False
+        os.close(cur2)
         shutil.rmtree(NAME, dir_fd=PFD)
     except OSError as exc:
         say('==== cleanup 失败：%s，已知残留 %s' % (exc, WORK))
@@ -400,32 +471,49 @@ def cleanup():
 
 npass = nfail = 0
 done = []
-t_all = time.monotonic()
+cleaned = False
+infra = None
 interrupted = None
-for name, grp, cmd, _full in selected:
-    if STOP:
-        interrupted = STOP[0]
-        break
-    say('==== BEGIN %s group %s' % (name, grp))
-    t0 = time.monotonic()
-    rc, data = run_entry(cmd)
-    dt = time.monotonic() - t0
-    tests, skip = counts(data, cmd)
-    say('==== END %s exit %d tests %s skipped %s %.2fs' % (name, rc, tests, skip, dt))
-    done.append((name, rc))
-    if STOP:
-        interrupted = STOP[0]
-        break
-    if rc == 0:
-        npass += 1
+t_all = time.monotonic()
+try:
+    child_env = build_child_env()
+    emit_header()
+    for name, grp, cmd, _full in selected:
+        if STOP:
+            interrupted = STOP[0]
+            break
+        say('==== BEGIN %s group %s' % (name, grp))
+        t0 = time.monotonic()
+        rc, data = run_entry(cmd)
+        dt = time.monotonic() - t0
+        tests, skip = counts(data, cmd)
+        say('==== END %s exit %d tests %s skipped %s %.2fs' % (name, rc, tests, skip, dt))
+        done.append((name, rc))
+        if STOP:
+            interrupted = STOP[0]
+            break
+        if rc == 0:
+            npass += 1
+        else:
+            nfail += 1
+except BaseException:
+    infra = traceback.format_exc().rstrip()
+    say('==== 基础设施异常（原文如下；已创建的 WORK 不因异常放宽身份核验）：')
+    say(infra)
+finally:
+    if stop_own():
+        cleaned = cleanup()
     else:
-        nfail += 1
+        say('==== cleanup 停止：无法确认本轮执行已停，保留 %s' % WORK)
 
 unfinished = [r[0] for r in selected if r[0] not in {d[0] for d in done}]
-cleaned = cleanup()
-if interrupted:
+if infra:
+    code = 2
+elif not cleaned:
+    code = 2
+elif interrupted:
     code = 130 if interrupted == signal.SIGINT else 143
-elif not cleaned or unfinished:
+elif unfinished:
     code = 2
 elif nfail:
     code = 1
