@@ -287,7 +287,8 @@ code,out=rt('select-paths',stdin='tests/run-tests.sh\0tools/check-rules.py\0')
 check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["group", "auth"], ["group", "identity"], ["group", "verify"], ["group", "minis-verify"], ["group", "lh-wiring"], ["group", "gate"]]',out)
 def expand(doc):
     got=set()
-    for k,a in doc:
+    for s in doc:
+        k=s[0];a=s[1] if len(s)>1 else None
         if k=='case':got.add(a)
         elif k=='full':got|={c[0] for c in REAL_CASES if c[3]=='1'}
         elif k=='smoke':got|={c[0] for c in REAL_CASES if c[1]=='smoke'}
