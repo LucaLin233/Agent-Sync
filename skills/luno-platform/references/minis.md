@@ -22,7 +22,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 - 客户端配置的读写（`minis-config`、子代理与模型、SOUL 与提示词、环境变量与挂载、技能新建与元数据刷新）：完整读取 `references/minis.md`〔分支 minis-configuration〕。
 - **使用 Minis 文件编辑工具前**，以及上下文卸载与压缩、会话结果截断、跨会话目录与挂载、隐私掩码、独立 Shell 进程、后台调度、工具连接异常：`references/minis.md`〔分支 minis-runtime〕。命中以下情形时另完整读对应分支：
-  - 上下文卸载、压缩、offloads、会话结果截断、会话原文回读，以及记忆注入、截断或容量相关判断前；跨会话目录、挂载、用户文件定位或跨话题交接前：`references/minis.md`〔分支 minis-runtime-context〕。其中需要记忆规则时继续按该资源加载，不凭旧阈值推断。
+  - 上下文卸载、压缩、offloads、会话结果截断、会话原文回读；跨会话目录、挂载、用户文件定位或跨话题交接前：`references/minis.md`〔分支 minis-runtime-context〕。其中需要记忆规则时继续按该资源加载，不凭旧阈值推断。
   - 本机能力、独立 Shell 进程、原生命令、分页覆盖、后台服务与调度、Bonjour、debug、文件或进程异常、Codex/iSH TLS 的操作、建议或判断前：`references/minis.md`〔分支 minis-runtime-device〕。`references/minis.md`〔分支 minis-runtime〕 的编辑与隐私掩码规则和工具异常规则仍适用；不因分支化省略安全、授权或写后回读。
 - 记忆写入或整理后的条目格式体检、压缩前后的标识保全校验，记忆日志的自动注入、截断与容量评估：`references/minis-memory.md`〔分支 minis-memory-injection〕。
 - 归档会话、判断会话归属，或用 `minis-sessions-cli update --group` 改派之前：`references/minis.md`〔分支 minis-configuration〕〈会话归组〉。
@@ -114,7 +114,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 - 上下文卸载、压缩和占位符以当前手册 `concepts/minis-url-scheme.md`〈Offloads〉和本次的实际提示为准；不沿用旧的 32K/64K/128K 阈值、压缩轮数或 token 估算倍率。当前行为未知就标「待验证」，不凭字符数估算余量；开启诊断日志仍需配置修改授权。
 - **工具结果自动卸载**是执行者无法关闭的平台行为（机制见上述手册）：派单和执行时用字段投影、截断或计数控制单次输出，避免触发。发生后只报告工具给出的确切路径，未经另行授权不读不删；不算受派方主动越权，不需逐次记入事故。获准回读时不猜文件名；编码或二进制拒读不代表不存在，只对确认不含秘密的文本，在确认编码后用管道转成 UTF-8 读取。秘密输出禁令不因自动卸载而豁免。
 - 回读会话的参数和字段上限见手册 `cli/minis-sessions-cli.md`（含 `--full`、`--tools`；`messages --tools --full` 读取已存储的 shell 输入，不保证恢复完整元数据）。`messages --id` 必须用完整 UUID：2026-10-25 本机用 8 位前缀时返回成功但消息为空，不能据此判断没有消息。长结果要当轮按授权归档，没有授权就报告缺口；检索或回读父会话和其他会话须当次授权，默认不提供父会话转录。
-- 规则文本本身不会报告余量，所以只在事件和阶段边界触发交接，不做「快满了」的预警。长任务的阶段暂停节点、压缩提示和按节点计算提醒次数见 `luno-core/references/handoff.md`；一次提醒不覆盖本会话其他节点。App 的 `chat.autoCompact` 与实际的压缩提示是平台行为，不当成容量阈值或硬限制。
+- 规则文本本身不会报告余量，不凭字符数预警或估算。批次间唯一暂停节点、先交接后提示用户查看输入框用量及手动压缩的做法，按 `luno-core/references/handoff.md`；自动压缩只作平台兜底，不改 App 设置。
 - 涉及记忆日志的自动注入、截断或容量，或据此评估日志的压缩、折行和整理时，先读 `references/minis-memory.md`〔分支 minis-memory-injection〕。
 
 ## 目录与挂载

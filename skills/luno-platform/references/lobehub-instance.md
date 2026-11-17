@@ -2,7 +2,7 @@
 
 ## 坐标与基线
 
-- **本部署坐标**（应用和数据库 2026-10-04、网关 2026-09-22 的记录，现版本未核）：Compose 在 `/root/lobehub/compose.yaml`（同目录 `.env`）；`lobe` 用 host 网络监听 `:3210`，`lobe-postgres`（ParadeDB PG17）`:3211`，`lobe-gateway` `:8787/:8788`。公网入口 `LOBEHUB_SERVER` 的取值和缺失处置见本技能入口的〈LobeHub入口〉；宿主按当次的连接参数确定，正文不缓存地址。
+- **本部署坐标**（应用和数据库 2026-10-04、网关 2026-09-22 的记录，现版本未核）：Compose 在 `/root/lobehub/compose.yaml`（同目录 `.env`）；`lobe` 用 host 网络监听 `:3210`，`lobe-postgres`（ParadeDB PG17）`:3211`，`lobe-gateway` `:8787/:8788`。公网入口 `LOBEHUB_SERVER` 的取值和缺失处置见 `references/lobehub.md`〔分支 lobehub〕〈LobeHub入口〉；宿主按当次的连接参数确定，正文不缓存地址。
 - **宿主初查**：`docker ps --format '{{.Names}}\t{{.Status}}\t{{.Ports}}'`、`curl -fsS http://localhost:3210/`；host 网络的监听看 `ss -lntp`，不要只看 `Ports` 或凭上游默认端口（3000）推断。
 - **基线核对**：应用和网关分别核对实际的镜像版本或 digest、Compose 标签和各自的自动更新策略；不拿应用版本推网关版本，也不把浮动标签当实际版本。应用版本以容器内的 `/app/package.json` 为准，OCI 标签可能和代码不符。必需配置（PostgreSQL 与 `pg_search`、Redis、S3、`INTERNAL_APP_URL`、`AUTH_SECRET`、`JWKS_KEY` 和网关变量）按对应版本文档 `self-hosting/platform/docker-compose.mdx`〈Necessary Configuration〉核对；现场取值按当次授权取证，不凭历史值推断，部署变更后重验。
 - **设备连接器**：更新和重启按执行设备上 `lh connect status`、`lh connect restart` 的帮助（上游 `apps/cli/README.md`〈Update a connected device〉）：installed 和 running 分别核对，不拿本机 CLI 版本推远端运行版本；重启会断开设备连接和远程终端，放到任务结束后。

@@ -103,6 +103,9 @@ case('CCHP 上游入口必需读取降级',1,'必需加载降级',
                                       '按需读取 `references/cchp-upstream/ENTRY.md`')))
 
 # ── 资源边 ──
+case('角色归属下沉后的必需读取不能降级',1,'必需加载降级',
+     lambda p:edit(p,ENTRY,lambda s:s.replace('先完整读取 `references/review.md`',
+                                             '按需读取 `references/review.md`',1)))
 def new_resource(p,registered):
     (p/'skills/luno-core/references/new-structural.md').write_text('x\n')
     append(p,SYNC,'\n`references/new-structural.md`\n')
@@ -185,13 +188,14 @@ def ob_empty(s):
 case('义务块重复',1,'义务块缺失或重复',lambda p:append(p,OB_SRC,'\n'+OB_HEAD+'\nx\n'))
 case('义务块为空',1,'义务块为空',lambda p:edit(p,OB_SRC,ob_empty))
 
-# 新入口承载的产品边界同样必须有真实负控；从守卫声明现读，不钉正文措辞。
-# 义务块缺失：逐个去掉平台入口的每个义务标题，每个都须单独报出。
-ROOT_OBS=[(src,head) for src,head in G.OBLIGATIONS if src=='skills/luno-platform/SKILL.md']
-assert ROOT_OBS, '平台入口义务负控不能空转'
-def drop_root_obs(p):
-    for src,head in ROOT_OBS:edit(p,src,lambda s,head=head:s.replace(head,head+'-removed',1))
-case('义务块缺失（平台入口 %d 个义务逐个）'%len(ROOT_OBS),1,'义务块缺失或重复',drop_root_obs,n=len(ROOT_OBS))
+# 产品入口下沉后，原产品边界仍须逐个负控；从守卫声明现读，不钉正文措辞。
+PRODUCT_PATHS={'skills/luno-platform/SKILL.md', 'skills/luno-platform/references/cchp.md',
+               'skills/luno-platform/references/lobehub.md'}
+PRODUCT_OBS=[(src,head) for src,head in G.OBLIGATIONS if src in PRODUCT_PATHS and head!='## 范围']
+assert PRODUCT_OBS, '产品入口义务负控不能空转'
+def drop_product_obs(p):
+    for src,head in PRODUCT_OBS:edit(p,src,lambda s,head=head:s.replace(head,head+'-removed',1))
+case('义务块缺失（产品入口 %d 个义务逐个）'%len(PRODUCT_OBS),1,'义务块缺失或重复',drop_product_obs,n=len(PRODUCT_OBS))
 
 # ── 自编资源：缺件不再豁免，旧取件登记一律拒绝 ──
 def legacy_fetch(p):

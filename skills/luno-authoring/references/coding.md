@@ -22,11 +22,7 @@
 
 修后回跑原始未缩减场景；回归边界须触发并观察真实故障，多调用方/完整链不能以单调用方或过浅测试代替，无合适接缝报缺口。重构先有通过基线，改后同组检查通过；行为变化另作需求，不混入重构。
 
-## 交付
-
-交实际命令、结果、未验证及原因；文件存在或“应该没问题”不代证据。
-
-来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock；Copyright (c) 2025 Jesse Vincent。完整许可随包见 ../LICENSE.matt-pocock.txt、../LICENSE.obra-superpowers.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
+来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END coding -->
 
 <a id="branch-i18n"></a>

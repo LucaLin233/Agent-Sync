@@ -1,4 +1,4 @@
-分支：command-reference、command-observation、command-network、command-inspection、command-mutation、command-automation、command-environment、output-safety、controller-cli、platform-compatibility、diagnostics。读法见 luno-core 入口〈加载〉。
+分支：command-reference、command-observation、command-network、command-inspection、command-mutation、command-automation、command-environment、output-safety、controller-cli、platform-compatibility、diagnostics、diagnostics-coredevice。读法见 luno-core 入口〈加载〉。
 
 <a id="branch-command-reference"></a>
 <!-- BEGIN command-reference -->
@@ -351,6 +351,13 @@ surge-cli --raw proxy-runtime-status POLICY::…
 
 `test-policy-udp` 需要真实的 Internet 出网：对 P2P 的 Tailscale/WireGuard 策略（`Test Capability: rtt-only`）会返回 not-applicable，这类策略改用 `test-policy` 取 RTT。这个错误**不是**隧道故障的证据。
 
+涉及 CoreDevice/RSD、RemotePairing 或同机回环时，另完整读取 `references/command-reference.md`〔分支 diagnostics-coredevice〕。
+<!-- END diagnostics -->
+
+<a id="branch-diagnostics-coredevice"></a>
+<!-- BEGIN diagnostics-coredevice -->
+先完整读取 `references/command-reference.md`〔分支 diagnostics〕，沿用引擎预检、共同命令知识、平台协议和授权要求。
+
 ## CoreDevice/RSD 同机回环（第三方报告，非本机验收）
 
 上游 OpenMinis ios-dev（2026-10-25 本地核对）报告：Surge iOS 5.23.0 可用，5.22.1 会静默丢弃 `[IP Rewrite]`，并以 ≥5.23.0 作为门槛（这里是 App 发行版本，不是 Controller 内部版本）。上游列出的验证环境是 iOS 27.0.1/27.1 和 Surge 5.23.0；流程要求 Wi-Fi、已开启开发者模式和有效的 RemotePairing 配对材料，同机只运行一个相应的 NetworkExtension VPN；49152 是该上游握手实现固定的端口。当前版本、拓扑和前提没核对时不据此执行，也不外推到其他系统、实现或全部服务端口。这是第三方报告的 App 版本条件，不是 `references/command-reference.md`〔分支 platform-compatibility〕 门槛表里的 Controller 协议门槛。
@@ -363,5 +370,4 @@ surge-cli --raw proxy-runtime-status POLICY::…
 - 配对凭据或设备访问缺授权时停止这一步，不读凭据文件取密。
 
 来源与许可：OpenMinis/MinisSkills，MIT 精选改写；Copyright (c) 2026 OpenMinis；Copyright (c) 2026 OpenMinis contributors；本地许可决定与边界见本包 references/SOURCE.md〈第三方精选改写〉。完整许可随包见 ../LICENSE.openminis.txt、../LICENSE.openminis-ios-dev.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
-<!-- END diagnostics -->
-
+<!-- END diagnostics-coredevice -->
