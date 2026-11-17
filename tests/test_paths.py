@@ -60,8 +60,19 @@ PATHS_RULES = (
      ('case', 'test-lh-deploy.py'), '离线验收或正文契约变更 → 部署消费者'),
     (('tools/sync-targets.json',),
      ('case', 'test-lh-deploy.py'), '对象登记变更 → 部署消费者'),
+    # 运行器、选路表与 CI 容器自身变化：既进 full，也须跑所有把 runner 当消费者的定向组。
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('group', 'auth'), '运行器、选路表或 CI 测试 workflow → auth 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('group', 'identity'), '运行器、选路表或 CI 测试 workflow → identity 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('group', 'verify'), '运行器、选路表或 CI 测试 workflow → verify 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('group', 'minis-verify'), '运行器、选路表或 CI 测试 workflow → minis-verify 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('group', 'lh-wiring'), '运行器、选路表或 CI 测试 workflow → lh-wiring 消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
-    (('tests/run-tests.sh', 'tests/test_paths.py', 'tools/sync-all.sh',
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml', 'tools/sync-all.sh',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),
      ('full',), '运行器与聚合入口 → full'),
 )

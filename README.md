@@ -263,4 +263,8 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
 
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。
 
+CI（`.github/workflows/tests.yml`）只用一个 job 和一个 `selected` 步骤，选路表与测试都取受测 checkout：`pull_request` 以事件 base 为 B、merge 提交为 M，显式检出 M 后核 HEAD=M 且 M 的双亲恰为 [B, head]，取 `git diff B M` 并测试 M（base 自己前进不算 PR 变化，冲突 PR 无合并结果）；`push` 取 before→after。事件值经 env 传入并校验事件名与 40 位 hex，diff 以 NUL bytes 经 `select-paths` 内存串接，缺对象、全零或上游失败都阻断，不静默 fetch、不以空树或 full 兜底。运行器、选路表或该 workflow 变更命中所有把 runner 当消费者的组，与 full 取并集后为 12 个入口各跑一次；普通未映射正文仍只跑 smoke。
+
+运行器一轮输出即原证：轮首打印 HEAD、tree、git 版本和 trackedState，每入口 BEGIN 记 name/group，stdout/stderr 原 bytes 合并流式输出（不截断、不加前缀、不重打），END 记原始 exitCode、unittest 摘要的 tests/skip（非 unittest 或摘要缺失分别记 N/A、unavailable）和单调耗时。聚合退出码：全成功 0、测试失败 1、选路/环境/基础设施或清理失败 2，原始子进程退出码始终保留；INT/TERM 清理后 130/143。WORK 由 `mktemp` 在 TMPDIR 排他创建并在本轮 nofollow 核验后删除，不落持久日志、不建证据平台；调用方获准后自行保存本轮 stdout/stderr 与进程退出码。
+
 批次结果只记当批 PR，历史以 git 为准；公开快照未导入旧私有 `LucaLin233/Agent` 历史。技能合并与资源迁移见提交 `484de55052413ef2004d5e588d5a0540bcf88826`（六技能）和 #43（记忆并入 luno-platform、CCHP 官方件入包）。

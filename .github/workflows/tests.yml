@@ -1,5 +1,6 @@
-# 仓库测试：PR 和 main 上跑 full 与 identity（Linux 上合计约 10 s）。
-# pull_request 运行 PR 自身的代码，只给 contents: read，不用任何秘密。
+# 仓库测试：PR 与 main 上按变更路径选路，一轮跑完命中入口（含 full 与定向消费者组）。
+# PR 测 base→merge 的净合并结果（B→M，不是 merge-base…H 的三点差）；push 测 before→after。
+# pull_request 只运行 PR 自身代码，只给 contents: read，不用任何秘密、不缓存凭据、不开第二 job。
 name: tests
 
 on:
@@ -15,12 +16,97 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # actions/checkout v4 固定完整 SHA，与 commit-identities.yml 相同；升级须重新核对。
+      # 显式检出受测提交并取完整历史，供选择器逐个核对 diff 端点对象。
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.sha || github.event.after }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: full
-        id: full
-        run: sh tests/run-tests.sh full
-      - name: identity
-        if: ${{ !cancelled() && (steps.full.outcome == 'success' || steps.full.outcome == 'failure') }}
-        run: sh tests/run-tests.sh group identity
+      # 单个 selected 步骤：选路表与测试都取受测 checkout，只有一个 job。
+      - name: selected
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MERGE_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        run: |
+          env -i PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+            PYTHONIOENCODING=utf-8 PYTHONDONTWRITEBYTECODE=1 TMPDIR=/tmp \
+            GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1 \
+            GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false \
+            EVENT_NAME="$EVENT_NAME" BASE_SHA="$BASE_SHA" HEAD_SHA="$HEAD_SHA" \
+            MERGE_SHA="$MERGE_SHA" BEFORE_SHA="$BEFORE_SHA" AFTER_SHA="$AFTER_SHA" \
+            python3 -I -B - <<'PY'
+          # >>> CI_SELECT
+          import json, os, re, subprocess, sys
+
+          HEX40 = re.compile(r'[0-9a-f]{40}')
+          EVENT = os.environ.get('EVENT_NAME', '')
+
+
+          def fail(msg):
+              print('CI 选路失败：' + msg, file=sys.stderr)
+              raise SystemExit(2)
+
+
+          def sha(name, zero_is_bad=True):
+              value = os.environ.get(name, '')
+              if not HEX40.fullmatch(value):
+                  fail('%s 不是 40 位小写 hex：%r' % (name, value))
+              if zero_is_bad and value == '0' * 40:
+                  fail('%s 为全零，不能作为 diff 端点' % name)
+              return value
+
+
+          def git(*args):
+              r = subprocess.run(('git',) + args, stdin=subprocess.DEVNULL, capture_output=True)
+              if r.returncode != 0:
+                  fail('git %s 失败（rc=%d）：%s' % (
+                      ' '.join(args), r.returncode,
+                      r.stderr.decode('utf-8', 'replace').strip()[:300]))
+              return r.stdout
+
+
+          if EVENT == 'pull_request':
+              base, head, target = sha('BASE_SHA'), sha('HEAD_SHA'), sha('MERGE_SHA')
+          elif EVENT == 'push':
+              base, head, target = sha('BEFORE_SHA'), None, sha('AFTER_SHA')
+          else:
+              fail('不支持的事件：%r' % EVENT)
+
+          # 缺对象直接失败：不静默 fetch 修复，也不以空树兜底。
+          for rev in ([base, target] + ([head] if head else [])):
+              git('cat-file', '-e', rev + '^{commit}')
+          probed = git('rev-parse', 'HEAD').decode().strip()
+          if probed != target:
+              fail('checkout 的 HEAD %s 与受测目标 %s 不一致' % (probed, target))
+          if head is not None:
+              parents = git('rev-list', '--parents', '-n', '1', target).decode().split()[1:]
+              if sorted(parents) != sorted([base, head]):
+                  fail('受测提交的双亲 %r 不是 [base, head]' % parents)
+
+          # 变更集是 B→M（或 before→after）；禁重命名检测使旧、新路径都参与选路。
+          diff = git('diff', '--name-only', '-z', '--no-renames', '--no-ext-diff',
+                     '--no-textconv', base, target, '--')
+          sel = subprocess.run(['python3', '-I', '-B', 'tests/test_paths.py', 'select-paths'],
+                               input=diff, capture_output=True)
+          if sel.returncode != 0:
+              fail('select-paths 失败（rc=%d）：%s' % (
+                  sel.returncode, sel.stderr.decode('utf-8', 'replace').strip()[:300]))
+          try:
+              plan = json.loads(sel.stdout.decode('utf-8'))
+          except ValueError:
+              fail('select-paths 输出不是 JSON')
+          print('事件 %s ｜ base %s｜%s 受测 %s ｜ tree %s' % (
+              EVENT, base, (' head ' + head + ' ｜') if head else '', target,
+              git('rev-parse', target + '^{tree}').decode().strip()))
+          print('selector ' + json.dumps(plan))
+          sys.stdout.flush()
+          run = subprocess.run(['sh', 'tests/run-tests.sh', 'select'], input=sel.stdout)
+          raise SystemExit(run.returncode)
+          # <<<
+          PY
