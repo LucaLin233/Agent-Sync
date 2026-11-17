@@ -209,33 +209,11 @@ def reopen_current():
         return None
 
 
-ANC = chain(TMP)
-PFD = ANC[-1]
-recheck(TMP, ANC)
-
-proc = subprocess.run(['mktemp', '-d', 'run-tests-XXXXXX'],
-                      env={'PATH': PATH, 'TMPDIR': TMP, 'LC_ALL': 'C.UTF-8'},
-                      preexec_fn=lambda: os.fchdir(PFD), pass_fds=(PFD,),
-                      stdin=subprocess.DEVNULL, capture_output=True)
-if proc.returncode != 0:
-    die('mktemp 创建 WORK 失败：%r' % proc.stderr.decode('utf-8', 'replace').strip())
-lines = proc.stdout.decode('utf-8', 'replace').splitlines()
-if len(lines) != 1 or not re.fullmatch(r'run-tests-[A-Za-z0-9]{6,}', lines[0]):
-    die('mktemp 返回名不合规：%r' % proc.stdout)
-NAME = lines[0]
-WORK = os.path.join(TMP, NAME)
-RF1 = os.open(NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=PFD)
-RF2 = os.open(NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=PFD)
-if ident(RF1) != ident(RF2):
-    die('WORK 同名重开身份不一致')
-_st = os.fstat(RF1)
-if _st.st_uid != os.geteuid() or stat.S_IMODE(_st.st_mode) != 0o700:
-    die('WORK 属主或模式异常（uid=%d mode=%o）' % (_st.st_uid, stat.S_IMODE(_st.st_mode)))
-recheck(TMP, ANC)
-for _d in ('home', 'tmp'):
-    os.mkdir(_d, 0o700, dir_fd=RF1)
-    _fd = os.open(_d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=RF1)
-    os.close(_fd)
+ANC = []
+PFD = RF1 = RF2 = None
+NAME = WORK = None
+work_attempted = False
+root_verified = False
 
 
 def build_child_env():
@@ -364,6 +342,17 @@ def stop_own():
             p.wait(timeout=5)
         except subprocess.TimeoutExpired:
             ok = False
+    # leader 退出不等于本轮进程组停止：只用 signal 0 核本次 start_new_session 的组，
+    # 未确证消失就不放行清理（不扫描、不按名扫杀、不宣称为已回收）。
+    for p in ACTIVE:
+        try:
+            os.killpg(p.pid, 0)
+        except ProcessLookupError:
+            continue
+        except OSError:
+            pass
+        say('==== cleanup 停止：本轮进程组 %d 仍在或无法确证停止，保留 %s' % (p.pid, WORK))
+        ok = False
     return ok
 
 
@@ -476,6 +465,34 @@ infra = None
 interrupted = None
 t_all = time.monotonic()
 try:
+    work_attempted = True
+    ANC = chain(TMP)
+    PFD = ANC[-1]
+    recheck(TMP, ANC)
+    proc = subprocess.run(['mktemp', '-d', 'run-tests-XXXXXX'],
+                          env={'PATH': PATH, 'TMPDIR': TMP, 'LC_ALL': 'C.UTF-8'},
+                          preexec_fn=lambda: os.fchdir(PFD), pass_fds=(PFD,),
+                          stdin=subprocess.DEVNULL, capture_output=True)
+    if proc.returncode != 0:
+        die('mktemp 创建 WORK 失败：%r' % proc.stderr.decode('utf-8', 'replace').strip())
+    lines = proc.stdout.decode('utf-8', 'replace').splitlines()
+    if len(lines) != 1 or not re.fullmatch(r'run-tests-[A-Za-z0-9]{6,}', lines[0]):
+        die('mktemp 返回名不合规：%r' % proc.stdout)
+    NAME = lines[0]
+    WORK = os.path.join(TMP, NAME)
+    RF1 = os.open(NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=PFD)
+    RF2 = os.open(NAME, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=PFD)
+    if ident(RF1) != ident(RF2):
+        die('WORK 同名重开身份不一致')
+    _st = os.fstat(RF1)
+    if _st.st_uid != os.geteuid() or stat.S_IMODE(_st.st_mode) != 0o700:
+        die('WORK 属主或模式异常（uid=%d mode=%o）' % (_st.st_uid, stat.S_IMODE(_st.st_mode)))
+    recheck(TMP, ANC)
+    root_verified = True
+    for _d in ('home', 'tmp'):
+        os.mkdir(_d, 0o700, dir_fd=RF1)
+        _fd = os.open(_d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=RF1)
+        os.close(_fd)
     child_env = build_child_env()
     emit_header()
     for name, grp, cmd, _full in selected:
@@ -501,10 +518,22 @@ except BaseException:
     say('==== 基础设施异常（原文如下；已创建的 WORK 不因异常放宽身份核验）：')
     say(infra)
 finally:
-    if stop_own():
-        cleaned = cleanup()
-    else:
+    if not stop_own():
         say('==== cleanup 停止：无法确认本轮执行已停，保留 %s' % WORK)
+    elif root_verified and RF1 is not None:
+        cleaned = cleanup()
+    elif work_attempted:
+        for _fd in (RF2, RF1):
+            if _fd is not None:
+                try:
+                    os.close(_fd)
+                except OSError:
+                    pass
+        say('==== cleanup 停止：WORK 创建已尝试但身份未核（已知 %s 与父目录 %s），不猜名、不删，残留未验证'
+            % (WORK or 'WORK 名未取得', TMP))
+        cleaned = False
+    else:
+        cleaned = True
 
 unfinished = [r[0] for r in selected if r[0] not in {d[0] for d in done}]
 if infra:

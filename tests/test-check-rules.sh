@@ -1,9 +1,9 @@
 #!/bin/sh
 # 结构守卫 tools/check-rules.py 的反例回归（固定 rc 0/1/2/3 与错误类别），
 # 以及 tests/run-tests.sh 的选路、失败传播、环境隔离与登记一致性回归（真实 runner + 合成用例表）。
-# 成本事实（2026-11-17 本机 iSH/aarch64 实测约 49 s）：超单入口 10 s 设计预算，超过部分是同族直接回归——
-# 真实 runner 与 CI/runner 边界要在合成 Git 仓里实跑 workflow 标界段和收尾契约，无法用更廉价的桩替代；
-# 绝对成本仍低于 1 min，拆文件或削断言不降低绝对成本，故不拆、不削。
+# 成本事实（2026-11-17 本机 iSH/aarch64）：前版已核完整轮 79.42 s 是历史观测，不是本版承诺；超单入口 10 s 设计预算；
+# 同族直接回归须在合成 Git 仓实跑真实 runner、workflow 标界段与收尾契约，本批已接受成本例外；
+# 保留同族文件与现有断言，不以拆文件或削断言规避预算，不承诺低于 1 min。
 # 降级条件：未来减少本入口运行频率或提速，须单独提交等价性证明（退出码与 stdout 断言不变；
 # 改为进程内执行时每个入口至少保留一个真实子进程用例），不得在本文件内以删判据换速度。
 set -u
@@ -251,7 +251,8 @@ for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set
 ''')
 ROWS=('lint|smoke|echo lint:ran|1','eat|g1|cat >/dev/null; echo eat:ran|1','probe|g1|sh tests/probe.sh|1',
       'bad|g2|echo bad:ran; exit 1|0','long|g1|sh tests/long.sh|1','unit|g1|cd tests && python3 -B -m unittest -v unitdemo|1',
-      'unitbad|g2|cd tests && python3 -B -m unittest -v unitbad|0','slow|g3|sh -c "sleep 30"|0')
+      'unitbad|g2|cd tests && python3 -B -m unittest -v unitbad|0','slow|g3|sh -c "sleep 30"|0',
+      'spawn|g4|python3 -B tests/spawn.py|0')
 (FIX/'tests/long.sh').write_text(''.join('echo %s%s\n'%(m,c*200) for m,c in (('LONGHEAD','A'),('LONGMID','M'),('LONGTAIL','T'))))
 (FIX/'tests/unitdemo.py').write_text('''import unittest
 class T(unittest.TestCase):
@@ -262,6 +263,22 @@ class T(unittest.TestCase):
 (FIX/'tests/unitbad.py').write_text('''import unittest
 class T(unittest.TestCase):
     def test_boom(self): self.fail('synthetic-boom')
+''')
+# R2 夹具：leader（shell→python）先退，同组后代忽略 TERM 继续写 heartbeat。
+(FIX/'tests/spawn.py').write_text('''import json, os, signal, time
+pid = os.fork()
+if pid == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.signal(signal.SIGINT, signal.SIG_IGN)
+    os.close(1); os.close(2)
+    with open('child.json', 'w') as f: json.dump({'pid': os.getpid(), 'pgid': os.getpgrp()}, f)
+    while True:
+        with open('heartbeat', 'a') as f: f.write('x')
+        time.sleep(0.05)
+ended = [False]
+signal.signal(signal.SIGTERM, lambda *a: ended.__setitem__(0, True))
+end = time.monotonic() + 5
+while not ended[0] and time.monotonic() < end: time.sleep(0.01)
+os._exit(0)
 ''')
 FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:]
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
@@ -327,6 +344,10 @@ check('负控：改用继承环境后探针报泄漏',code==1 and all(v in out f
 # ── CI workflow 运行段：抽取标界内的真实代码，在合成 Git 仓里跑，不复制选路算法 ──
 WF=(ROOT/'.github/workflows/tests.yml').read_text(encoding='utf-8');MK='          # >>> CI_SELECT\n'
 CI=textwrap.dedent(WF[WF.index(MK)+len(MK):WF.index('          # <<<\n')])
+# 实际跑 workflow 的最外层 env-i 白名单（含 Git 禁配置/replace），不只跑内层 Python。
+RH=textwrap.dedent(WF[WF.index('        run: |\n')+len('        run: |\n'):WF.index(MK)])
+PRE=RH.replace(" <<'PY'\n","\n").rstrip('\n')
+assert PRE.startswith('env -i ') and PRE.endswith('python3 -I -B -'),PRE
 G=dict(os.environ,GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL='/dev/null',GIT_AUTHOR_NAME='f',GIT_AUTHOR_EMAIL='f@e',GIT_COMMITTER_NAME='f',GIT_COMMITTER_EMAIL='f@e')
 R2=TMP/'ci';R2.mkdir()
 def g(*a):
@@ -335,10 +356,12 @@ def g(*a):
     return r.stdout.strip()
 def cm(m):
     g('add','-A');g('commit','-q','-m',m);return g('rev-parse','HEAD')
-def ci(ev,**kw):
-    env=dict(G,PATH=os.environ['PATH'],HOME=str(TMP/'h'),TMPDIR=str(TMP/'t'),EVENT_NAME=ev);env.update(kw)
+def ci(ev,pre=None,**kw):
+    env={'PATH':os.environ['PATH'],'HOME':str(TMP/'h'),'TMPDIR':str(TMP/'t'),'EVENT_NAME':ev}
+    env.update({k:str(v) for k,v in kw.items()})
     (R2/'selected.json').unlink(missing_ok=True)
-    return subprocess.run([sys.executable,'-I','-B','-'],input=CI,cwd=str(R2),env=env,capture_output=True,text=True,timeout=120)
+    return subprocess.run(['sh','-c',PRE if pre is None else pre],input=CI,cwd=str(R2),env=env,
+                          capture_output=True,text=True,timeout=120)
 def plan(r):return [l[9:] for l in r.stdout.splitlines() if l.startswith('selector ')][-1]
 (R2/'tests').mkdir();shutil.copyfile(ROOT/'tests/test_paths.py',R2/'tests/test_paths.py')
 (R2/'tests/run-tests.sh').write_text('cat > selected.json\n')
@@ -353,6 +376,17 @@ g('checkout','-q','-b','feat2',C1);(R2/'tools').mkdir(exist_ok=True);(R2/'tools/
 (R2/'skills/luno-platform/references').mkdir(parents=True,exist_ok=True);(R2/'skills/luno-platform/references/minis.md').write_text('m\n');D2=cm('d2')
 r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
 check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py')),r.stdout[-300:])
+# R3 直接回归：本地 replace ref 不得改变选路（最外层 Git 禁配置生效）；去掉保护须真实反例
+g('replace',C1,D2)
+r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
+check('CI：本地 replace ref 下仍按原始两棵树选路（禁 replace 生效）',
+      r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py')),r.stdout[-300:]+r.stderr[-300:])
+RED_PRE=PRE.replace('GIT_NO_REPLACE_OBJECTS=1 ','')
+assert RED_PRE!=PRE and 'GIT_NO_REPLACE_OBJECTS' not in RED_PRE
+r=ci('push',pre=RED_PRE,BEFORE_SHA=C1,AFTER_SHA=D2)
+check('负控：去掉 GIT_NO_REPLACE_OBJECTS 后同一 replace ref 令 gate 退化为 smoke',
+      r.returncode==0 and 'test-lh-verify.py' not in plan(r) and plan(r)=='[["smoke"]]',plan(r)+r.stderr[-200:])
+g('replace','-d',C1)
 for kw,label in ((dict(BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA='a'*40),'缺对象'),(dict(BEFORE_SHA='0'*40,AFTER_SHA=D2),'全零')):
     r=ci('push' if 'BEFORE_SHA' in kw else 'pull_request',**kw)
     check('CI：%s阻断且不得到成功 smoke'%label,r.returncode==2 and 'smoke' not in r.stdout and not (R2/'selected.json').exists(),r.stderr[-200:])
@@ -363,6 +397,36 @@ check('清理：正常与失败轮均删本轮 WORK 根',not left(),str(left()))
 p=subprocess.Popen(['sh','tests/run-tests.sh','case','slow'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 time.sleep(3);p.terminate();o=p.communicate(timeout=120)[0].decode('utf-8','replace')
 check('清理：TERM 停本轮进程组、删根并以 143 退出',p.returncode==143 and not left() and 'cleanup 完成' in o,'rc=%d %s'%(p.returncode,left()))
+# R2 直接回归：leader 已退、同组后代仍在 → 不得删根、不得报完成（未确证停止 = 保留 + 2）
+for f in ('child.json','heartbeat'):
+    if (FIX/f).exists():(FIX/f).unlink()
+p=subprocess.Popen(['sh','tests/run-tests.sh','case','spawn'],cwd=str(FIX),env=HOSTILE,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+info=None
+for _ in range(300):
+    if (FIX/'child.json').exists():
+        try:info=json.loads((FIX/'child.json').read_text());break
+        except ValueError:pass
+    time.sleep(0.02)
+assert info,'夹具子进程未就绪'
+a=(FIX/'heartbeat').stat().st_size
+p.terminate();o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
+b=(FIX/'heartbeat').stat().st_size
+try:os.kill(info['pid'],0);alive=True
+except ProcessLookupError:alive=False
+check('清理：leader 先退但同组后代仍在时 rc=2、保留根并披露（不冒称已停）',
+      p.returncode==2 and alive and b>a and left() and '本轮进程组' in o and 'cleanup 完成' not in o,
+      'rc=%d alive=%s grew=%s left=%s\n%s'%(p.returncode,alive,b>a,left(),o[-500:]))
+# 由夹具自己的直接父进程回收该精确组，再核精确 PID 消失与精确根路径
+try:os.killpg(info['pgid'],signal.SIGKILL)
+except ProcessLookupError:pass
+gone=False
+for _ in range(100):
+    try:os.kill(info['pid'],0)
+    except ProcessLookupError:gone=True;break
+    time.sleep(0.05)
+check('夹具回收：同组后代按精确 PID 确证消失',gone,'pid=%d'%info['pid'])
+for d in list((FIX/'tmp').iterdir()):
+    shutil.rmtree(d) if not d.is_symlink() else d.unlink()
 S=TMP/'sentinel';S.mkdir();(S/'keep').write_text('x')
 MOD=FIXED.replace('        shutil.rmtree(NAME, dir_fd=PFD)','        os.rename(NAME, NAME+"-moved", src_dir_fd=PFD, dst_dir_fd=PFD)\n        os.symlink(%r, NAME, dir_fd=PFD)\n        shutil.rmtree(NAME, dir_fd=PFD)'%str(S))
 assert MOD!=FIXED
@@ -412,6 +476,15 @@ code,out=rt('case','lint')
 check('runner 创建后基础设施异常：rc=2、保留原文、WORK 安全收尾无残留',
       code==2 and '基础设施异常' in out and 'RuntimeError: synthetic-infra' in out and 'cleanup 完成' in out and not left(),
       'rc=%d %s\n%s'%(code,left(),out[-400:]))
+# R1：创建块（含首个 home mkdir）也在 finally 覆盖内。位置与上面的循环 t0 用例不同，不是改名。
+assert FIXED.count('        os.mkdir(_d, 0o700, dir_fd=RF1)')==1
+(FIX/'tests/run-tests.sh').write_text(FIXED.replace(
+    '        os.mkdir(_d, 0o700, dir_fd=RF1)','        raise OSError(28, "synthetic-ENOSPC-init")',1),encoding='utf-8')
+code,out=rt('case','lint')
+(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
+check('runner 创建期首个 home mkdir 抛 OSError：rc=2、原文保留、按已核身份删精确根',
+      code==2 and 'OSError: [Errno 28] synthetic-ENOSPC-init' in out and 'cleanup 完成' in out and not left(),
+      'rc=%d left=%s\n%s'%(code,left(),out[-400:]))
 # trackedState：先判退出码。git status 非 0 且 stdout 为空时必须 unknown，不能打印 clean
 assert FIXED.count("    _st = git('status', '--porcelain', '--untracked-files=normal')")==1
 (FIX/'tests/run-tests.sh').write_text(FIXED.replace(
