@@ -79,6 +79,11 @@ class BodyContract(unittest.TestCase):
         """不可哈希键（序列/映射键）归 UNSUPPORTED_YAML，不逸出未捕获的 TypeError。"""
         self.assertEqual(self.code(BC.fm_fields, b"---\n? [a]\n: b\n---\n"), "UNSUPPORTED_YAML")
         self.assertEqual(self.code(BC.fm_fields, b"---\n? {a: b}\n: c\n---\n"), "UNSUPPORTED_YAML")
+        # 定向判据：特殊标量标签作键（构造出 list/dict/set 等不可哈希值）仍归 UNSUPPORTED_YAML。
+        for tag in ("seq", "map", "set", "omap", "pairs"):
+            with self.subTest(tag=tag):
+                raw = ("---\n? !!%s foo\n: bar\n---\n" % tag).encode()
+                self.assertEqual(self.code(BC.fm_fields, raw), "UNSUPPORTED_YAML")
 
     def test_block_scalar_chomping_follows_pyyaml(self):
         """`|`/`|+`/`|-` 的 chomping 与折叠空行都交给 PyYAML，不自制拼装。"""

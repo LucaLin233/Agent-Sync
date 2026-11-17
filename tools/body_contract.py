@@ -145,14 +145,13 @@ class _UniqueKeyLoader(yaml.SafeLoader):
                     if key_node.tag == _VALUE_TAG:    # flatten_mapping 的口径：value 标签按字符串键处理
                         key_node = yaml.ScalarNode(_STR_TAG, raw)
                     try:
-                        key = keys.construct_object(key_node)
+                        key = keys.construct_object(key_node, deep=True)   # deep：特殊标量标签键按完整构造归类
                     except yaml.YAMLError as exc:
                         detail = " ".join(str(exc).split())[:120]
                         raise ContractError("UNSUPPORTED_YAML", "frontmatter 键无法取值：%s" % detail) from None
                     if key in seen:
                         raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % raw)
                     seen.add(key)
-                    stack.append(value_node)
             elif isinstance(node, yaml.SequenceNode):
                 stack.extend(node.value)
 

@@ -341,8 +341,8 @@ for _ in range(200):
 check('夹具回收：同组后代按精确 PID 确证消失（直接父进程 wait）',not alive(info['pid']),'pid=%d'%info['pid'])
 # >>> R2T-GATE 删任何根之前逐例核验每一例自己的精确 PID/组已停；未核一律非零并保留本轮 TMP
 # 不再把「精确 PID 已回收＋组仍有成员」推定为僵尸放行：组是否已无成员核不出来就是「未知」，一律保留。
-if not GATE:
-    raise SystemExit('夹具停止未确证（无登记用例），保留本轮TMP：%s' % TMP)
+if len(GATE) != 3:  # 三例均须登记；缺 WORK/info 的 drop 不会追加 GATE
+    raise SystemExit('夹具停止未确证（登记不完整 %d/3），保留本轮TMP：%s' % (len(GATE),TMP))
 _GATE_BAD=[]
 for _case,_pid,_pgid,_work in GATE:
     if alive(_pid):
