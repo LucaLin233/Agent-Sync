@@ -870,7 +870,7 @@ class PackerTest(unittest.TestCase):
             self.assertEqual(0o644, modes['references/one.md'])
             self.assertEqual(0o755, modes['references/two.md'])
 
-    def test_cli_output_metadata_and_atomic_replace(self):
+    def test_cli_output_metadata_and_exclusive_link_publish(self):
         with tempfile.TemporaryDirectory(prefix='surge-cli-') as tmp:
             skill, script, _module = self.isolated(tmp)
             out = Path(tmp) / 'release.zip'

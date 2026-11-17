@@ -12,7 +12,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 python3 -B - "$ROOT" <<'PYEOF'
-import importlib.util, json, os, re, shutil, subprocess, sys, tempfile, textwrap, time
+import importlib.util, json, os, re, shutil, signal, subprocess, sys, tempfile, textwrap, time
 from pathlib import Path
 ROOT=Path(sys.argv[1])
 PASS=FAIL=0
@@ -135,7 +135,7 @@ def expand(doc):
 for pth in ('tests/run-tests.sh','tests/test_paths.py','.github/workflows/tests.yml'):
     check('select：%s 展开全 %d 入口各一次'%(pth,len(names)),expand(P.select([pth]))==names,str(P.select([pth])))
 check('select：普通未映射正文只 smoke',P.select(['README.md'])==[['smoke']])
-check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) and P.select([p])!=P.select(['README.md']) for p,x in (('skills/luno-core/references/sync.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-redact.py']),('skills/luno-surge/SKILL.md',['case','test-surge-package.py']))))
+check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) for p,x in (('skills/luno-core/references/sync.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-redact.py']),('skills/luno-surge/SKILL.md',['case','test-surge-package.py']))))
 check('select：collect 双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/lh-collect.py']))),str(P.select(['tools/lh-collect.py'])))
 try:P.select(['tests/nope.py']);ok=False
 except ValueError:ok=True
@@ -218,9 +218,40 @@ def work_of(out):
     """从本轮输出取本轮独占 WORK 的确切路径（不靠列举共享目录证明本轮保留）。"""
     m=re.search(r'==== WORK (\S+?)（',out)
     return m.group(1) if m else None
-def drop(m):
-    """只删本轮输出绑定的 WORK 路径；路径不明就不动。"""
-    if m and os.path.exists(m):shutil.rmtree(m,ignore_errors=True)
+GATE=[]                                 # 每例各自的登记 (case,pid,pgid,work)：轮末逐例复核，不复用最后一个 info
+def grp_gone(pgid):
+    """只用 signal 0 观察登记组：ProcessLookupError 才算已无成员，其他 OSError 一律“未确证”。"""
+    try:os.killpg(pgid,0);return False
+    except ProcessLookupError:return True
+    except OSError:return False
+def stopped(pid,pgid,limit=8.0):
+    """限时确证停止：精确 PID 已不在且登记组已无成员。只观察登记值，不扫进程表、不做僵尸推定。"""
+    end=time.monotonic()+limit
+    while True:
+        if not alive(pid) and grp_gone(pgid):return True
+        if time.monotonic()>=end:return False
+        time.sleep(0.05)
+def drop(case,m,info):
+    """先按本夹具自己的登记确证停止，再删本轮输出绑定的 WORK；任一项未证就保留、报告残留并判失败。"""
+    if info is None or m is None:
+        check('清理（%s）：无登记信息或无 WORK 路径，保留不删'%case,False,'info=%s work=%s'%(info,m));return
+    pid,pgid=info['pid'],info['pgid']
+    GATE.append((case,pid,pgid,m))
+    if not stopped(pid,pgid):
+        check('清理（%s）：停止未确证，保留 WORK 与 TMP 不删'%case,False,
+              '残留 %s（PID %d / PGID %d 未确证消失）'%(m,pid,pgid));return
+    p=Path(m)
+    if p.is_symlink() or p.parent!=FIX/'tmp' or not p.name.startswith('run-tests-'):
+        check('清理（%s）：WORK 不是本夹具 tmp 的直接子目录或是软链，保留不删'%case,False,
+              'work=%s parent=%s symlink=%s'%(m,p.parent,p.is_symlink()));return
+    if not p.exists():
+        check('清理（%s）：runner 已确证收尾，本夹具无 WORK 需删'%case,True);return
+    try:shutil.rmtree(p)
+    except OSError as exc:
+        check('清理（%s）：删除失败'%case,False,'%s: %s'%(m,exc));return
+    if p.exists() or p.is_symlink():
+        check('清理（%s）：删除后仍存在'%case,False,m);return
+    check('清理（%s）：确证停止后删除本轮 WORK'%case,True)
 # R2 原场景（恢复）：leader 已退、同组后代仍在（spawn 后代忽略 TERM），外部 TERM 停本轮进程组。
 # 契约为两条路线：确证停 → 143 + cleanup 完成 + 删本轮根 + 后代已停；无法确证 → 2 + 保留本轮根 + 披露。
 for f in ('child.json','heartbeat'):
@@ -246,7 +277,7 @@ live=alive(info['pid'])
 w=work_of(o)
 stop_ok=(p.returncode==143 and 'cleanup 完成' in o and w is not None and not os.path.exists(w) and not live)
 fail_closed=(p.returncode==2 and '本轮进程组' in o and w is not None and os.path.exists(w))
-drop(w)
+drop('R2 原场景',w,info)
 check('清理（R2 原场景）：外部 TERM 停本轮进程组（leader 已退、后代持流）→143+清本轮根；无法确证→2+保留/披露',
       stop_ok or fail_closed,
       'rc=%d live=%s grew=%s work=%s\n%s'%(p.returncode,live,grew,w,o[-500:]))
@@ -266,7 +297,7 @@ o=p.communicate(timeout=180)[0].decode('utf-8','replace');time.sleep(0.2)
 live=alive(info['pid']);w=work_of(o)
 self_ok=(p.returncode==0 and 'cleanup 完成' in o and w is not None and not os.path.exists(w) and not live)
 early_closed=(p.returncode==2 and '本轮进程组' in o and w is not None and os.path.exists(w))
-drop(w)
+drop('R2 自然退出',w,info)
 check('清理（自然退出）：leader 先退但同组后代仍在时按契约收尾（自身确证停→rc=0+清本轮根；否则2+保留/披露）',
       self_ok or early_closed,
       'rc=%d live=%s work=%s\n%s'%(p.returncode,live,w,o[-500:]))
@@ -285,16 +316,22 @@ held_info=None
 if (FIX/'held.json').exists():
     try:held_info=json.loads((FIX/'held.json').read_text())
     except ValueError:held_info=None
-if held_timeout and held_info is not None:      # 超时只停本夹具登记的进程组
-    try:os.killpg(held_info['pgid'],signal.SIGKILL)
-    except OSError:pass
+if held_timeout:
+    # 超时：先向登记组发 TERM，让负责 wait 的夹具父进程执行它既有的 kill+wait 回收自己的后代；
+    # 再限时核验登记的 PID/PGID。不先 KILL 负责 wait 的父进程，也不推定回收已完成；核不出就按 R2-01 保留并失败。
+    if held_info is not None:
+        try:os.killpg(held_info['pgid'],signal.SIGTERM)
+        except OSError:pass
+    held_stopped=held_info is not None and stopped(held_info['pid'],held_info['pgid'])
+else:
+    held_stopped=True
 work=work_of(out)
 held_ok=(code==0 and 'HELD-LIVE' in out and 'cleanup 完成' in out and work is not None and not os.path.exists(work))
 held_closed=(code==2 and 'HELD-LIVE' in out and '本轮进程组' in out and work is not None and os.path.exists(work))
-drop(work)
+drop('C01 持流后代',work,held_info)
 check('runner：入口已退但后代持 stdout（后代 60s、判期 40s）不空转挂死（确证停→rc=0 删本轮根；无法确证→rc=2 保留并披露）',
-      not held_timeout and (held_ok or held_closed),
-      'timeout=%s rc=%r work=%s held=%s\n%s'%(held_timeout,code,work,held_info,out[-400:]))
+      held_ok or held_closed,
+      'timeout=%s grounded=%s rc=%r work=%s held=%s\n%s'%(held_timeout,held_stopped if held_timeout else None,code,work,held_info,out[-400:]))
 check('C01 夹具登记：精确 PID/PGID 已记录，且该后代已不在',
       held_info is not None and not alive(held_info['pid']),'held=%s'%(held_info,))
 # 精确 PID 消失由夹具的直接父进程 kill+wait 兑现：只等这一条精确 PID，不扫进程表
@@ -302,21 +339,20 @@ for _ in range(200):
     if not alive(info['pid']):break
     time.sleep(0.05)
 check('夹具回收：同组后代按精确 PID 确证消失（直接父进程 wait）',not alive(info['pid']),'pid=%d'%info['pid'])
-# >>> R2T-GATE 删任何根之前先核本夹具自己的精确组已停；未核一律非零并保留本轮 TMP
-if alive(info['pid']):
-    raise SystemExit('夹具后代未停止，保留本轮TMP：%s' % TMP)
-try:
-    os.killpg(info['pgid'], 0)
-except ProcessLookupError:
-    pass
-except OSError:
-    raise SystemExit('夹具组停止未核，保留本轮TMP：%s' % TMP)
-else:
-    # 组仍在只允许「精确 PID 已 wait 回收」＋「runner 已 fail-closed 披露并保留 WORK」这一种组合：
-    # 不回收孤儿僵尸的平台（iSH 的 PID 1 不 reap）会留下僵尸成员，此时 signal 0 仍成功，
-    # 但组内已无运行中的夹具进程；runner 报 rc=0 而组仍在则视为冒充完成。
-    if p.returncode == 0:
-        raise SystemExit('夹具组仍在而 runner 报完成，保留本轮TMP：%s' % TMP)
+# >>> R2T-GATE 删任何根之前逐例核验每一例自己的精确 PID/组已停；未核一律非零并保留本轮 TMP
+# 不再把「精确 PID 已回收＋组仍有成员」推定为僵尸放行：组是否已无成员核不出来就是「未知」，一律保留。
+if not GATE:
+    raise SystemExit('夹具停止未确证（无登记用例），保留本轮TMP：%s' % TMP)
+_GATE_BAD=[]
+for _case,_pid,_pgid,_work in GATE:
+    if alive(_pid):
+        _GATE_BAD.append('%s：PID %d 仍在' % (_case,_pid))
+    elif not grp_gone(_pgid):
+        _GATE_BAD.append('%s：组 %d 仍有成员（停止未知，不做僵尸推定）' % (_case,_pgid))
+    elif os.path.lexists(_work):
+        _GATE_BAD.append('%s：WORK 仍残留 %s' % (_case,_work))
+if _GATE_BAD:
+    raise SystemExit('夹具停止未确证（%s），保留本轮TMP：%s' % ('；'.join(_GATE_BAD),TMP))
 # <<< R2T-GATE
 # 生命周期：已确证消失的本轮组不得保留到轮末（否则轮末会拿历史 PID 盲发信号）
 ACTIVE_MUT=FIXED.replace('finally:\n    if not stop_own():',"finally:\n    say('ACTIVE-RESID=%d' % len(ACTIVE))\n    if not stop_own():",1)

@@ -121,9 +121,10 @@ def build(entries):
 
 
 def publish(blob,output):
-    """排他发布：OUTPUT.parent 下独占临时目录写入并回读，再 os.replace 到 OUTPUT。
+    """排他发布：OUTPUT.parent 下独占临时目录写入并回读，再用排他 link 发布到 OUTPUT（目标已存在即失败）。
 
-    OUTPUT 已存在即拒绝（默认不覆盖）；临时目录随发布结束删除，失败不留 `.tmp` 固定名残件。
+    OUTPUT 已存在即拒绝（默认不覆盖，不存在“检查后覆盖”的窗口）；临时目录随发布结束删除，
+    失败不留 `.tmp` 固定名残件。
     """
     output=Path(output)
     output.parent.mkdir(parents=True,exist_ok=True)

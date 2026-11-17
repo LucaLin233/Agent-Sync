@@ -54,7 +54,7 @@ class BodyContract(unittest.TestCase):
         self.assertEqual(BC.body_bytes(raw), b"body")
 
     def test_merge_keys_follow_safeloader_semantics(self):
-        """`<<` 按 SafeLoader 处理：合法 merge 不误判，显式 override 合法，merge 源内重复键仍拒绝。"""
+        """`<<` 按 SafeLoader 处理：查重在 merge 展开前按原始节点图进行，不误判也不漏判。"""
         raw = (b"---\nbase: &b\n  a: 1\n  b: two\n"
                b"skill:\n  <<: *b\n  a: 2\n---\nbody")
         f = BC.fm_fields(raw)
@@ -62,8 +62,17 @@ class BodyContract(unittest.TestCase):
         self.assertEqual(f["base"], {"a": 1, "b": "two"})
         multi = b"---\nx: &a\n  p: 1\ny: &c\n  q: 2\nm:\n  <<: [*a, *c]\n---\n"
         self.assertEqual(BC.fm_fields(multi)["m"], {"p": 1, "q": 2})
-        # merge 源映射内部重复键：构造该映射时同样判重
-        self.assertEqual(self.code(BC.fm_fields, b"---\nx: &b\n  a: 1\n  a: 2\n---\n"),
+        # 定向判据①：内联 merge 源（不经别名）内的重复键同样拒绝。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nmerged: {<<: {x: 1, x: 2}, z: w}\n---\n"),
+                         "DUPLICATE_KEY")
+        # 定向判据②：merge 源经别名再次构造不得误报（SafeLoader 两处都是 {'x': 2}）。
+        alias = b"---\nfirst: {<<: &b {<<: {x: 1}, x: 2}}\nbase: *b\n---\nbody"
+        got = BC.fm_fields(alias)
+        self.assertEqual((got["first"], got["base"]), ({"x": 2}, {"x": 2}))
+        # 定向判据③：标量键按 SafeLoader 等值判定，1 与 01 是同一个键。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nm: {1: a, 01: b}\n---\n"), "DUPLICATE_KEY")
+        # 定向判据④：真实被 << 引用的 merge 源内重复键。
+        self.assertEqual(self.code(BC.fm_fields, b"---\nbase: &b\n  a: 1\n  a: 2\nuse:\n  <<: *b\n---\n"),
                          "DUPLICATE_KEY")
 
     def test_unhashable_key_is_a_contract_error(self):

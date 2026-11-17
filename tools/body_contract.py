@@ -7,7 +7,8 @@
     找不到结束行即视为无 frontmatter。两处终止符可不同族。
   · 整个文件严格 UTF-8、禁止 BOM；CRLF 不归一、尾换行不规范化。
   · frontmatter 字段交给 PyYAML 的 `yaml.safe_load` 取值（折叠、缩进、引号、嵌套、流式集合与锚点均按 YAML 语义）；
-    同一层级重复键拒绝；区分缺字段（MISSING）/null（None）/空串。解析失败或根不是映射按 UNSUPPORTED_YAML 拒绝。
+    同一映射内重复键拒绝，查重在 merge(`<<`) 展开前按原始节点图进行（内联/序列 merge 源与别名同样在范围内）；
+    区分缺字段（MISSING）/null（None）/空串。解析失败或根不是映射按 UNSUPPORTED_YAML 拒绝。
 
 依赖 PyYAML（系统包 py3-yaml，与 skills/luno-core/scripts/quick_validate.py 相同）：缺失或损坏即报错退出，
 不静默回退到自制解析器；正文提取只做字节切片，不走 YAML。
@@ -100,33 +101,60 @@ def body_bytes(raw):
 
 
 _MERGE_TAG = "tag:yaml.org,2002:merge"
+_VALUE_TAG = "tag:yaml.org,2002:value"
+_STR_TAG = "tag:yaml.org,2002:str"
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
-    """与 safe_load 相同，但同一映射内的重复键按 DUPLICATE_KEY 拒绝（不取后值）。"""
+    """与 safe_load 相同，但同一映射内的重复键按 DUPLICATE_KEY 拒绝（不取后值）。
 
-    def construct_mapping(self, node, deep=False):
+    查重发生在 `get_single_node()` 之后、`construct_document()` 之前：此时 merge(`<<`) 尚未展开、
+    别名仍指向同一个节点对象，所以按节点身份遍历原始节点图即可覆盖内联 merge 源、序列 merge 源和
+    别名的全部映射，且每个映射只检查一次；展开后的映射不再复查（否则会把被 merge 的原始键误判成重复）。
+    """
+
+    def get_single_node(self):
+        node = super().get_single_node()
         self._reject_duplicates(node)
-        return super().construct_mapping(node, deep=deep)
+        return node
 
-    @staticmethod
-    def _reject_duplicates(node):
-        """只用原始 key 节点判重：先于 merge(`<<`)/value 标签展开与键的哈希化。
+    def _reject_duplicates(self, root):
+        """遍历原始节点图：每个 MappingNode 判重一次，标量键按 SafeLoader 的等值判定比较。
 
         `<<` 是 SafeLoader 的特殊键（可多次出现，由 flatten_mapping 处理），不参与判重；
-        其余键按 (tag, value) 比较，非标量键无法判重且 SafeLoader 会因不可哈希报错，这里直接归入
-        UNSUPPORTED_YAML。merge 源映射本身也是映射节点，构造时同样经过本检查。
+        `=`（value 标签）在 SafeLoader 里先被改写成字符串键再构造，这里用同口径求键值。
+        非标量键无法判重且 SafeLoader 会因不可哈希报错，这里直接归入 UNSUPPORTED_YAML。
         """
-        seen = set()
-        for key_node, _value_node in node.value:
-            if getattr(key_node, "tag", None) == _MERGE_TAG:
+        keys = yaml.constructor.SafeConstructor()      # 只为按 SafeLoader 语义求键值，不改本 loader 状态
+        seen_nodes = set()
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node is None or id(node) in seen_nodes:
                 continue
-            if not isinstance(key_node, yaml.ScalarNode):
-                raise ContractError("UNSUPPORTED_YAML", "frontmatter 键不是标量，无法判定重复")
-            key = (key_node.tag, key_node.value)
-            if key in seen:
-                raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % key_node.value)
-            seen.add(key)
+            seen_nodes.add(id(node))
+            if isinstance(node, yaml.MappingNode):
+                seen = set()
+                for key_node, value_node in node.value:
+                    if not isinstance(key_node, yaml.ScalarNode):
+                        raise ContractError("UNSUPPORTED_YAML", "frontmatter 键不是标量，无法判定重复")
+                    raw = key_node.value
+                    stack.append(value_node)     # merge 源（映射或映射序列）与普通值都要按原图判重
+                    if key_node.tag == _MERGE_TAG:
+                        continue
+                    if key_node.tag == _VALUE_TAG:    # flatten_mapping 的口径：value 标签按字符串键处理
+                        key_node = yaml.ScalarNode(_STR_TAG, raw)
+                    try:
+                        key = keys.construct_object(key_node)
+                    except yaml.YAMLError as exc:
+                        detail = " ".join(str(exc).split())[:120]
+                        raise ContractError("UNSUPPORTED_YAML", "frontmatter 键无法取值：%s" % detail) from None
+                    if key in seen:
+                        raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % raw)
+                    seen.add(key)
+                    stack.append(value_node)
+            elif isinstance(node, yaml.SequenceNode):
+                stack.extend(node.value)
 
 
 def _fm_inner(raw):
