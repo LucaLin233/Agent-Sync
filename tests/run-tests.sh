@@ -315,6 +315,34 @@ def halt(p):
 ACTIVE = []
 
 
+def group_gone(pgid):
+    """只用 signal 0 判断已登记组是否消失；无法确证返回 False。"""
+    try:
+        os.killpg(pgid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+
+
+def confirm_stopped(pgid, sig):
+    """按登记组兑现停止：先 sig，再 KILL，各等 5 秒，最终以 signal 0 确证消失。"""
+    if group_gone(pgid):
+        return True
+    for _s in (sig, signal.SIGKILL):
+        try:
+            os.killpg(pgid, _s)
+        except OSError:
+            pass
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            if group_gone(pgid):
+                return True
+            time.sleep(0.05)
+    return group_gone(pgid)
+
+
 def stop_own():
     """只终止本轮 Popen（start_new_session 的进程组）：INT/TERM，5 秒未退则 KILL 并 wait。
 
@@ -342,21 +370,12 @@ def stop_own():
             p.wait(timeout=5)
         except subprocess.TimeoutExpired:
             ok = False
-    # leader 退出不等于本轮进程组停止：只用 signal 0 核本次 start_new_session 的组，
-    # 未确证消失就不放行清理（不扫描、不按名扫杀、不宣称为已回收）。
-    # 仅在本轮确有需要停止的进程（收到 INT/TERM）时执行：自行退出的入口其组从未被本 runner 信号，
-    # 残留后代不属本次停止义务，避免把正常轮误判为未停止。
-    if not STOP:
-        return ok
+    # leader 退出不等于本轮进程组停止：对本次 start_new_session 的组按既有 5 秒→KILL 契约
+    # 兑现停止，再只用 signal 0 确证消失；未确证消失就保留 WORK（不扫描、不按名扫杀、不宣称为已回收）。
     for p in ACTIVE:
-        try:
-            os.killpg(p.pid, 0)
-        except ProcessLookupError:
-            continue
-        except OSError:
-            pass
-        say('==== cleanup 停止：本轮进程组 %d 仍在或无法确证停止，保留 %s' % (p.pid, WORK))
-        ok = False
+        if not confirm_stopped(p.pid, STOP[0] if STOP else signal.SIGTERM):
+            say('==== cleanup 停止：本轮进程组 %d 仍在或无法确证停止，保留 %s' % (p.pid, WORK))
+            ok = False
     return ok
 
 
