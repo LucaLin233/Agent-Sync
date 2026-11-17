@@ -19,7 +19,7 @@
 - 新增、修改、删除或恢复规则对象和规则仓库，工作副本、克隆、并发和发布窗口，部署、归档、巡检、同步脚本和门禁：`references/sync.md`〔分支 sync-workflow〕。第一次改共享真源或仓库之前就要读，不能等到提交或部署时再补。
 - 改写规则、提示词或 `description` 的正文：另读 `references/agent-document-writing.md`〔分支 agent-document-writing〕；只查状态或不涉及正文改写的执行不读。
 - 新建或适配技能，目录、frontmatter 和校验器：另读 `references/agent-document-writing.md`〔分支 skill-authoring〕。
-- 新增、修改或退休测试用例和分层登记，裁定准入和成本预算：另读 `references/test-authoring.md`；只执行既有测试或查状态不读。
+- 新增、修改或退休测试用例和分层登记，裁定准入和成本预算，或选择测试的执行或验收环境：另读 `references/test-authoring.md`；只执行环境和跑集均已选定的既有测试或只查状态不读。
 
 ## 真源与落点
 
