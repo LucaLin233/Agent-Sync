@@ -441,6 +441,18 @@ for _ in range(200):
     if not alive(info['pid']):break
     time.sleep(0.05)
 check('夹具回收：同组后代按精确 PID 确证消失（直接父进程 wait）',not alive(info['pid']),'pid=%d'%info['pid'])
+# >>> R2T-GATE 删任何根之前先核本夹具自己的精确组已停；未核一律非零并保留本轮 TMP
+if alive(info['pid']):
+    raise SystemExit('夹具后代未停止，保留本轮TMP：%s' % TMP)
+try:
+    os.killpg(info['pgid'], 0)
+except ProcessLookupError:
+    pass
+except OSError:
+    raise SystemExit('夹具组停止未核，保留本轮TMP：%s' % TMP)
+else:
+    raise SystemExit('夹具组仍在，保留本轮TMP：%s' % TMP)
+# <<< R2T-GATE
 # 生命周期：已确证消失的本轮组不得保留到轮末（否则轮末会拿历史 PID 盲发信号）
 ACTIVE_MUT=FIXED.replace('finally:\n    if not stop_own():',"finally:\n    say('ACTIVE-RESID=%d' % len(ACTIVE))\n    if not stop_own():",1)
 assert ACTIVE_MUT!=FIXED
