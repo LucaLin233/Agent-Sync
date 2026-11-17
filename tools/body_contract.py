@@ -6,11 +6,17 @@
   · 起始：前 3 字节为 `---` 且其后是 `\n` 或 `\r\n`。结束：内容恰为 `---` 且带行终止符的行（EOF 上无终止符的行不算）；
     找不到结束行即视为无 frontmatter。两处终止符可不同族。
   · 整个文件严格 UTF-8、禁止 BOM；CRLF 不归一、尾换行不规范化。
-  · frontmatter 字段按 YAML 取值、重复键拒绝，区分缺字段（MISSING）/null（None）/空串。
+  · frontmatter 字段交给 PyYAML 的 `yaml.safe_load` 取值（折叠、缩进、引号、嵌套、流式集合与锚点均按 YAML 语义）；
+    同一层级重复键拒绝；区分缺字段（MISSING）/null（None）/空串。解析失败或根不是映射按 UNSUPPORTED_YAML 拒绝。
 
-本机无 PyYAML 且不得装包，故用受控最小解析器：只支持顶层 `key: 标量`（裸/单引号/双引号/`|`/`>` 块标量，含
-chomping 与缩进指示符）与一层嵌套映射（如 `metadata:`）；流式集合、锚点、标签、序列等一律 ContractError。
+依赖 PyYAML（系统包 py3-yaml，与 skills/luno-core/scripts/quick_validate.py 相同）：缺失或损坏即报错退出，
+不静默回退到自制解析器；正文提取只做字节切片，不走 YAML。
 """
+try:
+    import yaml
+except ImportError:                                   # 依赖缺失即停，不回退
+    raise SystemExit("body_contract：缺少 PyYAML（系统包 py3-yaml），缺依赖即停，不静默回退")
+
 
 BOM = b"\xef\xbb\xbf"
 LF = b"\n"
@@ -93,213 +99,59 @@ def body_bytes(raw):
     return raw if span is None else raw[span[1]:]
 
 
-_KEY_END = (":", " ")
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """与 safe_load 相同，但同一映射内的重复键按 DUPLICATE_KEY 拒绝（不取后值）。"""
+
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % key)
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 
-def _strip_comment(s):
-    """去掉裸标量后的注释（` #` 起始），引号内的 `#` 不在此处理。"""
-    out, quote = [], None
-    i = 0
-    while i < len(s):
-        ch = s[i]
-        if quote:
-            out.append(ch)
-            if quote == "'" and ch == "'" and s[i + 1:i + 2] == "'":
-                out.append("'")
-                i += 2
-                continue
-            if quote == '"' and ch == "\\":
-                out.append(s[i + 1:i + 2])
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-            i += 1
-            continue
-        if ch in "'\"":
-            quote = ch
-            out.append(ch)
-            i += 1
-            continue
-        if ch == "#" and (not out or out[-1] in " \t"):
-            break
-        out.append(ch)
-        i += 1
-    return "".join(out)
+def _fm_inner(raw):
+    """frontmatter 内层 bytes（不含起止行）；与 frontmatter_span 同口径，找不到结束行返回 None。"""
+    start = 3 + (2 if raw[3:5] == CRLF else 1)
+    i = start
+    while i <= len(raw):
+        ce, tl = _line_at(raw, i)
+        if tl == 0:
+            return None
+        if raw[i:ce] == b"---":
+            return raw[start:i]
+        i = ce + tl
+    return None
 
 
-def _scalar(s):
-    """裸标量 / 引号标量 → None | str。超出范围（流式集合、锚点、标签）→ ContractError。"""
-    s = _strip_comment(s).strip()
-    if s == "" or s in ("~", "null", "Null", "NULL"):
-        return None
-    if s[0] == "[" or s[0] == "{":
-        raise ContractError("UNSUPPORTED_YAML", "流式集合不在受控解析器范围内")
-    if s[0] in "&*!%@`":
-        raise ContractError("UNSUPPORTED_YAML", "锚点/别名/标签/保留指示符不在受控范围内")
-    if s[0] == "'":
-        if len(s) < 2 or not s.endswith("'"):
-            raise ContractError("UNSUPPORTED_YAML", "单引号标量未闭合")
-        return s[1:-1].replace("''", "'")
-    if s[0] == '"':
-        if len(s) < 2 or not s.endswith('"'):
-            raise ContractError("UNSUPPORTED_YAML", "双引号标量未闭合")
-        body, i = [], 1
-        esc = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", '"': '"', "\\": "\\", "/": "/",
-               "b": "\b", "f": "\f", " ": " ", "'": "'", "e": "\x1b"}
-        while i < len(s) - 1:
-            ch = s[i]
-            if ch != "\\":
-                body.append(ch)
-                i += 1
-                continue
-            nxt = s[i + 1:i + 2]
-            if nxt in esc:
-                body.append(esc[nxt])
-                i += 2
-            elif nxt in ("u", "U", "x"):
-                width = {"x": 2, "u": 4, "U": 8}[nxt]
-                hexs = s[i + 2:i + 2 + width]
-                if len(hexs) != width or any(c not in "0123456789abcdefABCDEF" for c in hexs):
-                    raise ContractError("UNSUPPORTED_YAML", "转义序列不合法")
-                try:
-                    body.append(chr(int(hexs, 16)))
-                except ValueError:
-                    raise ContractError("UNSUPPORTED_YAML", "码点超出范围")
-                i += 2 + width
-            else:
-                raise ContractError("UNSUPPORTED_YAML", "不支持的双引号转义 \\%s" % nxt)
-        return "".join(body)
-    return s
-
-
-def _block_scalar(lines, start, indicator, indent_of_key):
-    """读块标量。lines[start:] 为块内容行；返回 (值, 下一行索引)。
-
-    支持 `|` `|-` `|+` `>` `>-` `>+`（含显式缩进指示符数字）。受控范围外 → ContractError。
-    """
-    chomp = ""
-    explicit = ""
-    for c in indicator[1:]:
-        if c in "-+":
-            chomp = c
-        elif c.isdigit():
-            explicit = c
-        else:
-            raise ContractError("UNSUPPORTED_YAML", "块标量指示符不合法：%s" % indicator)
-    keep = chomp == "+"
-    strip = chomp == "-"
-    raw_lines, i = [], start
-    content_indent = None
-    while i < len(lines):
-        line = lines[i]
-        if line.strip() == "":
-            raw_lines.append("")
-            i += 1
-            continue
-        ind = len(line) - len(line.lstrip(" "))
-        if ind <= indent_of_key:
-            break
-        if content_indent is None:
-            content_indent = ind if not explicit else indent_of_key + int(explicit)
-        raw_lines.append(line[content_indent:] if len(line) >= content_indent else line.lstrip(" "))
-        i += 1
-    if content_indent is None:
-        content_indent = indent_of_key + (int(explicit) if explicit else 1)
-    # 去掉块末尾的纯空行（它们由 chomping 决定是否保留）
-    tail_empty = 0
-    while raw_lines and raw_lines[-1] == "":
-        raw_lines.pop()
-        tail_empty += 1
-    if indicator[0] == "|":
-        text = "".join(l + "\n" for l in raw_lines)
-    else:  # 折叠 `>`
-        folded = []
-        for idx, l in enumerate(raw_lines):
-            if l == "":
-                folded.append("\n")
-            else:
-                folded.append(l + (" " if idx + 1 < len(raw_lines) and raw_lines[idx + 1] != "" else "\n"))
-        text = "".join(folded)
-    if keep:
-        text += "\n" * tail_empty
-    elif strip:
-        text = text.rstrip("\n")
-    return text, i
-
-
-def _nested_mapping(lines, start, parent_indent):
-    """读一层嵌套映射。返回 (dict, 下一行索引)。
-
-    只支持一层：子键必须同缩进；子层内再出现嵌套、序列、块标量一律 fail-closed。
-    """
-    data, i, child_indent = {}, start, None
-    while i < len(lines):
-        line = lines[i]
-        if line.strip() == "":
-            i += 1
-            continue
-        ind = len(line) - len(line.lstrip(" "))
-        if ind <= parent_indent:
-            break
-        if child_indent is None:
-            child_indent = ind
-        elif ind != child_indent:
-            raise ContractError("UNSUPPORTED_YAML", "超过一层的嵌套不在受控范围内")
-        body = line.strip()
-        if body.startswith("- "):
-            raise ContractError("UNSUPPORTED_YAML", "序列不在受控范围内")
-        key, sep, rest = body.partition(":")
-        if not sep or not key or " " in key:
-            raise ContractError("UNSUPPORTED_YAML", "无法识别的子行：%s" % body[:32])
-        if key in data:
-            raise ContractError("DUPLICATE_KEY", "嵌套重复键：%s" % key)
-        if rest.lstrip()[:1] in ("|", ">"):
-            raise ContractError("UNSUPPORTED_YAML", "嵌套层内块标量不在受控范围内")
-        data[key] = _scalar(rest)
-        i += 1
-    return data, i
+def _load(text):
+    """safe_load 的唯一入口：解析错误与非映射根都归入 UNSUPPORTED_YAML。"""
+    try:
+        data = yaml.load(text, Loader=_UniqueKeyLoader)
+    except ContractError:
+        raise
+    except yaml.YAMLError as exc:
+        detail = " ".join(str(exc).split())[:120]
+        raise ContractError("UNSUPPORTED_YAML", "frontmatter 不是可解析的 YAML：%s" % detail)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ContractError("UNSUPPORTED_YAML", "frontmatter 根不是映射")
+    return data
 
 
 def parse_fm_mapping(raw):
-    """解析 frontmatter（bytes，可含起止行）为 dict；按行解析，`\\r\\n` 视作换行（只影响字段值，
-    正文 bytes 不归一）。"""
-    text = raw.decode("utf-8").replace(CRLF.decode("ascii"), "\n")
-    lines = text.split("\n")
-    if lines and lines[0] == "---":
-        lines = lines[1:]
-    while lines and lines[-1] in ("---", ""):
-        lines.pop()
-    data, seen, i = {}, set(), 0
-    while i < len(lines):
-        line = lines[i]
-        if line.strip() == "" or line.lstrip().startswith("#"):
-            i += 1
-            continue
-        if line[0] in " \t":
-            raise ContractError("UNSUPPORTED_YAML", "顶层的续行/嵌套不在受控范围内")
-        if line.lstrip().startswith("- "):
-            raise ContractError("UNSUPPORTED_YAML", "序列不在受控范围内")
-        key, sep, rest = line.partition(":")
-        if not sep or (" " in key) or key == "":
-            raise ContractError("UNSUPPORTED_YAML", "无法识别的行：%s" % line[:32])
-        key = key.strip()
-        if key in seen:
-            raise ContractError("DUPLICATE_KEY", "frontmatter 重复键：%s" % key)
-        seen.add(key)
-        if rest.lstrip()[:1] in ("|", ">"):
-            indent_of_key = len(line) - len(line.lstrip(" "))
-            value, i = _block_scalar(lines, i + 1, rest.strip(), indent_of_key)
-        elif rest.strip() == "" and i + 1 < len(lines) and lines[i + 1].strip() \
-                and (len(lines[i + 1]) - len(lines[i + 1].lstrip(" "))) > (len(line) - len(line.lstrip(" "))):
-            # 一层嵌套映射（如 `metadata:`）
-            indent_of_key = len(line) - len(line.lstrip(" "))
-            value, i = _nested_mapping(lines, i + 1, indent_of_key)
-        else:
-            value = _scalar(rest)
-            i += 1
-        data[key] = value
-    return data
+    """解析 frontmatter（bytes，可含起止行）为 dict；`\r\n` 只在此处视作换行，正文 bytes 不归一。"""
+    raw = check_text_bytes(raw)
+    if not raw.startswith(b"---") or len(raw) < 4 or raw[3:4] not in (LF, b"\r"):
+        raise ContractError("UNSUPPORTED_YAML", "输入不是 frontmatter 块")
+    inner = _fm_inner(raw)
+    if inner is None:
+        raise ContractError("UNSUPPORTED_YAML", "frontmatter 缺结束行")
+    text = inner.decode("utf-8").replace(CRLF.decode("ascii"), "\n")
+    return _load(text)
 
 
 def fm_fields(raw):

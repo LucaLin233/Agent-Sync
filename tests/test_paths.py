@@ -71,6 +71,14 @@ PATHS_RULES = (
      ('group', 'minis-verify'), '运行器、选路表或 CI 测试 workflow → minis-verify 消费者'),
     (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
      ('group', 'lh-wiring'), '运行器、选路表或 CI 测试 workflow → lh-wiring 消费者'),
+    # 拆出的运行器行为回归与按需包内校验入口：各自只由自身、运行器/选路表/workflow 变更命中。
+    (('tests/test-runner.sh',),
+     ('case', 'test-runner.sh'), '运行器、信号与选路回归 → runner'),
+    (('tools/sync-all.sh', 'skills/luno-core/scripts/quick_validate.py',
+      'tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('case', 'sync-all.sh'), '按需包内校验（结构守卫＋技能包校验）与运行器变更 → 包内校验'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('case', 'test-runner.sh'), '运行器、选路表或 CI 测试 workflow → runner 消费者'),
     # 退休入口的删除 diff 仍须可选路，但不再指向已删除套件。
     (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml', 'tools/sync-all.sh',
       'tests/test-deploy-skill.py', 'tests/test-pack-skill-zip.py'),

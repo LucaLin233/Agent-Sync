@@ -9,15 +9,12 @@
 顺序：无凭据阶段先核两版登记的身份/类型/kind/ID/source/installSource 相同、资源只增不减、旧 blob 完整可读，
 并核安装分支 HEAD 仍等于 merged；随后新建 pre 观察（tools/lh-collect.py + tools/lh-verify.py）对 base 验收，
 任意非 0 即零写；通过后紧邻执行官方 CLI 写；写后再核分支 HEAD，仍以新建 post 观察对 merged 验收。
-Agent 对象因实际表列/身份绑定未核准，在 pre 阶段以 `schema_unverified` 阻断，不写。首个错误后其余对象 not_run。
+Agent 对象按登记 ID 对 systemRole 做 pre/post 原字节核对；首个错误后其余对象 not_run。
 
 退出码：0 全部 post 通过 / 1 确证差异 / 2 执行、格式、写失败、超时或清理失败 / 3 缺证或首版不支持（并存 2>3>1>0）。
 stdout 一份摘要 JSON，不回显正文、资源、坐标或凭据。
 """
 import argparse
-import base64
-import binascii
-import datetime
 import importlib.util
 import json
 import os
@@ -33,7 +30,6 @@ import urllib.parse
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 USER_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_.-]{0,31}\Z")
 HOST_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
-BRANCH = "refs/heads/main"
 GIT_ENV = {
     "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": os.devnull,
     "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -84,8 +80,31 @@ class Deadline:
         return remain
 
 
-def _utc():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _batch_blobs_complete(data, keys):
+    """`cat-file --batch` 输出是否恰好含 keys 个完整 blob。
+
+    按对象头部 `<sha> blob <size>` 取长度跳过正文，正文里出现 ` blob ` 不影响判定；
+    要求 type 为 blob、头部长度与正文一致、对象间恰一个分隔 LF、末尾无剩余字节，任一不符即 False。
+    """
+    pos = 0
+    for _key in keys:
+        head_end = data.find(b"\n", pos)
+        if head_end < 0:
+            return False
+        parts = data[pos:head_end].split(b" ")
+        if len(parts) != 3 or parts[1] != b"blob":
+            return False
+        sha, size = parts[0], parts[2]
+        if len(sha) != 40 or any(c not in b"0123456789abcdef" for c in sha):
+            return False
+        if not size.isdigit():
+            return False
+        body_start = head_end + 1
+        body_end = body_start + int(size)
+        if body_end >= len(data) or data[body_end:body_end + 1] != b"\n":
+            return False
+        pos = body_end + 1
+    return pos == len(data)
 
 
 def _git(repo, args, data=None, timeout=60):
@@ -623,9 +642,10 @@ def main(argv=None):
             blobs.append(old["source"])
             blobs.extend(old.get("resources") or [])
         if blobs:
-            request = "".join("%s:%s\n" % (args.base, p) for p in dict.fromkeys(blobs)).encode("utf-8")
+            keys = list(dict.fromkeys(blobs))
+            request = "".join("%s:%s\n" % (args.base, p) for p in keys).encode("utf-8")
             proc = _git(args.repo, ["cat-file", "--batch"], request)
-            if proc.returncode != 0 or proc.stdout.count(b" blob ") != len(dict.fromkeys(blobs)):
+            if proc.returncode != 0 or not _batch_blobs_complete(proc.stdout, keys):
                 raise Fail("source_unverified", 3)
         os.mkdir(args.out_dir, 0o700)
         os.chmod(args.out_dir, 0o700)

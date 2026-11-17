@@ -39,6 +39,9 @@
 #   运行器、选路表或 CI 测试 workflow → verify 消费者
 #   运行器、选路表或 CI 测试 workflow → minis-verify 消费者
 #   运行器、选路表或 CI 测试 workflow → lh-wiring 消费者
+#   运行器、信号与选路回归 → runner
+#   按需包内校验（结构守卫＋技能包校验）与运行器变更 → 包内校验
+#   运行器、选路表或 CI 测试 workflow → runner 消费者
 #   运行器与聚合入口 → full
 # <<<
 set -u
@@ -56,6 +59,8 @@ CASES='
 test-auth-call.py|auth|cd tests && python3 -B -m unittest -v test-auth-call|0
 check-rules.py|smoke|python3 -B tools/check-rules.py|1
 test-check-rules.sh|gate|sh tests/test-check-rules.sh|1
+test-runner.sh|runner|sh tests/test-runner.sh|1
+sync-all.sh|package|sh tools/sync-all.sh|0
 test-body-contract.py|body|cd tests && python3 -B -m unittest -v test-body-contract|1
 test-redact.py|privacy|cd tests && python3 -B -m unittest -v test-redact|1
 test-surge-package.py|surge|cd tests && python3 -B -m unittest -v test-surge-package|1
@@ -276,19 +281,20 @@ def counts(data, cmd):
 
 
 def drain(p, chunks, limit):
-    """把剩余原 bytes 读完并转发，最多等 limit 秒，避免孙进程持管道时挂死。"""
+    """把剩余原 bytes 读完并转发，最多等 limit 秒；读到 EOF 返回 True，超时仍未 EOF 返回 False。"""
     fd = p.stdout.fileno()
     end = time.monotonic() + limit
     while time.monotonic() < end:
         r, _, _ = select.select([fd], [], [], 0.1)
         if not r:
-            break
+            continue
         b = os.read(fd, 65536)
         if not b:
-            return
+            return True
         chunks.append(b)
         OUT.write(b)
         OUT.flush()
+    return False
 
 
 def halt(p):
@@ -407,8 +413,13 @@ def run_entry(cmd):
             chunks.append(b)
             OUT.write(b)
             OUT.flush()
-        elif p.poll() is not None:
-            continue
+        if p.poll() is not None:
+            # 入口已退出但后代仍持 stdout：先按本轮登记组确证停止，再限时读到 EOF；任一失败保留 WORK。
+            if not confirm_stopped(p.pid, signal.SIGTERM):
+                die('无法确证本轮进程组已停，保留 WORK %s' % WORK, 2)
+            if not drain(p, chunks, 5):
+                die('后代仍持 stdout 未读到 EOF，保留 WORK %s' % WORK, 2)
+            break
     rc = p.wait()
     retire_own(p)
     return rc, b''.join(chunks)

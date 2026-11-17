@@ -802,6 +802,11 @@ class PackerTest(unittest.TestCase):
     def pack(self, script, out, process=False):
         return run_entry(script, [out], offline_env(), process=process)
 
+    def leftovers(self, out):
+        """发布后的残留：同目录不得留 `.tmp` 固定名或独占临时目录。"""
+        return sorted(p.name for p in Path(out).parent.iterdir()
+                      if p.name.endswith('.tmp') or p.name.startswith('package-release-'))
+
     def test_collect_filters_and_refuses_unsafe_entries(self):
         with tempfile.TemporaryDirectory(prefix='surge-pack-') as tmp:
             skill, _script, module = self.isolated(tmp)
@@ -869,18 +874,26 @@ class PackerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='surge-cli-') as tmp:
             skill, script, _module = self.isolated(tmp)
             out = Path(tmp) / 'release.zip'
-            out.write_bytes(b'OLD-ARTIFACT')
-            def deny(self, target):
+            def deny(source, target):
                 raise PermissionError('synthetic-replace-denied')
-            with mock.patch.object(Path, 'replace', deny):
+            with mock.patch.object(os, 'replace', deny):
                 r = self.pack(script, out)
             self.assertNotEqual(0, r.returncode)
             self.assertIn('PermissionError', r.stderr)
-            self.assertEqual(b'OLD-ARTIFACT', out.read_bytes())
-            self.assertFalse(Path(str(out) + '.tmp').exists())
+            self.assertFalse(out.exists(), '替换失败不得留下半成品')
+            self.assertEqual([], self.leftovers(out))
+            # 既有产物默认拒绝覆盖：报错、原字节与模式不变、不留临时物。
+            out.write_bytes(b'OLD-ARTIFACT')
+            out.chmod(0o640)
+            before = (out.read_bytes(), out.stat().st_mode & 0o777)
+            r = self.pack(script, out)
+            self.assertEqual((1, '', 'Output already exists: %s\n' % out), (r.returncode, r.stdout, r.stderr))
+            self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
+            self.assertEqual([], self.leftovers(out))
+            out.unlink()
             r = self.pack(script, out, process=True)        # 进程边界
             self.assertEqual(0, r.returncode, r.stderr)
-            self.assertFalse(Path(str(out) + '.tmp').exists())
+            self.assertEqual([], self.leftovers(out))
             expected = sorted(str(p.relative_to(skill)) for p in skill.rglob('*')
                               if p.is_file() and '__pycache__' not in p.parts)
             self.assertEqual([str(out), hashlib.sha256(out.read_bytes()).hexdigest(),
@@ -911,7 +924,7 @@ class PackerTest(unittest.TestCase):
                 self.assertEqual((1, '', 'Official resource is not distributable: ' + name + '\n'),
                                  (result.returncode, result.stdout, result.stderr))
                 self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
-                self.assertFalse(Path(str(out) + '.tmp').exists())
+                self.assertEqual([], self.leftovers(out))
                 target.unlink()
                 self.assertTrue(module.build(module.collect(skill)))
 
@@ -934,7 +947,7 @@ class PackerTest(unittest.TestCase):
                     self.assertEqual((1, '', 'Known whole official file is not distributable: ' + name + '\n'),
                                      (result.returncode, result.stdout, result.stderr))
                     self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
-                    self.assertFalse(Path(str(out) + '.tmp').exists())
+                    self.assertEqual([], self.leftovers(out))
                     target.write_bytes(b'own distinct guide')
                     self.assertTrue(module.build(module.collect(skill)), 'Removing the injection must restore the positive control')
 
@@ -984,7 +997,7 @@ class PackerTest(unittest.TestCase):
                 self.assertEqual((1, '', 'Invalid provenance manifest\n'),
                                  (result.returncode, result.stdout, result.stderr))
                 self.assertEqual(before, (out.read_bytes(), out.stat().st_mode & 0o777))
-                self.assertFalse(Path(str(out) + '.tmp').exists())
+                self.assertEqual([], self.leftovers(out))
                 self.write_manifest(skill)
                 self.assertTrue(module.build(module.collect(skill)), 'Removing the fault must pass')
 

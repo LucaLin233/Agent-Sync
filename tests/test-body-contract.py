@@ -38,9 +38,25 @@ class BodyContract(unittest.TestCase):
         self.assertEqual(self.code(BC.body_bytes, b"x\xff"), "INVALID_UTF8")
         self.assertEqual(self.code(BC.fm_fields, b"---\nname: \xff\n---\n"), "INVALID_UTF8")
         self.assertEqual(self.code(BC.body_bytes, b"\xef\xbb\xbfno frontmatter"), "BOM_FORBIDDEN")
-        for raw in (b"---\nt: [a]\n---\n", b"---\nt: &a x\n---\n", b"---\n- a\n---\n",
-                    b"---\nm:\n  a:\n    b: c\n---\n"):
+        # PyYAML 语义下真正非法的 frontmatter：根不是映射、流式/引号未闭合、未知标签都 fail-closed。
+        for raw in (b"---\n- a\n---\n", b"---\nt: [a\n---\n", b'---\nt: "a\n---\n',
+                    b"---\nt: !tag x\n---\n", b"---\nt: |2x\n  a\n---\n"):
             self.assertEqual(self.code(BC.fm_fields, raw), "UNSUPPORTED_YAML", raw)
+
+    def test_folded_and_deep_indentation_follow_pyyaml(self):
+        """折叠标量含空行、缩进超过一层的前置字段，取值按 YAML 语义（期望值是 yaml.safe_load 的结果）。"""
+        raw = (b"---\nfolded: >\n  line one\n\n  line two\n"
+               b"nested:\n  meta:\n    deeper: value\n---\nbody")
+        f = BC.fm_fields(raw)
+        self.assertEqual(f["folded"], "line one\nline two\n")
+        self.assertEqual(f["nested"], {"meta": {"deeper": "value"}})
+        self.assertEqual(BC.body_bytes(raw), b"body")
+
+    def test_block_scalar_chomping_follows_pyyaml(self):
+        """`|`/`|+`/`|-` 的 chomping 与折叠空行都交给 PyYAML，不自制拼装。"""
+        raw = b"---\na: |\n  x\n\n  y\nkeep: |+\n  k\n\nstrip: |-\n  s\n---\n"
+        f = BC.fm_fields(raw)
+        self.assertEqual((f["a"], f["keep"], f["strip"]), ("x\n\ny\n", "k\n\n", "s"))
 
 
 if __name__ == "__main__":

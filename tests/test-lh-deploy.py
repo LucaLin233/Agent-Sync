@@ -272,6 +272,20 @@ class Case(unittest.TestCase):
             "pre-0/skill-evidence.json", "post-0/skill-evidence.json",
             "verify-pre-0.json", "verify-post-0.json"])
 
+    def test_body_containing_blob_word_is_full_read(self):
+        """正文含 ` blob ` 子串时按头部长度跳过正文，不得据此判旧 blob 不完整（source_unverified）。"""
+        self.lh(0)
+        self.write("skills/one/SKILL.md", "one blob inside blob\n")
+        subprocess.run(["git", "-C", self.repo, "add", "."], check=True)
+        subprocess.run(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@e",
+                        "commit", "-qm", "blob word"], check=True)
+        self.base = self.merged = self.git("rev-parse", "HEAD")
+        with open(os.path.join(self.bin, "head"), "w", encoding="utf-8") as handle:
+            handle.write(self.merged)
+        proc = self.run_tool(("one",))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["status"], "complete")
+
     def test_tail_lf_single_correction_uses_argv(self):
         """post 仅差 content 且现场==期望去一个尾 LF：按 argv 原样补一次全文再全量重采复验。"""
         self.lh(0)
