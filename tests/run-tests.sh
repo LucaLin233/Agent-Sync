@@ -344,6 +344,10 @@ def stop_own():
             ok = False
     # leader 退出不等于本轮进程组停止：只用 signal 0 核本次 start_new_session 的组，
     # 未确证消失就不放行清理（不扫描、不按名扫杀、不宣称为已回收）。
+    # 仅在本轮确有需要停止的进程（收到 INT/TERM）时执行：自行退出的入口其组从未被本 runner 信号，
+    # 残留后代不属本次停止义务，避免把正常轮误判为未停止。
+    if not STOP:
+        return ok
     for p in ACTIVE:
         try:
             os.killpg(p.pid, 0)
