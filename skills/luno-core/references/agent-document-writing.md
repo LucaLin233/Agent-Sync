@@ -36,7 +36,7 @@
 
 不直接移植本端宿主未支持或未经核实的调用机制，如 `disable-model-invocation`；按调用拆分或 router skill 也不作为默认改造方案。这不排除本端已有、按真实任务分支渐进加载的最小路由。仍不以单个「锚词」替代多句说明。
 
-来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.matt-pocock.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
+来源与许可：mattpocock/skills，MIT 精选改写；Copyright (c) 2026 Matt Pocock。完整许可随包见 ../LICENSE.mit-sources.txt；固定提交、取材路径与日期见仓库 skills-sources.md。
 <!-- END agent-document-writing -->
 
 <a id="branch-skill-authoring"></a>

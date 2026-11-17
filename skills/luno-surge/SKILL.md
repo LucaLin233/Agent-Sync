@@ -50,7 +50,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 查命令选择、语法、key-path 或响应字段时，先完整读 `references/command-reference.md`〔分支 command-reference〕，再按其任务目录完整读取命中分支及共同前置，跨任务取并集；未触发专题不因同文件共置而加载。本文和命令参考未覆盖的参数、字段或版本语义，须通过已核实的当前帮助或官方资料确认；无法取得依据就停止该项，不猜命令，也不要求安装官方 Skill 原件。取得帮助仍须遵守平台、实例连接及当次授权。
 
-涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/command-reference.md`〔分支 diagnostics〕。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
+涉及 CoreDevice/RSD、RemotePairing 或同机回环时，完整读 `references/command-reference.md`〔分支 diagnostics-coredevice〕及其共同前置。涉及路由、DNS、临时规则、性能或 Tailscale/WireGuard 之前，完整读 `references/command-reference.md`〔分支 diagnostics〕。调试路由优先用临时规则，不改 Profile；变更前后只读最窄的相关状态。写 macOS 插件配置前，先读 parameters schema 和 `references/plugin-authoring.md`。
 
 ## 6. HTTP API 回退
 

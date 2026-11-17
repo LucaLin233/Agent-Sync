@@ -2,9 +2,13 @@
 
 CCHP 任务先完整读取 `references/cchp-upstream/ENTRY.md`（官方技能入口原文；其相对引用资源随包保留）；业务流程、参数、输出、错误、分页与下载按官方技能及当前 CLI 帮助，不在本地复写。官方技能缺失就停止依赖它的操作，不用旧中文副本替代。下面只补本端边界、组织约定和实例经验；官方建议与这些边界冲突时，以本端限制为准。
 
+## 管理入口
+
+管理面用 `CCHP_GATEWAY_URL` + `CCHP_TOKEN`，模型数据面用 `CCHP_BASE_URL` + LLM token，**两个面不得混用**。CLI 的 server 必须指向管理面（本端变量映射与认证限制见 `references/cchp.md`〈安全与认证〉）。缺哪个入口或凭据，就停止依赖它的请求、命令和结论，并报告变量名；不回退旧地址、不猜子域、不换实例或环境。
+
 ## 安全与认证
 
-管理面与模型数据面按本技能入口〈实例与端点〉分开。CLI 从 `CCHP_BASE_URL` 读 server，本环境每次调用显式设置 `CCHP_BASE_URL="$CCHP_GATEWAY_URL"`，管理 token 只用当次获准且已注入的 `CCHP_TOKEN`。缺变量停止依赖请求，不回退 `CCHP_TOKEN_FILE`、login 保存态或 keychain，不自动登录、不交互补取、不换实例。401 先核已授权 URL/token 的配对，不能仅凭 401 要求换 token。
+管理面与模型数据面按本文件〈管理入口〉分开。CLI 从 `CCHP_BASE_URL` 读 server，本环境每次调用显式设置 `CCHP_BASE_URL="$CCHP_GATEWAY_URL"`，管理 token 只用当次获准且已注入的 `CCHP_TOKEN`。缺变量停止依赖请求，不回退 `CCHP_TOKEN_FILE`、login 保存态或 keychain，不自动登录、不交互补取、不换实例。401 先核已授权 URL/token 的配对，不能仅凭 401 要求换 token。
 
 管理 token 只发已授权 origin，跨 origin 重定向不得携带凭据；明文 HTTP 仅限回环，管理 API 直连同样适用。
 

@@ -21,6 +21,7 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/FORGE.md', 'luno-core'),
                   ('subagents/minis-general-fallback.md', 'luno-core'),
                   ('prompt/LUNO.md', 'luno-platform'),
+                  ('skills/luno-core/SKILL.md', 'references/review.md'),
                   ('skills/luno-core/references/execution.md', 'luno-core'),
                   ('skills/luno-platform/references/cchp.md', 'references/cchp-upstream/ENTRY.md'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
@@ -31,7 +32,7 @@ RETIRED_RESOURCES = ('skills/luno-surge/references/upstream-SKILL.md',
                      'skills/luno-surge/references/upstream-command-reference.md',
                      'skills/luno-surge/assets/logo.png')
 # __OBLIGATIONS__
-OBLIGATIONS = (('skills/luno-platform/SKILL.md', '## 实例与端点'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/SKILL.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
+OBLIGATIONS = (('skills/luno-platform/references/cchp.md', '## 管理入口'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/references/lobehub.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-core/references/review.md', '## 任务归属'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
 
 class Guard:
     def __init__(self, root):

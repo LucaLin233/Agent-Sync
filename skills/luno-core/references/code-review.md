@@ -1,6 +1,6 @@
 # 代码审查
 
-本文件含改写自 `anthropics/knowledge-work-plugins` 与 `anthropics/claude-plugins-official` 的内容（Apache-2.0，已修改；许可见 `../LICENSE.code-review.txt`、`../LICENSE.apache-2.0.txt`）。
+本文件含改写自 `anthropics/knowledge-work-plugins` 与 `anthropics/claude-plugins-official` 的内容（Apache-2.0，已修改；许可见 `../LICENSE.apache-2.0.txt`）。
 
 通用流程、授权、分级和输出按 `references/review.md`〔分支 review〕；实施侧纪律（最小改动、沿用风格、只清自己引入的孤儿代码、先复现后修复、重构保持行为、结果证据）按 `luno-authoring/references/coding.md`〔分支 coding〕。通用检查面（设计、功能、复杂度、测试、命名、注释、风格，以及安全、性能和依赖）按 [Google 代码审查指南：审查看什么](https://google.github.io/eng-practices/review/reviewer/looking-for.html) 逐文件覆盖；这里只写代码审查的分轴、CI 和本机取舍。
 
@@ -22,4 +22,4 @@ CI 核对最新的 HEAD、实际运行的套件和日志。GitHub 查询按 `gh 
 - **排序与分歧**：正确性和安全优先，其次结构回归与遗漏的简化；外观 nit 不能埋掉结构问题。不做无证据的通过，不淡化真问题，能量化就量化。分歧按技术事实与数据 > 风格指南 > 工程设计原则 > 代码库一致性；作者有完整上下文并坚持时接受推翻，评代码不评人。
 - **收尾**：死代码先列位置和可确认的替代者，清理范围与删除条件按 coding〈改动〉，已授权且确定的删除不重复问，不确定才问，不静默删。当批处理不了的发现按 `luno-core`〈执行闭环〉说明处置与责任；只有已授权且确需外部跟踪时才建 issue，不以口头「以后处理」冒充闭环。
 
-来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock；Copyright (c) 2025 Jesse Vincent。完整许可随包见 ../LICENSE.matt-pocock.txt、../LICENSE.obra-superpowers.txt、../LICENSE.openminis.txt；固定提交、取材路径、许可裁定和未采纳部分见仓库 skills-sources.md。
+来源与许可：MIT 精选改写：Copyright (c) 2026 Matt Pocock；Copyright (c) 2025 Jesse Vincent。完整许可随包见 ../LICENSE.mit-sources.txt；固定提交、取材路径、许可裁定和未采纳部分见仓库 skills-sources.md。
