@@ -136,7 +136,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_80yT7HBovdhm",
+          "id": "skl_uwJOacJnCwCZ",
           "fields": "content,name,description"
         }
       },
@@ -195,7 +195,7 @@
         "lobehub": {
           "present": true,
           "kind": "skill",
-          "id": "skl_gRPt1BruQ3lS",
+          "id": "skl_RBqxBjRlC67z",
           "fields": "content,name,description"
         }
       },
