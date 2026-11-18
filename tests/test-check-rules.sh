@@ -201,16 +201,6 @@ case('同一平台 ID 多占',1,'平台身份多占',shared_id)
 case('缺位仍带 ID',1,'缺位身份冲突',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('present',False)))
 case('平台 ID 非法形态',1,'平台身份形态',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('id','bad')))
 case('身份端缺 present',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends']['minis'].pop('present')))
-for end in ('minis','lobehub'):
-    case('移除可选端 '+end,0,'无问题',
-         lambda p,end=end:registry(p,lambda d:[o['ends'].pop(end,None) for o in d['objects']]))
-case('只保留仓库端',0,'无问题',
-     lambda p:registry(p,lambda d:[o.__setitem__('ends',{'repo':o['ends']['repo']}) for o in d['objects']]))
-case('仓库端仍必须登记',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends'].pop('repo')))
-case('仓库端不能标为缺位',1,'仓库身份缺位',
-     lambda p:skill_obj(p,lambda o:o['ends']['repo'].__setitem__('present',False)))
-case('已登记的可选端不能是 null',1,'身份端结构',
-     lambda p:skill_obj(p,lambda o:o['ends'].__setitem__('lobehub',None)))
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']

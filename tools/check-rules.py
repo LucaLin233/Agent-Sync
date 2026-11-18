@@ -217,8 +217,6 @@ class Guard:
                 if m is None or m[1]!=name or Path(src).parent.name!=name:
                     self.problem('身份与技能源不一致')
             for end in ('repo','minis','lobehub'):
-                if end!='repo' and end not in ends:
-                    continue
                 v=ends.get(end)
                 if not isinstance(v,dict) or not isinstance(v.get('present'),bool):
                     self.problem('身份端结构');continue
