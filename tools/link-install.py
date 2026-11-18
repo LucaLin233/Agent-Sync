@@ -344,6 +344,18 @@ def delete_retired(action, tree):
     tree.unlink(path)
 
 
+def retire_before_repoint(actions, retired, tree):
+    """改指会切断旧生成文件的归属证据：先按已核 inode 删它，中断后重跑不会撞冲突。
+
+    删除发生在公开软链改指之前，这段窗口内该入口可能悬空，须在维护窗口内暂停新会话。
+    """
+    moving = {a["path"] for a in actions
+              if a["kind"] == "link" and a.get("previousTarget") is not None}
+    for action in retired:
+        if action["kind"] == "generated" and any(p in moving for p in action["public"]):
+            delete_retired(action, tree)
+
+
 def write_generated(action, tree):
     path = action["path"]
     parent = tree.directory(path.parent)
@@ -374,6 +386,8 @@ def discard_staging(temporary, parent, created):
 
 
 def apply(actions, tree):
+    """按计划写入，返回本次实际执行过的项（state=create/update）；未执行的项不列入。"""
+    done = []
     for action in actions:
         current = state(action, tree)
         if current == "conflict":
@@ -384,11 +398,24 @@ def apply(actions, tree):
         if action["kind"] == "directory":
             tree.directory(action["path"], create=True)
         elif action["kind"] == "link":
-            if current == "update":
-                tree.unlink(action["path"])
-            os.symlink(str(action["target"]), action["path"].name, dir_fd=tree.directory(action["path"].parent))
+            parent = tree.directory(action["path"].parent)
+            if current == "create":
+                os.symlink(str(action["target"]), action["path"].name, dir_fd=parent)
+            else:
+                # 改指用同目录临时软链改名替换，窗口内旧入口仍可解析，不留缺失态。
+                temporary = action["path"].with_name(
+                    "." + action["path"].name + ".link-install.tmp." + os.urandom(8).hex())
+                os.symlink(str(action["target"]), temporary.name, dir_fd=parent)
+                try:
+                    os.rename(temporary.name, action["path"].name, src_dir_fd=parent, dst_dir_fd=parent)
+                except BaseException:
+                    discard_staging(temporary, parent,
+                                    os.stat(temporary.name, dir_fd=parent, follow_symlinks=False))
+                    raise
         else:
             write_generated(action, tree)
+        done.append(action)
+    return done
 
 
 def public_action(action):
@@ -443,7 +470,8 @@ def main(argv=None):
         if errors:
             report["status"], code = "blocked", 2
         elif args.apply:
-            apply(actions, tree)
+            retire_before_repoint(actions, retired, tree)
+            report["created"] = [public_action(a) for a in apply(actions, tree)]
             for action in retired:
                 delete_retired(action, tree)
             actions, errors = plan(checkout, home, tree)

@@ -416,12 +416,37 @@ module.render = repointed
 sys.exit(module.main(sys.argv[2:]))
 ''')
         run = [sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout)]
+        # 合成中断：旧文件已按已核 inode 退役，公开软链还没改指就退出。
+        interrupt = self.root / "repoint-interrupt.py"
+        interrupt.write_text('''import importlib.util, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+render = module.render
+def repointed(obj, renderer, checkout, home, tree, read):
+    artifact, content = render(obj, renderer, checkout, home, tree, read)
+    if read is Path.read_bytes and artifact.name == "forge.md":
+        artifact = artifact.with_name("forge-v2.md")
+    return artifact, content
+def stop(*args, **kwargs):
+    os._exit(99)
+module.render = repointed
+module.os.symlink = stop
+sys.exit(module.main(sys.argv[2:]))
+''')
+        proc = subprocess.run([sys.executable, "-B", str(interrupt), str(TOOL), "--checkout", str(self.checkout),
+                               "--apply", "--previous", old], env=self.env, capture_output=True, timeout=30)
+        self.assertEqual(proc.returncode, 99, proc.stdout + proc.stderr)
+        self.assertFalse(artifact.exists())
+        self.assertEqual(os.readlink(public), str(artifact))  # 悬空窗口：软链尚未改指
         proc = subprocess.run(run + ["--apply", "--previous", old],
                               env=self.env, capture_output=True, timeout=30)
         report = json.loads(proc.stdout)
         self.assertEqual((proc.returncode, report["status"]), (0, "completed"), report["errors"])
-        self.assertIn(str(artifact), [a["path"] for a in report["retirements"]])
-        self.assertFalse(artifact.exists())
+        self.assertEqual(report["retirements"], [])  # 旧文件已在中断前退役，重跑无重复删除
+        self.assertIn((str(artifact.with_name("forge-v2.md")), "create"),
+                      {(a["path"], a["state"]) for a in report["created"]})
         self.assertEqual(os.readlink(public), str(artifact.with_name("forge-v2.md")))
         # 改指后重跑同一入口不改写已完成状态，也不残留暂存文件。
         proc = subprocess.run(run + ["--apply", "--previous", old],
@@ -432,6 +457,48 @@ sys.exit(module.main(sys.argv[2:]))
         self.assertEqual(report["residue"], [])
         proc = subprocess.run(run + ["--check"], env=self.env, capture_output=True, timeout=30)
         self.assertEqual(proc.returncode, 0, proc.stdout)
+
+    def test_created_report_covers_first_install_and_existing_state_is_preserved(self):
+        login = self.home / ".codex/auth.json"
+        login.parent.mkdir(parents=True, exist_ok=True)
+        login.write_bytes(b"SYNTH_LOGIN")
+        login.chmod(0o600)
+        rc, report = self.call("--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        created = {(a["path"], a["state"]) for a in report["created"]}
+        generated = str(self.home / ".luno/generated/codex/AGENTS.md")
+        self.assertIn((generated, "create"), created)
+        self.assertIn((str(self.home / ".codex/AGENTS.md"), "create"), created)
+        # 前态已有的文件不在 created 里，也不被改写。
+        self.assertNotIn(str(login), {p for p, _ in created})
+        self.assertEqual(login.read_bytes(), b"SYNTH_LOGIN")
+        # 重跑没有新增项：后续不能拿空报告当「本次新增」去撤回。
+        rc, report = self.call("--apply")
+        self.assertEqual((rc, report["created"]), (0, []))
+        # 更新只报 update，不冒充新建。
+        self.global_file.write_bytes(b"new global fixture")
+        rc, report = self.call("--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertEqual([(a["path"], a["state"]) for a in report["created"]], [(generated, "update")])
+
+    def test_previous_revision_without_host_registration_retires_nothing(self):
+        installed = self.call("--apply")[0]
+        self.assertEqual(installed, 0)
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            for end in ("claude-code", "codex", "paseo"):
+                if end in obj["ends"]:
+                    obj["ends"][end] = {"present": False}
+        registry_file.write_text(json.dumps(registry))
+        old_without_host = self.commit()
+        registry_file.write_text(json.dumps(json.loads((ROOT / "tools/sync-targets.json").read_text())))
+        self.commit()
+        before = self.snapshot()
+        rc, report = self.call("--apply", "--previous", old_without_host)
+        self.assertEqual((rc, report["status"], report["retirements"]), (0, "completed", []))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.call("--check")[0], 0)
 
     def test_successful_install_preserves_existing_login_and_settings_files(self):
         paths = (".claude/.credentials.json", ".claude/settings.json", ".codex/auth.json", ".codex/config.toml")
