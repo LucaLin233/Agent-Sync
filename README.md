@@ -259,6 +259,17 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
 
 专项测试（不进常跑）：`sh tests/run-tests.sh case test-lh-collect.py`、`sh tests/run-tests.sh case test-lh-deploy.py`；选路见 `tests/run-tests.sh` 头部。
 
+## 宿主端安装（Claude Code、Codex 与 paseo）
+
+宿主端是运行 Claude Code、Codex 并由 paseo 托管的 Debian 主机。规则与流程按 `skills/luno-core/references/sync.md`〔分支 sync-host〕，各端机制见 `skills/luno-platform/references/runtime-host.md`、`runtime-claude-code.md`、`runtime-codex.md`、`runtime-paseo.md`。
+
+1. **受管检出**：把本仓库克隆到 `~/.luno/agent-sync`，只快进到已合并的 main，不在其中编辑。
+2. **安装与核对**：在受管检出中运行 `python3 -B tools/link-install.py`（默认只列计划），确认后加 `--apply` 写入，用 `--check` 回读。安装器按 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，建立技能软链、`~/.luno/generated/` 下的生成文件及其公开软链（`~/.claude/CLAUDE.md`、`~/.claude/agents/lens.md`、`forge.md`、`~/.codex/AGENTS.md`）和四个角色家目录 `~/.luno/homes/{lens,forge}-{claude,codex}/`。它不读取、不复制凭据和登录态，不改写用户已有的 settings 或 config，遇到非受管文件占位即停止并报告。
+3. **GLOBAL 副本**：把 Minis `GLOBAL.md` 整份复制到 `~/.luno/memory/GLOBAL.md`（600）后，再运行一次 `--apply` 与 `--check`，以重新生成 Codex 常驻文件。宿主端自持的经验日志是 `~/.luno/memory/MEMORY.md`。
+4. **登录**：主会话照常登录 Claude Code 与 Codex；四个角色家目录分别登录一次，例如 `CLAUDE_CONFIG_DIR=~/.luno/homes/lens-claude claude`、`CODEX_HOME=~/.luno/homes/forge-codex codex login`。
+5. **paseo**：按 `platforms/paseo/config.example.json` 合并四个角色 provider 到 `~/.paseo/config.json`（把 `USER` 换成实际用户），并开启 `daemon.mcp.injectIntoAgents`；用 `paseo daemon set-password` 设访问密码，手机配对用 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查和 `smoke`、`select` 两个测试脚本。
+6. **验收**：`--check` 全部一致后，新开会话确认技能与 `lens`、`forge` 可列出；在 paseo 中派一次角色 provider，核对 `get_agent_status` 的 provider 与模型，并确认角色家目录中的角色文件是实际加载来源。
+
 ## 测试与历史
 
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。

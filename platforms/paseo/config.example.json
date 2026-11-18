@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "daemon": {
+    "listen": "127.0.0.1:6767",
+    "mcp": { "enabled": true, "injectIntoAgents": true }
+  },
+  "agents": {
+    "providers": {
+      "lens-claude":  { "extends": "claude", "label": "LENS · Claude Code", "env": { "CLAUDE_CONFIG_DIR": "/home/USER/.luno/homes/lens-claude" } },
+      "forge-claude": { "extends": "claude", "label": "FORGE · Claude Code", "env": { "CLAUDE_CONFIG_DIR": "/home/USER/.luno/homes/forge-claude" } },
+      "lens-codex":   { "extends": "codex",  "label": "LENS · Codex",  "env": { "CODEX_HOME": "/home/USER/.luno/homes/lens-codex" } },
+      "forge-codex":  { "extends": "codex",  "label": "FORGE · Codex", "env": { "CODEX_HOME": "/home/USER/.luno/homes/forge-codex" } }
+    }
+  }
+}

@@ -12,7 +12,7 @@
 
 ## 连接与授权
 
-HTTP API 仍须满足入口的实例、认证、平台和版本门槛：默认同机，活动实例或其他目标须由用户指定并授权。远程明文 HTTP 会暴露 API key，描述符探测还会暴露节点密码或 PSK，只能在获准的可信局域网使用，其他情况用 HTTPS。分节写入更严，见 `references/http-api.md`〔分支 http-sections〕。危险操作按入口再次单独确认，不自动启用监听、MCP、MITM，也不关闭证书校验。
+HTTP API 仍须满足入口的实例、认证、平台和版本门槛：默认目标按 `luno-platform`〈运行端〉当前端〈Surge 控制目标〉，活动实例或其他目标须由用户指定并授权。远程明文 HTTP 会暴露 API key，描述符探测还会暴露节点密码或 PSK，只能在获准的可信局域网使用，其他情况用 HTTPS。分节写入更严，见 `references/http-api.md`〔分支 http-sections〕。危险操作按入口再次单独确认，不自动启用监听、MCP、MITM，也不关闭证书校验。
 
 ## 安全分节写入
 

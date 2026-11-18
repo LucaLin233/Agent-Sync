@@ -1,0 +1,7 @@
+{
+  "worktree": { "setup": ["python3 -c 'import yaml'"] },
+  "scripts": {
+    "smoke":  { "command": "env -i PATH=/usr/local/bin:/usr/bin:/bin TMPDIR=/tmp sh tests/run-tests.sh smoke" },
+    "select": { "command": "git diff --name-only -z origin/main... | env -i PATH=/usr/local/bin:/usr/bin:/bin TMPDIR=/tmp sh tests/run-tests.sh select-paths | env -i PATH=/usr/local/bin:/usr/bin:/bin TMPDIR=/tmp sh tests/run-tests.sh select" }
+  }
+}

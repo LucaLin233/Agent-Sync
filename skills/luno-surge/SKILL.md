@@ -44,7 +44,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 ## 5. CLI
 
-`/usr/local/bin/surge-cli` 是 `scripts/surge_cli.py` 这个自建的 Python 3 桥，**不是官方 Mac 二进制**。默认连同机的 Controller；`SURGE_CLI_REMOTE` 或 `--remote` 只在显式指定时使用，用户没指定就不连外部主机。涉及传输、凭据或 `--check` 时，先完整读 `references/command-reference.md`〔分支 controller-cli〕。
+`/usr/local/bin/surge-cli` 是 `scripts/surge_cli.py` 这个自建的 Python 3 桥，**不是官方 Mac 二进制**。默认控制目标按 `luno-platform`〈运行端〉当前端〈Surge 控制目标〉；`SURGE_CLI_REMOTE` 或 `--remote` 只在显式指定时使用，用户没指定就不连外部主机。涉及传输、凭据或 `--check` 时，先完整读 `references/command-reference.md`〔分支 controller-cli〕。
 
 优先用 `--raw`，它输出的是**客户端脱敏后的 JSON，不是服务端原文**（包内其他地方说的「原始」都按这个理解）。使用本包的 CLI、HTTP API 或 policy-descriptor 助手，或判读、整理、分享其输出前，完整读 `references/command-reference.md`〔分支 output-safety〕；本地帮助的字面量例外只按该分支执行，不放宽运行数据的限制。
 
@@ -54,7 +54,7 @@ Controller 或 API 能响应，不等于引擎在正常处理流量：要核对 
 
 ## 6. HTTP API 回退
 
-Controller 不可用，或需要 `/v1/*` 端点、Prometheus 指标时，先完整读 `references/http-api.md`〔分支 http-api〕（含远程明文的风险），再用 `scripts/surge_ios.py`。核对端点和认证（`X-Key`）；默认连同机，`SURGE_HTTP_API_BASE` 指向活动实例或可信局域网时，都要用户指定。危险操作按 §3 再确认。测试还没写进 Profile 的节点用 `scripts/test_policy_descriptor.py`，它不改配置，凭据按 §3 处理。
+Controller 不可用，或需要 `/v1/*` 端点、Prometheus 指标时，先完整读 `references/http-api.md`〔分支 http-api〕（含远程明文的风险），再用 `scripts/surge_ios.py`。核对端点和认证（`X-Key`）；默认目标同上，`SURGE_HTTP_API_BASE` 指向活动实例或可信局域网时，都要用户指定。危险操作按 §3 再确认。测试还没写进 Profile 的节点用 `scripts/test_policy_descriptor.py`，它不改配置，凭据按 §3 处理。
 
 ## 7. 交付
 

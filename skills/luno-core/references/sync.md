@@ -1,4 +1,4 @@
-分支：sync、sync-workflow、sync-lobehub。读法见 luno-core 入口〈加载〉。
+分支：sync、sync-workflow、sync-lobehub、sync-host。读法见 luno-core 入口〈加载〉。
 
 <a id="branch-sync"></a>
 <!-- BEGIN sync -->
@@ -6,9 +6,9 @@
 
 ## 范围
 
-本技能处理**跨端规则对象**（常驻提示词、`luno-*` 与专题技能、子代理指令）在三处落点的同步、巡检和漂移修复：Minis 本地、LobeHub 平台、公开仓库 `LucaLin233/Agent-Sync`。**日志和未指定的其他记忆各端自持，不互相同步**。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向同步到经核实的 LobeHub 私人载体，Minis 文件为唯一真源，不分区、不回写、不双向合并；目标独有修改或冲突即停下交用户核对。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。载体、首次读取和恢复细则见 `luno-platform/references/lobehub-knowledge.md`〔分支 knowledge〕；本例外不纳入公开规则发布或默认部署授权，私人读写依当次授权执行，各端的记忆写法见 `luno-platform/references/minis.md`〔分支 minis〕 和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
+本技能处理**跨端规则对象**（常驻提示词、`luno-*` 与专题技能、子代理指令）在各登记落点的同步、巡检和漂移修复：Minis 本地、LobeHub 平台、宿主端（Claude Code、Codex 及 paseo 角色家目录）、公开仓库 `LucaLin233/Agent-Sync`。**日志和未指定的其他记忆各端自持，不互相同步**。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向同步到经核实的 LobeHub 私人载体和宿主端 `~/.luno/memory/GLOBAL.md`，Minis 文件为唯一真源，不分区、不回写、不双向合并；目标独有修改或冲突即停下交用户核对。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。载体、首次读取和恢复细则：LobeHub 见 `luno-platform/references/lobehub-knowledge.md`〔分支 knowledge〕，宿主端见本文件〔分支 sync-host〕；本例外不纳入公开规则发布或默认部署授权，私人读写依当次授权执行，各端的记忆写法见 `luno-platform/references/minis.md`〔分支 minis〕 和 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
 
-管理落点是 Minis、LobeHub 和公开仓库，运行端是 Minis 和 LobeHub；并不是每个对象三处都有。对象的身份和各端落点只以 `tools/sync-targets.json` 这一份登记为准：某端标为没有的不算漂移，`present` 只表示受管存在，不表示已部署或已核验。正文里不缓存各对象的部署状态，部署沿革见旧私有仓库 `LucaLin233/Agent` 的 git 历史。部署前按登记 ID 回读既有对象的实际身份、identifier 和生效字段；首次安装按已审来源与名称核目标，取得实际 ID 后补登记。与已审基线冲突就停止相关对象并交负责人判定。现在不再做自动的三副本互校和同名发现，所以不能声称已排除额外的同名对象；需要查询时也要有当次授权。
+管理落点是 Minis、LobeHub、宿主端和公开仓库，运行端是 Minis、LobeHub 和宿主端；并不是每个对象各处都有。对象的身份和各端落点只以 `tools/sync-targets.json` 这一份登记为准：某端标为没有的不算漂移，`present` 只表示受管存在，不表示已部署或已核验。正文里不缓存各对象的部署状态，部署沿革见旧私有仓库 `LucaLin233/Agent` 的 git 历史。部署前按登记 ID 回读既有对象的实际身份、identifier 和生效字段；首次安装按已审来源与名称核目标，取得实际 ID 后补登记。与已审基线冲突就停止相关对象并交负责人判定。现在不再做自动的三副本互校和同名发现，所以不能声称已排除额外的同名对象；需要查询时也要有当次授权。
 
 **Minis 内置技能（如 `skill-creator`）不是同步对象**：它们只在 Minis 本地，不进仓库、不上平台，「仓库没有」「平台没有」都不算漂移。判断是否内置要有平台依据；没有入库或映射只表示未受管，不要靠 App 技能页的图标判断。第三方技能在负责人裁定是否同步之前同样不纳入受管集合，不擅自新增落点。
 
@@ -27,11 +27,12 @@
 
 **默认同步授权**：用户已明确确认，本技能范围内所有规则对象（常驻提示词、技能及包内资源、子代理指令与配置）的已授权修改，按 `references/sync.md`〔分支 sync-workflow〕 完成风险分级要求的必要校验和自验，以及需要时的独立放行之后，默认按 `tools/sync-targets.json` 登记的落点完成提交、PR、合并、部署和逐端回读，不逐次征询。这条授权不允许自行新增修改或扩大同步范围。以下情况超出既有授权，仍须确认：新增或删除同步对象，新增端或环境，扩大权限或数据访问面，规则部署以外的生产数据变更，不可逆操作，以及跨端内容冲突需要取舍。审查或验收没通过就不进入后续阶段；逐端回读、来源登记和实际同步状态的记录都不能省，没回读就不算完成。
 
-**生效真源**是 Minis 本地文件：技能是 `/var/minis/skills/<name>/SKILL.md`；常驻提示词有 `/var/minis/memory/SOUL.md` 和 `minis-config` 的 `soul.body` 两处，**以后者为生效值**，两者不一致时先判定当前生效的版本，不自行挑一份覆盖其他。逐处回读判等：
+**发布源与生效值**：已合并的 main 是规则对象的发布源；各登记端实际加载的内容是该端的生效值，分别按下列口径回读判等。现场有未入库改动时，按〔分支 sync-workflow〕第 4 步停止该对象并交用户决定，既不以现场覆盖仓库，也不以 main 覆盖现场。Minis 端的技能是 `/var/minis/skills/<name>/SKILL.md`；常驻提示词有 `/var/minis/memory/SOUL.md` 和 `minis-config` 的 `soul.body` 两处，**以后者为生效值**，两者不一致时先判定当前生效的版本，不自行挑一份覆盖其他。逐处回读判等：
 
-- 常驻提示词：Minis 文件和 `soul.body`、LobeHub agent 的 `systemRole`、仓库 `prompt/`。
-- 技能：Minis 文件；LobeHub 的 `content`、`description` 和 `name`（三者独立，按支持的入口分别更新）；仓库 `skills/`。
-- 子代理：仓库 `subagents/` 和两端的助理配置。
+- 常驻提示词：Minis 文件和 `soul.body`、LobeHub agent 的 `systemRole`、宿主端安装器生成的常驻文件、仓库 `prompt/`。
+- 技能：Minis 文件；LobeHub 的 `content`、`description` 和 `name`（三者独立，按支持的入口分别更新）；宿主端软链；仓库 `skills/`。
+- 子代理：仓库 `subagents/`、Minis 与 LobeHub 的助理配置，以及宿主端的角色文件与 paseo 角色家目录。
+- 宿主端的回读口径见〔分支 sync-host〕。
 
 **上游核对只认 GitHub 仓库**：判断技能有没有上游更新，只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff；不探测技能市场的端点（如 skills.sh 的搜索或下载接口），它们的可用性和返回码不作为来源依据。完整吸收件保持原样、本端约定写同层独立自有文件的通用执行边界见 `luno-core/references/execution.md`〔分支 execution〕〈上游件〉，不只适用于 CCHP：`luno-platform/references/cchp.md` 是本端约定，官方件在同层 `cchp-upstream/`，目录相邻不表示官方原文被改写。**来源例外**要逐个对象裁定并登记：目前只有 `luno-surge`，它的官方 Agent Skill 只随 Surge Mac 应用包分发，取源方式、包身份校验（bundle id、版本、build）和逐文件 sha256 判据写在 `luno-surge/references/SOURCE.md`。例外只对该对象有效，不外推，也不能用同名的第三方仓库冒充官方来源。
 
@@ -57,11 +58,11 @@
 
 ## 同步顺序
 
-本次涉及 LobeHub 的离线验收、现场核对、采集、安装、部署或恢复时，在执行或规划这些步骤前，另完整读取 `references/sync.md`〔分支 sync-lobehub〕；纯仓库改稿及不涉及 LobeHub 的任务不读该分支。
+本次涉及 LobeHub 的离线验收、现场核对、采集、安装、部署或恢复时，在执行或规划这些步骤前，另完整读取 `references/sync.md`〔分支 sync-lobehub〕；涉及宿主端的安装、部署、核对或 GLOBAL 副本时，另完整读取 `references/sync.md`〔分支 sync-host〕。纯仓库改稿及不涉及这些端的任务不读对应分支。
 
 **独立副本或分支上修改 → 必要校验 → GitHub 原生 PR → 串行合并 → 核对现场与仓库基线 → 按合并的变化同步 → 逐端回读。**不使用自研的发布状态机、冻结链、摘要账本、档案窄提交或机器证据回执；不要求每次正文同步都跑全仓重测试或全端巡检。
 
-1. **副本**：每个会话用独立 clone 和唯一任务分支；Minis 上的候选放在 `/var/minis/shared/agent-sync-candidates/<会话标识>/`，不放 `workspace/`，也不用共享 `.git` 的 worktree。一份副本只有一个写入者；各会话只推自己的分支和 PR，不推 main，不写共享集成副本。由负责人指定的收口者逐个合并，并串行部署同一生效对象。原生 PR 承载差分和合并冲突，但不声称能自动解决语义冲突或平台竞态。
+1. **副本**：每个会话用独立 clone 和唯一任务分支；Minis 上的候选放在 `/var/minis/shared/agent-sync-candidates/<会话标识>/`，不放 `workspace/`，也不用共享 `.git` 的 worktree；宿主端的候选可以是 paseo 为任务创建的 worktree（落点按 `luno-platform`〈运行端〉当前端〈工作副本〉），不在受管检出里编辑。一份副本只有一个写入者；各会话只推自己的分支和 PR，不推 main，不写共享集成副本。由负责人指定的收口者逐个合并，并串行部署同一生效对象。原生 PR 承载差分和合并冲突，但不声称能自动解决语义冲突或平台竞态。
 2. **校验**：先读本批 diff 和 `PENDING.md`，核对授权、变化对象和登记落点。只跑变更路径命中的必要测试（以 `tests/run-tests.sh` 的选路为准），纯正文改动跑 `smoke`。`tools/sync-all.sh` 只跑结构守卫和包内校验，不读生效端；rc=1 或 3 阻断，rc=2 只是提示。登记或公共工具变化时，完整执行它们的实际消费者。结构守卫只查加载边、资源边、登记身份、包内引用和义务块是否存在，不比对正文；防止正文弱化靠本文件的分级和独立审查。新增或退休资源要在同批更新 `tools/sync-targets.json`；必需加载的入口变化时，同批更新 `tools/check-rules.py` 的 `REQUIRED_LOADS`。
 3. **提交、PR 与合并**：审阅暂存 diff，显式 `git add <本批路径>` 后普通提交，推到本会话任务分支（不强推），用 `gh pr create` 开原生 PR。合并前读最新 main；基线前进就普通 merge main 到本分支，逐处处理冲突并重跑受影响的测试，不用 union、整份选边或强推。收口者确认上一个 PR 已合并后再合下一个。
 4. **现场基线与恢复来源**：只同步已授权的变化对象及其包内资源，按 `tools/sync-targets.json` 找目标；未登记的先登记，不顺带改无关的端。受管提示词与技能内容**不做同步前的例行重复备份**：仓库先合并、再同步，前态就是仓库历史里的对应旧版本；写前按现场逐项核目标的实际身份、identifier、完整正文和完整资源路径集的字节，以及名称、描述等相关元数据，能否对应仓库历史里明确的版本（提交全哈希和路径）；已经核过的不重复取副本备份，也不把刚合入的新版本冒充旧前态。写入前发现现场与已核基线不一致、存在未入库差异、独有资源或平台状态（如删除重装后的旧 ID、插件绑定）时，停止相关对象，说明缺口和取舍点交用户决定；不自行增加备份流程，不拿候选副本冒充前态。平台 ID、identifier 和插件绑定可能因删除重装改变，按既有授权范围说明影响并回读，不因此每次重复确认或备份。本条只覆盖提示词、技能及包内受管内容，不外推到数据库、业务数据、秘密或系统备份，也不删除任何既有备份；涉及这些对象时仍按原有备份规则。恢复按〈记录与恢复〉用明确的历史版本进行，旧 ID 不保证恢复。
@@ -115,3 +116,16 @@ LobeHub 技能用 `lh skill install` 从已合并的公开 GitHub 子目录安�
 
 恢复前先核现状和并发编辑，按真实前态恢复正文、资源及改过的元数据；要清除新资源时同样需要删除重装的授权，并能按仓库历史明确版本恢复将删对象的正文和资源。旧 ID 不保证恢复，回读恢复后的实际 ID，更新登记并核按名引用。旧 R2 包暂时保留作恢复材料，不随代码退役清桶或删变量；退役工具不再作为常规入口，需使用旧包时另核支持的恢复入口、安全通道及授权。失败只停相关对象，列出已删、已装、已回读与未完成状态，不能凭重装成功报恢复完成。
 <!-- END sync-lobehub -->
+
+<a id="branch-sync-host"></a>
+<!-- BEGIN sync-host -->
+# 宿主端同步专用步骤
+
+宿主端的落点由 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，安装与核对只用 `tools/link-install.py`：默认只列计划，`--apply` 写入，`--check` 只回读。使用前先读仓库 README 的宿主端安装说明。安装器只建目录、软链和 `~/.luno/generated/` 下的生成文件，公开位置（如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.claude/agents/`）是指向生成文件的软链；不读取、不复制、不改写凭据和登录态，不覆盖非受管文件，遇到占位冲突即停止并报告。
+
+1. **前态**：受管检出 `~/.luno/agent-sync` 工作区干净，HEAD 是上次部署的已合并提交；先运行 `--check`。有未入库改动、非受管文件占位或检查不一致时，停止相关对象并交用户决定。
+2. **写入**：把受管检出快进到本次已合并提交（不 merge、不强制覆盖），再运行 `--apply`。软链目标随检出更新，生成文件由安装器按登记重写。
+3. **回读**：`--check` 全部一致：软链解析到受管检出，生成文件与重算结果逐字节相同，没有重名技能；同时报告检出 HEAD。再开一个新会话确认技能和角色可以列出。文件存在或安装器退出码为 0 不代表已被加载。
+4. **GLOBAL 副本**：Minis GLOBAL 变化后，在当次授权内整份单向复制到 `~/.luno/memory/GLOBAL.md`（权限 600）。目标有独有修改即停止，不回写、不合并；复制后逐字节回读，再运行 `--apply` 与 `--check` 重新生成 Codex 常驻文件。正文和私有定位不进入公开仓库、日志或提交。
+5. **恢复**：受管检出回到上一个已合并提交，再运行 `--apply` 与 `--check`；生成文件随之恢复。
+<!-- END sync-host -->
