@@ -131,6 +131,15 @@ case('CCHP 上游入口必需读取降级',1,'必需加载降级',
                    lambda s:s.replace('先完整读取 `references/cchp-upstream/ENTRY.md`',
                                       '按需读取 `references/cchp-upstream/ENTRY.md`')))
 
+# 运行端必读入口：任一端判定或合用指针被删掉都要失败。
+for rel,fragment in G.REQUIRED_READS:
+    case('运行端必读入口缺失 %s：%s'%(rel.rsplit('/',1)[1],fragment[:24]),1,'必需加载降级',
+         lambda p,rel=rel,fragment=fragment:edit(p,rel,lambda s:s.replace(fragment,'',1)))
+case('运行端资源改为可选读取',1,'必需加载降级',
+     lambda p:edit(p,'skills/luno-platform/SKILL.md',
+                   lambda s:s.replace('）读 `references/runtime-host.md`','）可选读 `references/runtime-host.md`',1)
+                             .replace('和 `references/runtime-host.md`','，可选读 `references/runtime-host.md`',1)))
+
 # ── 资源边 ──
 case('角色归属下沉后的必需读取不能降级',1,'必需加载降级',
      lambda p:edit(p,ENTRY,lambda s:s.replace('先完整读取 `references/review.md`',

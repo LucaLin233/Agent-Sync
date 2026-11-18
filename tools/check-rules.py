@@ -26,6 +26,25 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('skills/luno-core/SKILL.md', 'references/review.md'),
                   ('skills/luno-core/references/execution.md', 'luno-core'),
                   ('skills/luno-platform/references/cchp.md', 'references/cchp-upstream/ENTRY.md'))
+# 运行端必读入口：〈运行端〉的端判定与各端资源之间的合用指针按原句片段核对，漏掉、改为可选或
+# 改写判定时报必需加载降级；措辞有意改动时同步更新这里。
+REQUIRED_READS = (
+    ('skills/luno-platform/SKILL.md', '按当前端完整读取对应资源：'),
+    ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
+    ('skills/luno-platform/SKILL.md', 'LobeHub 端（在 LobeHub 助理中运行）读 `references/runtime-lobehub.md`'),
+    ('skills/luno-platform/SKILL.md', 'Claude Code 端（Bash 环境中指定变量 `CLAUDECODE` 为 `1`）'
+                                      '读 `references/runtime-claude-code.md` 和 `references/runtime-host.md`'),
+    ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
+    ('skills/luno-platform/SKILL.md', '在 Claude Code 或 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
+                                      '另读 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-claude-code.md',
+     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-codex.md',
+     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-host.md',
+     '并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用'),
+    ('skills/luno-platform/references/runtime-paseo.md',
+     '其余槽位仍按 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 与 `references/runtime-host.md`'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
@@ -178,6 +197,8 @@ class Guard:
                         path_required_missing += 1
                 elif not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
                     self.problem('必需加载降级')
+        # 必读片段都带资源路径，缺失与路径形态的必需读取同样计入，资源路径为空时归入不完整。
+        path_required_missing += sum(fragment not in bodies.get(src,'') for src,fragment in REQUIRED_READS)
         if not load_count: self.problem("0 条加载语句被核对", incomplete=True)
         if not resource_count: self.problem("0 条资源路径被核对", incomplete=True)
         else:
