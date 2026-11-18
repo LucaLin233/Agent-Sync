@@ -223,7 +223,9 @@
         "skills/luno-platform/references/lobehub.md",
         "skills/luno-platform/references/memory-common.md",
         "skills/luno-platform/references/minis-memory.md",
-        "skills/luno-platform/references/minis.md"
+        "skills/luno-platform/references/minis.md",
+        "skills/luno-platform/references/runtime-minis.md",
+        "skills/luno-platform/references/runtime-lobehub.md"
       ],
       "ends": {
         "repo": {

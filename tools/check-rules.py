@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""结构守卫：加载/资源边（从正文与资源登记现读）、单份身份、references 路径、分支指针、义务块存在性。
+"""结构守卫：加载/资源边、身份、references 路径、分支指针、义务块及中立规则的平台词边界。
 只读当前树，不访问生效端，不检查正文措辞；rc=0 不证明规则无弱化。
 退出码：0 无问题，1 结构错误，2 仅提示，3 检查不完整。
 """
@@ -21,6 +21,7 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/FORGE.md', 'luno-core'),
                   ('subagents/minis-general-fallback.md', 'luno-core'),
                   ('prompt/LUNO.md', 'luno-platform'),
+                  ('skills/luno-core/SKILL.md', 'luno-platform'),
                   ('skills/luno-core/SKILL.md', 'references/review.md'),
                   ('skills/luno-core/references/execution.md', 'luno-core'),
                   ('skills/luno-platform/references/cchp.md', 'references/cchp-upstream/ENTRY.md'))
@@ -31,6 +32,16 @@ BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\
 RETIRED_RESOURCES = ('skills/luno-surge/references/upstream-SKILL.md',
                      'skills/luno-surge/references/upstream-command-reference.md',
                      'skills/luno-surge/assets/logo.png')
+PLATFORM_WORD_RE = re.compile(r'(?<![A-Za-z])(?:Minis|iSH|LobeHub|OnlyBoxes)(?![A-Za-z])'
+                              r'|/var/minis|minis://|subagent_task|max_minutes')
+PLATFORM_WORD_ALLOWED = (
+    'skills/luno-core/references/sync.md',
+    'skills/luno-ops/references/execution-environment.md',
+    'skills/luno-ops/references/cfst.md',
+    'skills/luno-surge/references/command-reference.md',
+    'skills/luno-surge/references/SOURCE.md',
+    'skills/luno-surge/references/official-sources.md',
+)
 # __OBLIGATIONS__
 OBLIGATIONS = (('skills/luno-platform/references/cchp.md', '## 管理入口'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/references/lobehub.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-core/references/review.md', '## 任务归属'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
 
@@ -104,9 +115,20 @@ class Guard:
                     if Path(fn).suffix not in ('.md','.py','.sh'): continue
                     rel=(Path(dp)/fn).relative_to(self.root).as_posix()
                     text=self.read(rel)
-                    if text is not None: out[rel]=strip_frontmatter(text)
+                    if text is not None:
+                        self.platform_words(rel,text)
+                        out[rel]=strip_frontmatter(text)
         if not out: self.problem('扫描范围为空',incomplete=True)
         return out
+
+    def platform_words(self, rel, text):
+        """只查技能 Markdown（含 frontmatter）；脚本中的平台协议和提示不属于规则正文。"""
+        if (not rel.startswith('skills/') or not rel.endswith('.md')
+                or rel.startswith('skills/luno-platform/') or rel in PLATFORM_WORD_ALLOWED):
+            return
+        for line, content in enumerate(text.splitlines(),1):
+            for match in PLATFORM_WORD_RE.finditer(content):
+                self.problem('平台词超出适配层：%s:%d: %s' % (rel,line,match[0]))
 
     def resources(self):
         """技能包资源清单的唯一真源：登记即部署与分发面，故从登记现读。"""
@@ -195,6 +217,8 @@ class Guard:
                 if m is None or m[1]!=name or Path(src).parent.name!=name:
                     self.problem('身份与技能源不一致')
             for end in ('repo','minis','lobehub'):
+                if end!='repo' and end not in ends:
+                    continue
                 v=ends.get(end)
                 if not isinstance(v,dict) or not isinstance(v.get('present'),bool):
                     self.problem('身份端结构');continue

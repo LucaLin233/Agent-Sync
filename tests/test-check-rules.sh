@@ -80,6 +80,32 @@ case('完整正控',0,'无问题')
 case('frontmatter 内的加载语句不算加载边',0,'无问题',
      lambda p:edit(p,ENTRY,lambda s:s.replace('name: luno-core','name: luno-core\nmetadata: "必须加载 `luno-example-only`"',1)))
 
+# ── 平台词只留在端适配与明确例外（Markdown 含 frontmatter，脚本不在此守卫范围）──
+NEUTRAL='skills/luno-authoring/references/prose.md'
+line=(ROOT/NEUTRAL).read_text(encoding='utf-8').count('\n')+2
+case('中立正文的平台词报路径和行号',1,'平台词超出适配层：%s:%d: Minis'%(NEUTRAL,line),
+     lambda p:append(p,NEUTRAL,'\nMinis\n'))
+case('frontmatter 的平台词不能绕过',1,'平台词超出适配层：%s:2: LobeHub'%ENTRY,
+     lambda p:edit(p,ENTRY,lambda s:s.replace('---\n','---\nmetadata: LobeHub\n',1)))
+# 契约夹具独立列出受限词与例外，不从守卫的正则或白名单生成，避免同错同过。
+WORDS=('Minis','iSH','LobeHub','OnlyBoxes','/var/minis','minis://','subagent_task','max_minutes')
+for word in WORDS:
+    g=G.Guard(CASE);g.platform_words(NEUTRAL,'说明\n'+word+'\n')
+    check('平台词判据 '+word,g.hard==['平台词超出适配层：%s:2: %s'%(NEUTRAL,word)],str(g.hard))
+ALLOWED=('skills/luno-platform/SKILL.md',
+         'skills/luno-platform/references/runtime-minis.md',
+         'skills/luno-core/references/sync.md',
+         'skills/luno-ops/references/execution-environment.md',
+         'skills/luno-ops/references/cfst.md',
+         'skills/luno-surge/references/command-reference.md',
+         'skills/luno-surge/references/SOURCE.md',
+         'skills/luno-surge/references/official-sources.md')
+for rel in ALLOWED+('prompt/LUNO.md','subagents/LENS.md','skills/luno-surge/scripts/install.sh'):
+    g=G.Guard(CASE);g.platform_words(rel,' '.join(WORDS))
+    check('平台词范围例外 '+rel,not g.hard,str(g.hard))
+g=G.Guard(CASE);g.platform_words(NEUTRAL,'OpenMinis MinisTools iSHell LobeHubby OnlyBoxesAPI')
+check('产品名边界不误伤较长英文词',not g.hard,str(g.hard))
+
 # ── 资源登记可读性 ──
 case('资源登记不可用',3,'资源登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{bad'))
 
@@ -90,6 +116,9 @@ case('加载目标缺失',1,'加载目标缺失',lambda p:append(p,SYNC,'\n- 写
 case('必需加载被降级为条件加载',1,'必需加载降级',
      lambda p:edit(p,'skills/luno-core/references/execution.md',
                    lambda s:s.replace('先完整加载 `luno-core`','条件加载 `luno-core`')))
+case('当前端入口的必需加载不能降级',1,'必需加载降级',
+     lambda p:edit(p,ENTRY,lambda s:s.replace('必须完整加载 `luno-platform`',
+                                             '条件加载 `luno-platform`',1)))
 def no_loads(p):
     for f in scope_files(p):
         t=f.read_text(encoding='utf-8');u=G.LOAD_RE.sub('加载说明',t)
@@ -172,6 +201,16 @@ case('同一平台 ID 多占',1,'平台身份多占',shared_id)
 case('缺位仍带 ID',1,'缺位身份冲突',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('present',False)))
 case('平台 ID 非法形态',1,'平台身份形态',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('id','bad')))
 case('身份端缺 present',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends']['minis'].pop('present')))
+for end in ('minis','lobehub'):
+    case('移除可选端 '+end,0,'无问题',
+         lambda p,end=end:registry(p,lambda d:[o['ends'].pop(end,None) for o in d['objects']]))
+case('只保留仓库端',0,'无问题',
+     lambda p:registry(p,lambda d:[o.__setitem__('ends',{'repo':o['ends']['repo']}) for o in d['objects']]))
+case('仓库端仍必须登记',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends'].pop('repo')))
+case('仓库端不能标为缺位',1,'仓库身份缺位',
+     lambda p:skill_obj(p,lambda o:o['ends']['repo'].__setitem__('present',False)))
+case('已登记的可选端不能是 null',1,'身份端结构',
+     lambda p:skill_obj(p,lambda o:o['ends'].__setitem__('lobehub',None)))
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']
