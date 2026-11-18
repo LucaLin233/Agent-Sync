@@ -15,6 +15,7 @@ REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加�
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
+HOST_ENDS = ('claude-code','codex','paseo')
 # 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
 REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/LENS.md', 'luno-core'),
@@ -25,6 +26,25 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('skills/luno-core/SKILL.md', 'references/review.md'),
                   ('skills/luno-core/references/execution.md', 'luno-core'),
                   ('skills/luno-platform/references/cchp.md', 'references/cchp-upstream/ENTRY.md'))
+# 运行端必读入口：〈运行端〉的端判定与各端资源之间的合用指针按原句片段核对，漏掉、改为可选或
+# 改写判定时报必需加载降级；措辞有意改动时同步更新这里。
+REQUIRED_READS = (
+    ('skills/luno-platform/SKILL.md', '按当前端完整读取对应资源：'),
+    ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
+    ('skills/luno-platform/SKILL.md', 'LobeHub 端（在 LobeHub 助理中运行）读 `references/runtime-lobehub.md`'),
+    ('skills/luno-platform/SKILL.md', 'Claude Code 端（Bash 环境中指定变量 `CLAUDECODE` 为 `1`）'
+                                      '读 `references/runtime-claude-code.md` 和 `references/runtime-host.md`'),
+    ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
+    ('skills/luno-platform/SKILL.md', '在 Claude Code 或 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
+                                      '另读 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-claude-code.md',
+     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-codex.md',
+     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/references/runtime-host.md',
+     '并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用'),
+    ('skills/luno-platform/references/runtime-paseo.md',
+     '其余槽位仍按 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 与 `references/runtime-host.md`'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
@@ -177,6 +197,8 @@ class Guard:
                         path_required_missing += 1
                 elif not any(m[2]==skill and m[1] in REQUIRED_VERBS for m in LOAD_RE.finditer(body)):
                     self.problem('必需加载降级')
+        # 必读片段都带资源路径，缺失与路径形态的必需读取同样计入，资源路径为空时归入不完整。
+        path_required_missing += sum(fragment not in bodies.get(src,'') for src,fragment in REQUIRED_READS)
         if not load_count: self.problem("0 条加载语句被核对", incomplete=True)
         if not resource_count: self.problem("0 条资源路径被核对", incomplete=True)
         else:
@@ -216,13 +238,16 @@ class Guard:
                 m=re.search(r'^name:\s*[\'\"]?([a-z0-9-]+)[\'\"]?\s*$',fm[1],re.M) if len(fm)==3 and fm[0]=='' else None
                 if m is None or m[1]!=name or Path(src).parent.name!=name:
                     self.problem('身份与技能源不一致')
-            for end in ('repo','minis','lobehub'):
+            for end in ('repo','minis','lobehub')+HOST_ENDS:
                 v=ends.get(end)
                 if not isinstance(v,dict) or not isinstance(v.get('present'),bool):
                     self.problem('身份端结构');continue
                 if not v['present']:
                     if end=='repo':self.problem('仓库身份缺位')
                     if v.get('id') is not None: self.problem('缺位身份冲突')
+                    continue
+                if end in HOST_ENDS:
+                    self.host_identity(end,kind,name,v,owners)
                     continue
                 if end=='minis':
                     if kind=='skill':
@@ -252,6 +277,30 @@ class Guard:
                     key=(end,sid)
                     if key in owners and owners[key]!=name: self.problem('平台身份多占')
                     owners[key]=name
+
+    def host_identity(self, end, kind, name, value, owners):
+        """宿主端使用完整文件的软链或生成文件；不复用平台字段型身份。"""
+        renderer = None
+        if kind=='skill':
+            want='link'
+        elif kind=='prompt' and end in ('claude-code','codex'):
+            want='generated';renderer='claude-main' if end=='claude-code' else 'codex-main'
+        elif name in ('subagents/LENS.md','subagents/FORGE.md') and end in ('claude-code','paseo'):
+            want='generated' if end=='claude-code' else 'link'
+            if end=='claude-code':renderer='claude-role'
+        else:
+            self.problem('宿主端对象不支持');return
+        if value.get('kind')!=want or (renderer is not None and value.get('renderer')!=renderer):
+            self.problem('宿主端身份种类冲突')
+        paths=value.get('paths')
+        if (not isinstance(paths,list) or not paths or any(not isinstance(p,str)
+                or not p.startswith('~/') or '\\' in p
+                or any(c in ('','.','..') for c in p[2:].split('/')) for p in paths)):
+            self.problem('宿主端路径形态');return
+        for path in paths:
+            key=('host',path)
+            if key in owners and owners[key]!=name:self.problem('宿主端身份多占')
+            owners[key]=name
 
     def branches(self,bodies):
         for src,body in bodies.items():

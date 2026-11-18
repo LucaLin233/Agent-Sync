@@ -9,6 +9,14 @@ import json
 import sys
 
 PATHS_RULES = (
+    (('tools/link-install.py', 'tests/test-link-install.py', 'tools/sync-targets.json',
+      'prompt/*', 'subagents/*', 'paseo.json', 'platforms/paseo/*',
+      'skills/luno-platform/references/runtime-host.md',
+      'skills/luno-platform/references/runtime-claude-code.md',
+      'skills/luno-platform/references/runtime-codex.md',
+      'skills/luno-platform/references/runtime-paseo.md',
+      'tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('case', 'test-link-install.py'), '宿主安装器、目标登记与入口配置 → host'),
     (('tools/auth-call.py', 'tests/test-auth-call.py'),
      ('case', 'test-auth-call.py'), '固定认证读取 → auth'),
     (('tools/check-rules.py', 'tools/sync-targets.json',

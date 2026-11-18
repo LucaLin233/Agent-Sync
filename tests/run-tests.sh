@@ -13,6 +13,7 @@
 # 调用方须先用 env -i 起最小白名单，这里只用其已核的 PATH，TMPDIR 默认 /tmp。
 # 变更路径→必跑套件（机器表 tests/test_paths.py；本块与 render-paths 输出须一致）：
 # >>> PATHS_RULES
+#   宿主安装器、目标登记与入口配置 → host
 #   固定认证读取 → auth
 #   结构守卫或边登记 → gate
 #   正文契约及既有用例 → body
@@ -70,6 +71,7 @@ test-lh-verify.py|verify|cd tests && python3 -B -m unittest -v test-lh-verify|0
 test-minis-verify.py|minis-verify|cd tests && python3 -B -m unittest -v test-minis-verify|0
 test-lh-collect.py|lh-wiring|cd tests && python3 -B -m unittest -v test-lh-collect|0
 test-lh-deploy.py|lh-wiring|cd tests && python3 -B -m unittest -v test-lh-deploy|0
+test-link-install.py|host|cd tests && python3 -B -m unittest -v test-link-install|0
 '
 
 mode=${1:-smoke}

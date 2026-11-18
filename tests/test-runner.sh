@@ -122,7 +122,7 @@ for label,args,stdin in (('未知组',('group','nope'),None),
     code,out=rt(*args,stdin=stdin)
     check('runner 拒绝%s（rc=2，未跑任何入口）'%label,code==2 and not ran(out),'rc=%d\n%s'%(code,out[-300:]))
 code,out=rt('select-paths',stdin='tests/run-tests.sh\0tools/check-rules.py\0')
-check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["group", "auth"], ["group", "identity"], ["group", "verify"], ["group", "minis-verify"], ["group", "lh-wiring"], ["case", "sync-all.sh"], ["case", "test-runner.sh"], ["group", "gate"]]',out)
+check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["case", "test-link-install.py"], ["group", "auth"], ["group", "identity"], ["group", "verify"], ["group", "minis-verify"], ["group", "lh-wiring"], ["case", "sync-all.sh"], ["case", "test-runner.sh"], ["group", "gate"]]',out)
 def expand(doc):
     got=set()
     for s in doc:

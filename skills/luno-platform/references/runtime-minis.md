@@ -17,7 +17,8 @@
 
 ## 截断与压缩
 
-Minis 工具结果自动卸载按 `references/minis.md`〔分支 minis-runtime-context〕。
+- Minis 工具结果自动卸载按 `references/minis.md`〔分支 minis-runtime-context〕。
+- 批次间收口时提示用户查看输入框用量，在约30%（约300K）时手动压缩；该数值只是用户操作参考，不是助手可估算的余量或平台硬限。容量事件包括收到 App 实际容量提示；不改 App 自动压缩设置，自动压缩只作平台兜底。
 
 ## 临时目录
 
@@ -51,5 +52,9 @@ Minis 工具结果自动卸载按 `references/minis.md`〔分支 minis-runtime-c
 ## 连接清单
 
 SSH 主机清单和连接约定在 Minis 端的 `GLOBAL.md`。
+
+## Surge 控制目标
+
+默认连同机的 Controller 和 HTTP API（脚本默认 `127.0.0.1`）。
 
 来源与许可：自编本端适配。自 `luno-core` 迁入的句子沿用原文件的 MIT 精选改写性质（Copyright (c) 2026 Matt Pocock；Copyright (c) 2026 OpenMinis），完整许可随包见 ../LICENSE.matt-pocock.txt、../LICENSE.openminis.txt；取材登记见仓库 skills-sources.md。
