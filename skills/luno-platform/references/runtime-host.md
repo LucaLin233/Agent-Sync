@@ -8,13 +8,13 @@
 
 ## 执行环境
 
-- 本端执行环境是 paseo 容器（Debian 12 基础镜像，非 root 用户 `paseo`，uid/gid 1000），Python 3 与 PyYAML 由仓库 `platforms/paseo/Dockerfile` 的子镜像提供；可写范围是 `/home/paseo` 与 `/workspace` 两个挂载。Claude Code 与 Codex 各自的沙箱和审批设置按其运行端资源。来源可信、入口及依赖已静态核对的测试可以把容器当作原生执行环境。
+- 本端执行环境是 paseo 容器（Debian 12 基础镜像，非 root 用户 `paseo`，uid/gid 1000），Python 3 与 PyYAML 由仓库 `platforms/paseo/Dockerfile` 的子镜像提供；持久的可写路径是 `/home/paseo` 与 `/workspace` 两个挂载，容器内 `/tmp` 可写但不持久。Claude Code 与 Codex 各自的沙箱和审批设置按其运行端资源。来源可信、入口及依赖已静态核对的测试可以把容器当作原生执行环境。
 - 容器内没有 Docker 和 systemd，也不挂载 Docker socket；需要它们的测试和重测试另选隔离环境，前提和限制按 `luno-ops` 入口〈安全与测试〉。
 - 并行执行在容器内的收益没有验证过，不作推荐手段。
 
 ## 秘密注入
 
-秘密由容器环境或 paseo provider 的 `env` 注入运行会话。容器环境来自用户在仓库外维护的 Compose env 文件（权限 600），AI 不创建、不读取该文件。缺失时报告变量名，请用户在该文件中设置并重建容器，不提供在聊天里粘贴的入口。paseo 的 `config.json` 是明文，只放非秘密值；Claude Code 与 Codex 的登录态保存在 `/home/paseo` 持久卷中，由用户在容器内登录。
+秘密由容器环境或 paseo provider 的 `env` 注入运行会话。容器环境来自用户在仓库外部署目录中维护的 Compose env 文件 `paseo.env`（权限 600），AI 不创建、不读取该文件。缺失时报告变量名，请用户在该文件中设置并重建容器，不提供在聊天里粘贴的入口。paseo 的 `config.json` 是明文，只放非秘密值；Claude Code 与 Codex 的登录态保存在 `/home/paseo` 持久卷中，由用户在容器内登录。
 
 ## 技能根
 
