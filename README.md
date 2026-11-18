@@ -259,16 +259,17 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
 
 专项测试（不进常跑）：`sh tests/run-tests.sh case test-lh-collect.py`、`sh tests/run-tests.sh case test-lh-deploy.py`；选路见 `tests/run-tests.sh` 头部。
 
-## 宿主端安装（Claude Code、Codex 与 paseo）
+## 宿主端安装（Docker Compose 运行的 paseo、Claude Code 与 Codex）
 
-宿主端是运行 Claude Code、Codex 并由 paseo 托管的 Debian 主机。规则与流程按 `skills/luno-core/references/sync.md`〔分支 sync-host〕，各端机制见 `skills/luno-platform/references/runtime-host.md`、`runtime-claude-code.md`、`runtime-codex.md`、`runtime-paseo.md`。
+宿主端是 Debian 主机上用 Docker Compose 运行的 paseo 容器；Claude Code 与 Codex 在容器内以非 root 用户 `paseo`（uid/gid 1000）运行，`~` 即容器内的 `/home/paseo`（持久卷）。规则与流程按 `skills/luno-core/references/sync.md`〔分支 sync-host〕，各端机制见 `skills/luno-platform/references/runtime-host.md`、`runtime-claude-code.md`、`runtime-codex.md`、`runtime-paseo.md`。下文的 `dc` 代表在部署目录执行的 `docker compose`，容器内命令都用 `dc exec --user paseo paseo …`。
 
-1. **受管检出**：把本仓库克隆到 `~/.luno/agent-sync`，只快进到已合并的 main，不在其中编辑。
-2. **GLOBAL 副本**：先把 Minis `GLOBAL.md` 整份复制到 `~/.luno/memory/GLOBAL.md`（600）。缺这个文件时安装器在预检阶段报错，不做任何写入；以后 GLOBAL 更新，复制后再运行一次 `--apply` 与 `--check`，重新生成 Codex 常驻文件。宿主端自持的经验日志是 `~/.luno/memory/MEMORY.md`。
-3. **安装与核对**：在受管检出中运行 `python3 -B tools/link-install.py`（需要 PyYAML，Debian 用 `python3-yaml`；默认只列计划），确认后加 `--apply` 写入，用 `--check` 回读。安装器按 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，建立技能软链、`~/.luno/generated/` 下的生成文件及其公开软链（`~/.claude/CLAUDE.md`、`~/.claude/agents/lens.md`、`forge.md`、`~/.codex/AGENTS.md`）和四个角色家目录 `~/.luno/homes/{lens,forge}-{claude,codex}/`。它不读取、不复制凭据和登录态，不改写用户已有的 settings 或 config，遇到非受管文件占位即停止并报告。
-4. **登录**：主会话照常登录 Claude Code 与 Codex；四个角色家目录分别登录一次，例如 `CLAUDE_CONFIG_DIR=~/.luno/homes/lens-claude claude`、`CODEX_HOME=~/.luno/homes/forge-codex codex login`。
-5. **paseo**：按 `platforms/paseo/config.example.json` 合并四个角色 provider 到 `~/.paseo/config.json`（把 `USER` 换成实际用户），并开启 `daemon.mcp.injectIntoAgents`；用 `paseo daemon set-password` 设访问密码，手机配对用 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查和 `smoke`、`select` 两个测试脚本。
-6. **验收**：`--check` 全部一致后，新开会话确认技能可列出，Claude Code 另确认 `lens`、`forge` 子代理可列出（Codex 有意不装会话内角色，角色经 paseo provider 核对）；在 paseo 中派一次角色 provider，核对 `get_agent_status` 的 provider 与模型，并确认角色家目录中的角色文件是实际加载来源。
+1. **构建与启动**：主机先装好 Docker Engine 与 Compose 插件。把 `platforms/paseo/Dockerfile` 与 `compose.example.yaml` 复制到仓库外的部署目录（后者改名为 `compose.yaml`），在同目录建立只由你维护的 env 文件（权限 600），写入 `PASEO_PASSWORD`。确认 `./paseo-home`、`./workspace` 归属 uid/gid 1000 后，运行 `dc up -d --build`。端口只绑定 `127.0.0.1:6767`；手机经 relay 连接。不要挂载 Docker socket，不用 host 网络，也不开特权模式。
+2. **受管检出**：`dc exec --user paseo paseo git clone https://github.com/LucaLin233/Agent-Sync.git /home/paseo/.luno/agent-sync`。之后只快进到已合并的 main，不在其中编辑。
+3. **GLOBAL 副本**：把 Minis `GLOBAL.md` 整份复制到主机上的 `./paseo-home/.luno/memory/GLOBAL.md`（即容器内 `~/.luno/memory/GLOBAL.md`，属主 1000，权限 600）。缺这个文件时安装器在预检阶段报错，不做任何写入。以后 GLOBAL 更新时，复制后再运行一次 `--apply` 与 `--check`，重新生成 Codex 常驻文件。宿主端自持的经验日志是 `~/.luno/memory/MEMORY.md`。
+4. **安装与核对**：`dc exec --user paseo paseo python3 -B /home/paseo/.luno/agent-sync/tools/link-install.py --checkout /home/paseo/.luno/agent-sync`。默认只列计划，确认后加 `--apply` 写入，用 `--check` 回读。安装器按 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，建立以下内容：技能软链；`~/.luno/generated/` 下的生成文件及其公开软链（`~/.claude/CLAUDE.md`、`~/.claude/agents/lens.md`、`forge.md`、`~/.codex/AGENTS.md`）；四个角色家目录 `~/.luno/homes/{lens,forge}-{claude,codex}/`。它不读取、不复制凭据和登录态，不改写已有的 settings 或 config；遇到非受管文件占位即停止并报告。
+5. **登录**：主会话执行 `dc exec -it --user paseo paseo claude` 和 `dc exec -it --user paseo paseo codex login`。四个角色家目录各登录一次，例如 `dc exec -it --user paseo -e CLAUDE_CONFIG_DIR=/home/paseo/.luno/homes/lens-claude paseo claude`、`dc exec -it --user paseo -e CODEX_HOME=/home/paseo/.luno/homes/forge-codex paseo codex login`。登录态保存在持久卷中。
+6. **paseo 配置**：把 `platforms/paseo/config.example.json` 中的 `daemon.mcp` 与四个角色 provider 合并进 `./paseo-home/.paseo/config.json`。监听地址由镜像环境变量决定，不在这里改。合并后运行 `dc exec --user paseo paseo paseo reload`；手机配对用 `dc exec -it --user paseo paseo paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。
+7. **验收**：`--check` 全部一致后，新开会话确认技能可以列出；在 Claude Code 中另确认 `lens`、`forge` 子代理可以列出（Codex 有意不装会话内角色，角色经 paseo provider 核对）。在 paseo 中派一次角色 provider，核对 `get_agent_status` 返回的 provider 与模型，并确认实际加载的是角色家目录中的角色文件。镜像全局设置了 `CLAUDE_CONFIG_DIR` 与 `CODEX_HOME`，所以要特别确认角色 provider 的 `env` 确实覆盖了这两个变量。
 
 ## 测试与历史
 

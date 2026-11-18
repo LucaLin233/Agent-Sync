@@ -121,11 +121,11 @@ LobeHub 技能用 `lh skill install` 从已合并的公开 GitHub 子目录安�
 <!-- BEGIN sync-host -->
 # 宿主端同步专用步骤
 
-宿主端的落点由 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，安装与核对只用 `tools/link-install.py`：默认只列计划，`--apply` 写入，`--check` 只回读。使用前先读仓库 README 的宿主端安装说明。安装器只建目录、软链和 `~/.luno/generated/` 下的生成文件，公开位置（如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.claude/agents/`）是指向生成文件的软链；不读取、不复制、不改写凭据和登录态，不覆盖非受管文件，遇到占位冲突即停止并报告。
+宿主端是 Docker Compose 运行的 paseo 容器，落点由 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，均为容器内路径（`~` 即 `/home/paseo`）；下列命令都在容器内以 `paseo` 用户执行（`docker compose exec --user paseo paseo …`）。安装与核对只用 `tools/link-install.py`：默认只列计划，`--apply` 写入，`--check` 只回读。使用前先读仓库 README 的宿主端安装说明。安装器只建目录、软链和 `~/.luno/generated/` 下的生成文件，公开位置（如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.claude/agents/`）是指向生成文件的软链；不读取、不复制、不改写凭据和登录态，不覆盖非受管文件，遇到占位冲突即停止并报告。
 
 1. **前态**：受管检出 `~/.luno/agent-sync` 工作区干净，HEAD 是上次部署的已合并提交；先运行 `--check`。有未入库改动、非受管文件占位或检查不一致时，停止相关对象并交用户决定。
 2. **写入**：把受管检出快进到本次已合并提交（不 merge、不强制覆盖），再运行 `--apply`。软链目标随检出更新，生成文件由安装器按登记重写。
 3. **回读**：`--check` 全部一致：软链解析到受管检出，生成文件与重算结果逐字节相同，没有重名技能；同时报告检出 HEAD。再开新会话确认技能可以列出，Claude Code 另确认 `lens`、`forge` 子代理可以列出；Codex 不装会话内角色，角色按 `luno-platform`〈运行端〉的 paseo 资源经角色 provider 核对。文件存在或安装器退出码为 0 不代表已被加载。
-4. **GLOBAL 副本**：Minis GLOBAL 变化后，在当次授权内整份单向复制到 `~/.luno/memory/GLOBAL.md`（权限 600）。目标有独有修改即停止，不回写、不合并；复制后逐字节回读，再运行 `--apply` 与 `--check` 重新生成 Codex 常驻文件。正文和私有定位不进入公开仓库、日志或提交。
+4. **GLOBAL 副本**：Minis GLOBAL 变化后，在当次授权内整份单向复制到 `~/.luno/memory/GLOBAL.md`（权限 600，属主为容器用户 uid 1000）。目标有独有修改即停止，不回写、不合并；复制后逐字节回读，再运行 `--apply` 与 `--check` 重新生成 Codex 常驻文件。正文和私有定位不进入公开仓库、日志或提交。
 5. **恢复**：受管检出回到上一个已合并提交，再运行 `--apply` 与 `--check`；生成文件随之恢复。
 <!-- END sync-host -->

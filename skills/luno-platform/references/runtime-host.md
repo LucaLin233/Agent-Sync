@@ -1,6 +1,6 @@
 # 宿主端运行适配（Claude Code、Codex 共用）
 
-本资源是 `luno-platform` 入口〈运行端〉在宿主端的共用槽位取值。宿主端指用 `tools/link-install.py` 安装了本仓库提示词与技能的 Debian 主机，Claude Code 与 Codex 都在其上运行，可由 paseo 托管。只在当前端为 Claude Code 或 Codex 时读取，并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用，同一槽位两处都写时以后者为准。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
+本资源是 `luno-platform` 入口〈运行端〉在宿主端的共用槽位取值。宿主端指 Debian 主机上用 Docker Compose 运行的 paseo 容器：Claude Code 与 Codex 在容器内以非 root 用户 `paseo` 运行，本仓库提示词与技能由容器内的 `tools/link-install.py` 安装。本资源中的 `~` 指容器内的 `/home/paseo`（持久卷）。只在当前端为 Claude Code 或 Codex 时读取，并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用，同一槽位两处都写时以后者为准。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
 ## 临时目录
 
@@ -8,13 +8,13 @@
 
 ## 执行环境
 
-- 本端执行环境是宿主 Debian 的原生 Linux；Claude Code 与 Codex 各自的沙箱和审批设置按其运行端资源。来源可信、入口及依赖已静态核对的测试可以把宿主当作原生执行环境。
-- Docker、systemd 可用于测试隔离，前提和限制按 `luno-ops` 入口〈安全与测试〉。宿主同时运行生产服务时，重测试和 Docker 测试不落在宿主上，另选隔离环境。
-- 并行执行在宿主上的收益没有验证过，不作推荐手段。
+- 本端执行环境是 paseo 容器（Debian 12 基础镜像，非 root 用户 `paseo`，uid/gid 1000），Python 3 与 PyYAML 由仓库 `platforms/paseo/Dockerfile` 的子镜像提供；可写范围是 `/home/paseo` 与 `/workspace` 两个挂载。Claude Code 与 Codex 各自的沙箱和审批设置按其运行端资源。来源可信、入口及依赖已静态核对的测试可以把容器当作原生执行环境。
+- 容器内没有 Docker 和 systemd，也不挂载 Docker socket；需要它们的测试和重测试另选隔离环境，前提和限制按 `luno-ops` 入口〈安全与测试〉。
+- 并行执行在容器内的收益没有验证过，不作推荐手段。
 
 ## 秘密注入
 
-秘密由宿主环境或 paseo provider 的 `env` 注入运行会话。缺失时报告变量名，请用户在宿主上设置（例如写入启动 paseo daemon 的服务环境），不提供在聊天里粘贴的入口。paseo 的 `config.json` 是明文，只放非秘密值。
+秘密由容器环境或 paseo provider 的 `env` 注入运行会话。容器环境来自用户在仓库外维护的 Compose env 文件（权限 600），AI 不创建、不读取该文件。缺失时报告变量名，请用户在该文件中设置并重建容器，不提供在聊天里粘贴的入口。paseo 的 `config.json` 是明文，只放非秘密值；Claude Code 与 Codex 的登录态保存在 `/home/paseo` 持久卷中，由用户在容器内登录。
 
 ## 技能根
 
@@ -22,8 +22,8 @@ Claude Code 为 `~/.claude/skills/<技能名>/`（paseo 的 Claude Code 角色�
 
 ## 工作副本
 
-- 受管检出是 `~/.luno/agent-sync`：只由收口者在干净状态下快进到已合并的 main，供软链和安装器使用，不在其中编辑。
-- 候选在 paseo 为任务创建的 worktree 或独立 clone 中编辑：一个任务一个分支、一个写入者，不写受管检出或共享集成副本。
+- 受管检出是 `~/.luno/agent-sync`（位于持久卷）：只由收口者在干净状态下快进到已合并的 main，供软链和安装器使用，不在其中编辑。
+- 候选在 `/workspace` 下的独立 clone 或 paseo 为任务创建的 worktree 中编辑：一个任务一个分支、一个写入者，不写受管检出或共享集成副本。
 
 ## 远端工作目录
 
