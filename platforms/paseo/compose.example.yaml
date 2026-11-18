@@ -1,11 +1,12 @@
-# 将本文件和 Dockerfile 复制到仓库外的私有部署目录，本文件改名为 compose.yaml。
+# 本文件复制到仓库外私有部署目录并改名为 compose.yaml，Dockerfile 单独放在 ./build/。
+# build 目录只放构建文件，不放 env、登录态或工作区。
 # paseo.env 由用户维护，权限 600，包含 PASEO_PASSWORD；不要提交、同步或分享部署目录。
 # 预先创建 paseo-home、workspace 并设为 uid/gid 1000；paseo-home 会保存登录态和凭据。
 # 不挂载 docker.sock，不用 host 网络，不开 privileged。
 services:
   paseo:
     build:
-      context: .
+      context: ./build
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:

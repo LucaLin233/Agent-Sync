@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """宿主安装器离线回归：临时 HOME、真实进程、文件与软链；不访问真实登录态。"""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -9,18 +10,22 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools/link-install.py"
+SPEC = importlib.util.spec_from_file_location("link_install", TOOL)
+INSTALL = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(INSTALL)
 
 
 class InstallTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="link-install-test-")
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.home = self.root / "home/paseo"
         self.home.mkdir(parents=True)
         self.checkout = self.root / "checkout with space"
@@ -51,6 +56,14 @@ class InstallTest(unittest.TestCase):
         return {str(p.relative_to(self.home)): os.readlink(p) if p.is_symlink()
                 else p.read_bytes() if p.is_file() else "directory"
                 for p in self.home.rglob("*")}
+
+    def git(self, *args):
+        return subprocess.check_output(["git", "-C", str(self.checkout), *args], env=self.env).decode().strip()
+
+    def commit(self):
+        self.git("add", ".")
+        self.git("-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "fixture change")
+        return self.git("rev-parse", "HEAD")
 
     def test_plan_is_read_only_and_install_is_idempotent(self):
         before = self.snapshot()
@@ -143,6 +156,172 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.call("--apply")[0], 2)
         self.assertEqual(self.snapshot(), before)
 
+    def test_identical_unowned_artifact_is_not_adopted(self):
+        self.assertEqual(self.call("--apply")[0], 0)
+        public = self.home / ".codex/AGENTS.md"
+        public.unlink()
+        before = self.snapshot()
+        self.assertEqual(self.call("--apply")[0], 2)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_role_home_wrong_mode_or_owner_blocks_without_repair(self):
+        role = self.home / ".luno/homes/lens-codex"
+        role.mkdir(parents=True, mode=0o755)
+        before = self.snapshot()
+        self.assertEqual(self.call("--apply")[0], 2)
+        self.assertEqual(stat.S_IMODE(role.stat().st_mode), 0o755)
+        self.assertEqual(self.snapshot(), before)
+        role.chmod(0o700)
+        tree = INSTALL.HomeTree(self.home)
+        self.addCleanup(tree.close)
+        with patch.object(INSTALL.os, "geteuid", return_value=os.geteuid() + 1):
+            self.assertEqual(INSTALL.state({"kind": "directory", "path": role}, tree), "conflict")
+
+    def test_codex_override_shadowing_is_reported_without_reading_or_overwriting(self):
+        self.assertEqual(self.call("--apply")[0], 0)
+        for relative in (".codex", ".luno/homes/lens-codex", ".luno/homes/forge-codex"):
+            with self.subTest(home=relative):
+                override = self.home / relative / "AGENTS.override.md"
+                override.write_bytes(b"USER OVERRIDE")
+                before = self.snapshot()
+                for mode in ("--check", "--apply"):
+                    rc, report = self.call(mode)
+                    self.assertEqual(rc, 2)
+                    self.assertIn({"code": "agents_override_shadowing", "path": str(override)}, report["errors"])
+                    self.assertEqual(self.snapshot(), before)
+                override.unlink()
+
+    def test_global_and_legacy_parent_symlinks_are_rejected_before_reads(self):
+        for relative in (".luno/memory", ".codex/skills", ".codex/skills/legacy"):
+            with self.subTest(parent=relative):
+                path = self.home / relative
+                if path.exists():
+                    shutil.rmtree(path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                outside = self.root / ("outside-" + relative.replace("/", "-"))
+                outside.mkdir()
+                (outside / "GLOBAL.md").write_bytes(b"INVALID UTF8\xff")
+                (outside / "SKILL.md").write_bytes(b"INVALID UTF8\xff")
+                path.symlink_to(outside, target_is_directory=True)
+                rc, report = self.call("--apply")
+                self.assertEqual(rc, 2)
+                self.assertIn("unsafe_parent", [e["code"] for e in report["errors"]])
+                self.assertFalse((self.home / ".claude").exists())
+                self.assertEqual(sorted(p.name for p in outside.iterdir()), ["GLOBAL.md", "SKILL.md"])
+                path.unlink()
+                if relative == ".luno/memory":
+                    path.mkdir()
+                    self.global_file.write_bytes(b"global fixture")
+
+    def test_parent_replacement_after_plan_cannot_redirect_writes(self):
+        parent = self.home / ".claude"
+        parent.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        tree = INSTALL.HomeTree(self.home)
+        self.addCleanup(tree.close)
+        actions, errors = INSTALL.plan(self.checkout, self.home, tree)
+        self.assertEqual(errors, [])
+        parent.rename(self.home / "checked-claude")
+        parent.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(INSTALL.InstallError) as result:
+            INSTALL.apply(actions, tree)
+        self.assertIn(result.exception.code, ("parent_changed", "path_conflict"))
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_preflight_and_interrupted_upgrade_recovery_preserve_login_state(self):
+        registry_file = self.checkout / "tools/sync-targets.json"
+        new_registry = json.loads(registry_file.read_text())
+        old_registry = json.loads(registry_file.read_text())
+        old_registry["objects"] = [o for o in old_registry["objects"] if o["id"] != "subagents/FORGE.md"]
+        registry_file.write_text(json.dumps(old_registry))
+        old = self.commit()
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        registry_file.write_text(json.dumps(new_registry))
+        prompt = self.checkout / "prompt/LUNO.md"
+        prompt.write_bytes(prompt.read_bytes() + b"\nNEW_VERSION\n")
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"], report["targetHead"]), (0, "ready", new))
+        self.assertEqual(self.snapshot(), baseline)
+
+        # 独立进程写到新版独有暂存文件的一部分时中断，重跑和回退都须能处理。
+        self.git("checkout", "-q", new)
+        script = self.root / "interrupt.py"
+        script.write_text('''import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+def interrupt(action, tree):
+    if action["path"].name == "forge.md":
+        fd = os.open(module.staging_path(action).name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+                     dir_fd=tree.directory(action["path"].parent))
+        os.write(fd, b"INTERRUPTED_PARTIAL_CONTENT")
+        os._exit(99)
+    write(action, tree)
+write = module.write_generated
+module.write_generated = interrupt
+module.main(sys.argv[2:])
+''')
+        proc = subprocess.run([sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout),
+                               "--apply", "--previous", old], env=self.env, capture_output=True, timeout=30)
+        self.assertEqual(proc.returncode, 99, proc.stderr)
+        self.assertTrue((self.home / ".claude/agents/forge.md").is_symlink())
+        artifact = self.home / ".luno/generated/claude-code/agents/forge.md"
+        staging = artifact.with_name(".forge.md.link-install.tmp")
+        self.assertFalse(artifact.exists())
+        self.assertEqual(staging.read_bytes(), b"INTERRUPTED_PARTIAL_CONTENT")
+        login = self.home / ".luno/homes/forge-codex/auth.json"
+        login.write_bytes(b"SYNTH_LOGIN")
+        login.chmod(0o600)
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--apply", "--previous", new)
+        self.assertEqual((rc, report["status"]), (0, "completed"), report["errors"])
+        self.assertFalse((self.home / ".claude/agents/forge.md").is_symlink())
+        self.assertFalse((self.home / ".luno/generated/claude-code/agents/forge.md").exists())
+        self.assertFalse(staging.exists())
+        self.assertFalse((self.home / ".luno/homes/forge-codex/AGENTS.md").is_symlink())
+        self.assertEqual(login.read_bytes(), b"SYNTH_LOGIN")
+        self.assertEqual(self.call("--check")[0], 0)
+        self.assertEqual(self.call("--apply", "--previous", new)[0], 0)
+        # 同一中断状态也允许直接重跑新版完成升级。
+        self.git("checkout", "-q", new)
+        proc = subprocess.run([sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout),
+                               "--apply", "--previous", old], env=self.env, capture_output=True, timeout=30)
+        self.assertEqual(proc.returncode, 99, proc.stderr)
+        self.assertEqual(self.call("--apply", "--previous", old)[0], 0)
+        self.assertEqual(self.call("--check")[0], 0)
+        self.assertNotIn(b"INTERRUPTED_PARTIAL_CONTENT", artifact.read_bytes())
+        self.assertEqual(login.read_bytes(), b"SYNTH_LOGIN")
+
+    def test_preflight_rejects_candidate_conflict_before_git_switch(self):
+        self.assertEqual(self.call("--apply")[0], 0)
+        old = self.git("rev-parse", "HEAD")
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        registry["objects"][0]["ends"]["claude-code"]["paths"].append("~/.claude/user.md")
+        registry_file.write_text(json.dumps(registry))
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        (self.home / ".claude/user.md").write_bytes(b"UNMANAGED")
+        before = self.snapshot()
+        self.assertEqual(self.call("--preflight", new)[0], 2)
+        self.assertEqual(self.git("rev-parse", "HEAD"), old)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_compose_build_context_excludes_env_credentials_and_workspace(self):
+        compose = yaml.safe_load((ROOT / "platforms/paseo/compose.example.yaml").read_text())
+        self.assertEqual(set(compose["services"]), {"paseo"})
+        service = compose["services"]["paseo"]
+        self.assertEqual(service["build"], {"context": "./build", "dockerfile": "Dockerfile"})
+        self.assertEqual(service["env_file"], ["./paseo.env"])
+        self.assertEqual(service["ports"], ["127.0.0.1:6767:6767"])
+        self.assertEqual(service["volumes"], ["./paseo-home:/home/paseo", "./workspace:/workspace"])
+        self.assertFalse(service.get("privileged", False))
+        self.assertNotEqual(service.get("network_mode"), "host")
+
     def test_parent_symlink_cannot_redirect_installer_writes(self):
         outside = self.root / "outside"
         outside.mkdir()
@@ -172,6 +351,32 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(credential.read_bytes(), b"SYNTH_CREDENTIAL_FILE")
         self.assertNotIn("SYNTH_CREDENTIAL_FILE", json.dumps(report))
+
+    def test_atomic_update_and_staging_conflict(self):
+        self.assertEqual(self.call("--apply")[0], 0)
+        artifact = self.home / ".luno/generated/codex/AGENTS.md"
+        original = artifact.read_bytes()
+        self.global_file.write_bytes(b"new global fixture")
+        tree = INSTALL.HomeTree(self.home)
+        self.addCleanup(tree.close)
+        actions, errors = INSTALL.plan(self.checkout, self.home, tree)
+        self.assertEqual(errors, [])
+        with patch.object(INSTALL.os, "replace", side_effect=INSTALL.InstallError("interrupted", artifact)):
+            with self.assertRaises(INSTALL.InstallError):
+                INSTALL.apply(actions, tree)
+        self.assertEqual(artifact.read_bytes(), original)
+        staging = artifact.with_name(".AGENTS.md.link-install.tmp")
+        self.assertTrue(staging.is_file())
+        self.assertEqual(self.call("--apply")[0], 0)
+        self.assertFalse(staging.exists())
+        self.assertNotEqual(artifact.read_bytes(), original)
+        credential = self.home / ".codex/auth.json"
+        credential.write_bytes(b"SYNTH_SECRET")
+        staging.symlink_to(credential)
+        before = self.snapshot()
+        self.assertEqual(self.call("--apply")[0], 2)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(credential.read_bytes(), b"SYNTH_SECRET")
 
     def test_successful_install_preserves_existing_login_and_settings_files(self):
         paths = (".claude/.credentials.json", ".claude/settings.json", ".codex/auth.json", ".codex/config.toml")
