@@ -121,11 +121,11 @@ LobeHub 技能用 `lh skill install` 从已合并的公开 GitHub 子目录安�
 <!-- BEGIN sync-host -->
 # 宿主端同步专用步骤
 
-宿主端是 Docker Compose 运行的 paseo 容器，落点由 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，均为容器内路径（`~` 即 `/home/paseo`）；下列命令都在容器内以 `paseo` 用户执行（`docker compose exec --user paseo paseo …`）。安装与核对只用 `tools/link-install.py`：默认只列计划，`--preflight <目标提交>` 在切换版本前只读预检，`--apply` 写入，`--check` 只回读；它不 fetch，也不切换 Git。使用前先读仓库 README 的宿主端安装说明。安装器只建目录、软链和 `~/.luno/generated/` 下的生成文件，公开位置（如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.claude/agents/`）是指向生成文件的软链；不读取、不复制、不改写凭据和登录态，不覆盖非受管文件；遇到占位冲突、经非受管软链的路径、内容相同但没有对应公开软链的生成文件，或角色家目录属主、权限（700）不符，即停止并报告。
+宿主端是 Docker Compose 运行的 paseo 容器，落点由 `tools/sync-targets.json` 的 `claude-code`、`codex`、`paseo` 端登记，均为容器内路径（`~` 即 `/home/paseo`）；下列命令都在容器内以 `paseo` 用户执行（`docker compose exec --user paseo paseo …`）。安装与核对只用 `tools/link-install.py`：默认只列计划，`--preflight <目标提交>` 在切换版本前只读预检，`--apply` 写入，`--check` 只回读；它不 fetch，也不切换 Git。使用前先读仓库 README 的宿主端安装说明。安装器只建目录、软链和 `~/.luno/generated/` 下的生成文件，公开位置（如 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md`、`~/.claude/agents/`）是指向生成文件的软链；不读取、不复制、不改写凭据和登录态，不覆盖非受管文件；遇到占位冲突、经非受管软链的路径、内容相同但没有对应公开软链的生成文件、角色家目录属主或权限（700）不符，或主会话与 `lens-codex`、`forge-codex` 家目录中存在 `AGENTS.override.md`（遮蔽常驻提示词），即停止并报告，交用户处理。
 
 1. **前态**：受管检出 `~/.luno/agent-sync` 工作区干净，HEAD 是上次部署的已合并提交（记为旧版）；先运行 `--check`，再把本次已合并提交取到本地（记为新版），以它运行 `--preflight <新版>`。预检要求检出干净、现有安装与检出一致、新版登记没有冲突，并列出旧版、新版与将退役的入口；未就绪、有未入库改动、非受管文件占位或检查不一致时，停止相关对象并交用户决定。
 2. **写入**：把受管检出快进到新版（不 merge、不强制覆盖），再运行 `--apply --previous <旧版>`。软链目标随检出更新，生成文件由安装器按登记重写；只退役旧版独有的公开软链和带受管标记的生成文件，不删目录、设置与登录态；写入中断时以同样参数重跑。
-3. **回读**：`--check` 全部一致：软链解析到受管检出，生成文件与重算结果逐字节相同，没有重名技能；同时报告检出 HEAD；主会话与 `lens-codex`、`forge-codex` 家目录中存在 `AGENTS.override.md` 时报告遮蔽，交用户处理，不覆盖。再开新会话确认技能可以列出，Claude Code 另确认 `lens`、`forge` 子代理可以列出；Codex 不装会话内角色，角色按 `luno-platform`〈运行端〉的 paseo 资源经角色 provider 核对。文件存在或安装器退出码为 0 不代表已被加载。
+3. **回读**：`--check` 全部一致：软链解析到受管检出，生成文件与重算结果逐字节相同，没有重名技能；同时报告检出 HEAD。再开新会话确认技能可以列出，Claude Code 另确认 `lens`、`forge` 子代理可以列出；Codex 不装会话内角色，角色按 `luno-platform`〈运行端〉的 paseo 资源经角色 provider 核对。文件存在或安装器退出码为 0 不代表已被加载。
 4. **GLOBAL 副本**：Minis GLOBAL 变化后，在当次授权内整份单向复制到 `~/.luno/memory/GLOBAL.md`（权限 600，属主为容器用户 uid 1000）。目标有独有修改即停止，不回写、不合并；复制后逐字节回读，再运行 `--apply` 与 `--check` 重新生成 Codex 常驻文件。正文和私有定位不进入公开仓库、日志或提交。
 5. **恢复**：升级失败或中断时，受管检出回到旧版（`git reset --keep <旧版>`），再运行 `--apply --previous <新版>` 与 `--check`；新版独有的受管入口随之清理，生成文件恢复为旧版，登录态和角色家目录不动。
 <!-- END sync-host -->
