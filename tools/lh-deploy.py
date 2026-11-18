@@ -39,6 +39,14 @@ GIT_ENV = {
 BASE_ENV = {"LC_ALL": "C.UTF-8"}
 # 每对象硬截止 D、清理保留 C=2 秒：业务只用 W=D-C，留给子进程清理与回报。
 CLEANUP_RESERVE = 2.0
+# 子采集器通知只投影固定码；不接收原始错误、路径或输出作为诊断正文。
+COLLECT_ERROR_CODES = frozenset((
+    "bad_args", "bad_target", "cleanup_failed", "git_error", "identity_difference",
+    "internal_error", "missing_evidence", "registry_invalid", "resource_read_error",
+    "source_unverified", "timeout", "unsafe_path",
+    "missing_variable:SSH_PRIVATE_KEY_B64", "missing_variable:LOBEHUB_SERVER",
+    "missing_variable:LOBEHUB_CLI_API_KEY",
+))
 
 
 class Fail(Exception):
@@ -509,6 +517,7 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
         if write_fd is not None:
             os.close(write_fd)
     root = None
+    child_code = None
     residuals = []
     confirmed = False
     for line in buf.decode("ascii", "replace").splitlines():
@@ -525,6 +534,9 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
             residuals = [item for item in doc["residuals"]
                          if isinstance(item, dict) and isinstance(item.get("path"), str)
                          and item.get("status") in ("remaining", "unverified")]
+        elif doc.get("event") == "result" and isinstance(doc.get("error"), str) \
+                and doc["error"] in COLLECT_ERROR_CODES:
+            child_code = doc["error"]
     if not confirmed and root is not None:
         # 缺 cleanup 确认（如强杀）：只按先前根记录列根与固定 id，不扫描、不猜名、不补删。
         residuals = [{"path": root, "status": "unverified"},
@@ -534,9 +546,9 @@ def _collect(repo, name, version, out_dir, args, target_raw, phase, limits):
         if terminated or killed or unreaped:
             code, exit_code = "timeout", 2
         elif proc.returncode == 3:
-            code, exit_code = "missing_evidence", 3
+            code, exit_code = child_code or "missing_evidence", 3
         else:
-            code, exit_code = "cli_error", 2
+            code, exit_code = child_code or "cli_error", 2
         if not confirmed or unreaped or residuals:
             code, exit_code = "cleanup_failed", 2
         exc = Fail(code, exit_code, phase)
