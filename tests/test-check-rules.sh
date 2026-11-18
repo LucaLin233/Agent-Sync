@@ -201,6 +201,19 @@ case('同一平台 ID 多占',1,'平台身份多占',shared_id)
 case('缺位仍带 ID',1,'缺位身份冲突',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('present',False)))
 case('平台 ID 非法形态',1,'平台身份形态',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('id','bad')))
 case('身份端缺 present',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends']['minis'].pop('present')))
+case('宿主端也须显式登记',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends'].pop('codex')))
+case('宿主端路径须为 HOME 相对路径',1,'宿主端路径形态',
+     lambda p:skill_obj(p,lambda o:o['ends']['codex'].__setitem__('paths',['/tmp/skill'])))
+case('宿主端种类须符合对象类型',1,'宿主端身份种类冲突',
+     lambda p:skill_obj(p,lambda o:o['ends']['codex'].__setitem__('kind','field')))
+case('生成常驻文件须使用对应 renderer',1,'宿主端身份种类冲突',
+     lambda p:registry(p,lambda d:d['objects'][0]['ends']['codex'].__setitem__('renderer','claude-main')))
+def shared_host_path(p):
+    def fn(d):
+        sk=[o for o in d['objects'] if o['type']=='skill']
+        sk[1]['ends']['codex']['paths']=sk[0]['ends']['codex']['paths']
+    registry(p,fn)
+case('宿主端路径不能被不同对象占用',1,'宿主端身份多占',shared_host_path)
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']

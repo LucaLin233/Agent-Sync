@@ -15,6 +15,7 @@ REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加�
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
+HOST_ENDS = ('claude-code','codex','paseo')
 # 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
 REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/LENS.md', 'luno-core'),
@@ -216,13 +217,16 @@ class Guard:
                 m=re.search(r'^name:\s*[\'\"]?([a-z0-9-]+)[\'\"]?\s*$',fm[1],re.M) if len(fm)==3 and fm[0]=='' else None
                 if m is None or m[1]!=name or Path(src).parent.name!=name:
                     self.problem('身份与技能源不一致')
-            for end in ('repo','minis','lobehub'):
+            for end in ('repo','minis','lobehub')+HOST_ENDS:
                 v=ends.get(end)
                 if not isinstance(v,dict) or not isinstance(v.get('present'),bool):
                     self.problem('身份端结构');continue
                 if not v['present']:
                     if end=='repo':self.problem('仓库身份缺位')
                     if v.get('id') is not None: self.problem('缺位身份冲突')
+                    continue
+                if end in HOST_ENDS:
+                    self.host_identity(end,kind,name,v,owners)
                     continue
                 if end=='minis':
                     if kind=='skill':
@@ -252,6 +256,30 @@ class Guard:
                     key=(end,sid)
                     if key in owners and owners[key]!=name: self.problem('平台身份多占')
                     owners[key]=name
+
+    def host_identity(self, end, kind, name, value, owners):
+        """宿主端使用完整文件的软链或生成文件；不复用平台字段型身份。"""
+        renderer = None
+        if kind=='skill':
+            want='link'
+        elif kind=='prompt' and end in ('claude-code','codex'):
+            want='generated';renderer='claude-main' if end=='claude-code' else 'codex-main'
+        elif name in ('subagents/LENS.md','subagents/FORGE.md') and end in ('claude-code','paseo'):
+            want='generated' if end=='claude-code' else 'link'
+            if end=='claude-code':renderer='claude-role'
+        else:
+            self.problem('宿主端对象不支持');return
+        if value.get('kind')!=want or (renderer is not None and value.get('renderer')!=renderer):
+            self.problem('宿主端身份种类冲突')
+        paths=value.get('paths')
+        if (not isinstance(paths,list) or not paths or any(not isinstance(p,str)
+                or not p.startswith('~/') or '\\' in p
+                or any(c in ('','.','..') for c in p[2:].split('/')) for p in paths)):
+            self.problem('宿主端路径形态');return
+        for path in paths:
+            key=('host',path)
+            if key in owners and owners[key]!=name:self.problem('宿主端身份多占')
+            owners[key]=name
 
     def branches(self,bodies):
         for src,body in bodies.items():
