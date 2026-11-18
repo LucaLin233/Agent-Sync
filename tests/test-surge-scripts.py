@@ -1540,8 +1540,11 @@ class SectionWriteTest(unittest.TestCase):
         certs = Path(self.backup_dir())
         ca, ca_key, cert, key, csr, ext = (str(certs / n) for n in
                                            ('ca.pem', 'ca.key', 'cert.pem', 'key.pem', 'req.csr', 'ext.cnf'))
-        Path(ext).write_text('subjectAltName=DNS:localhost\n[req]\ndistinguished_name=dn\n[dn]\n'
-                             '[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n')
+        # 合成证书链带齐 SKI/AKI，以满足 Python 3.13 默认的严格验证。
+        Path(ext).write_text('subjectAltName=DNS:localhost\nsubjectKeyIdentifier=hash\n'
+                             'authorityKeyIdentifier=keyid,issuer\n[req]\ndistinguished_name=dn\n[dn]\n'
+                             '[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign\n'
+                             'subjectKeyIdentifier=hash\n')
         for argv in (['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj',
                       '/CN=synthetic-ca', '-config', ext, '-extensions', 'ca', '-keyout', ca_key, '-out', ca],
                      ['req', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost', '-keyout', key,
