@@ -272,7 +272,7 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
 7. **验收**：`--check` 全部一致后（它还会报告主会话与两个 Codex 角色家目录中遮蔽常驻提示词的 `AGENTS.override.md`，有则由你处理，安装器不覆盖），新开会话确认技能可以列出；在 Claude Code 中另确认 `lens`、`forge` 子代理可以列出（Codex 有意不装会话内角色，角色经 paseo provider 核对）。在 paseo 中派一次角色 provider，核对 `get_agent_status` 返回的 provider 与模型，并确认实际加载的是角色家目录中的角色文件。镜像全局设置了 `CLAUDE_CONFIG_DIR` 与 `CODEX_HOME`，所以要特别确认角色 provider 的 `env` 确实覆盖了这两个变量。
 8. **升级与回退**：下文 `LI` 代表第 4 步的安装器命令，`CO` 代表 `dc exec --user paseo paseo git -C /home/paseo/.luno/agent-sync`。安装器不 fetch、不切换 Git，旧版与新版都要已在本地。
    - 预检：`CO fetch origin`，记下当前 HEAD 为旧版、`origin/main` 为新版，运行 `LI --preflight <新版>`。只有检出干净、现有安装一致、新版登记无冲突时才返回就绪；输出列出旧版、新版与将退役的入口。
-   - 升级：`CO merge --ff-only <新版>`，再运行 `LI --apply --previous <旧版>` 与 `LI --check`。只退役旧版独有的公开软链和受管生成文件，目录、设置和登录态不动。
+   - 升级：`CO merge --ff-only <新版>`，再运行 `LI --apply --previous <旧版>` 与 `LI --check`。只退役旧版独有的公开软链和受管生成文件，目录、设置和登录态不动。`--apply` 中断时，可用同样的参数重跑完成升级。
    - 回退（升级失败或中断）：`CO reset --keep <旧版>`，再运行 `LI --apply --previous <新版>` 与 `LI --check`，清理新版独有的受管入口并恢复旧版的生成文件。
 
 ## 测试与历史
