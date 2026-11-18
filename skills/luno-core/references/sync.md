@@ -27,7 +27,7 @@
 
 **默认同步授权**：用户已明确确认，本技能范围内所有规则对象（常驻提示词、技能及包内资源、子代理指令与配置）的已授权修改，按 `references/sync.md`〔分支 sync-workflow〕 完成风险分级要求的必要校验和自验，以及需要时的独立放行之后，默认按 `tools/sync-targets.json` 登记的落点完成提交、PR、合并、部署和逐端回读，不逐次征询。这条授权不允许自行新增修改或扩大同步范围。以下情况超出既有授权，仍须确认：新增或删除同步对象，新增端或环境，扩大权限或数据访问面，规则部署以外的生产数据变更，不可逆操作，以及跨端内容冲突需要取舍。审查或验收没通过就不进入后续阶段；逐端回读、来源登记和实际同步状态的记录都不能省，没回读就不算完成。
 
-**发布源与生效值**：已合并的 main 是规则对象的发布源；各登记端的生效值分别按下列口径回读判等。Minis 端的技能是 `/var/minis/skills/<name>/SKILL.md`；常驻提示词有 `/var/minis/memory/SOUL.md` 和 `minis-config` 的 `soul.body` 两处，**以后者为生效值**，两者不一致时先判定当前生效的版本，不自行挑一份覆盖其他。逐处回读判等：
+**生效真源**是 Minis 本地文件：技能是 `/var/minis/skills/<name>/SKILL.md`；常驻提示词有 `/var/minis/memory/SOUL.md` 和 `minis-config` 的 `soul.body` 两处，**以后者为生效值**，两者不一致时先判定当前生效的版本，不自行挑一份覆盖其他。逐处回读判等：
 
 - 常驻提示词：Minis 文件和 `soul.body`、LobeHub agent 的 `systemRole`、仓库 `prompt/`。
 - 技能：Minis 文件；LobeHub 的 `content`、`description` 和 `name`（三者独立，按支持的入口分别更新）；仓库 `skills/`。

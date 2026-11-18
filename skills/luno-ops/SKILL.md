@@ -24,7 +24,7 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 - **lint**：按项目入口和 shebang 选 lint；ShellCheck 不支持 zsh，zsh 脚本不能声称已通过 ShellCheck。
 - **批量替换**：先暂存并校验全部源和备份，再逐项切换，失败显式退出并按授权恢复。禁止先删后复制，不依赖 `set -e` 或循环末尾的 `||` 兜底。
 - **验证数据不失真**：NUL 分隔的数据（如 `git diff --name-only -z`）不经过 shell 变量或命令替换，改用管道或 Python `subprocess` 的 bytes 输入；解析 JSON 前分开捕获 stdout、stderr 和退出码，确认 stdout 只有预期的 JSON。做不到就不能据下游结果判定验证通过。
-- **BusyBox/Alpine**：`cut -c` 按字节截断多字节字符，验证中文时不要用。当前端编辑工具的掩码误改或路径异常，操作或下结论前按 `luno-platform`〈运行端〉当前端〈文件编辑〉另读其指定资源。
+- **BusyBox/Alpine**：`cut -c` 按字节截断多字节字符，验证中文时不要用。当前端出现掩码误改或路径异常时，操作或下结论前按 `luno-platform`〈运行端〉当前端〈文件编辑〉另读其指定资源。
 
 ## 安全与测试
 

@@ -45,7 +45,7 @@ Minis 工具结果自动卸载按 `references/minis.md`〔分支 minis-runtime-c
 
 ## 远端工作目录
 
-- **Minis 端登录的所有主机**：过程产物统一放在 `/root/workdir/minis/<项目>/`，根目录不存在就 `install -d -m 700 /root/workdir/minis`。
+- **Minis 端登录的所有主机**：过程产物（脚本草稿和被测副本、夹具、日志、克隆副本、样本、临时快照）统一放在 `/root/workdir/minis/<项目>/`，根目录不存在就 `install -d -m 700 /root/workdir/minis`。**项目目录按任务对象命名，同一对象始终复用，不在 `/root` 顶层散落文件。**目录 700、文件 600；保留结论性产物。
 - 同一主机上由 Minis 端整理或产出的 LobeHub 过程产物放 `/root/workdir/lobehub/`。
 
 ## 连接清单
