@@ -33,11 +33,14 @@ class InstallTest(unittest.TestCase):
         for name in ("skills", "prompt", "subagents"):
             shutil.copytree(ROOT / name, self.checkout / name)
         (self.checkout / "tools").mkdir()
-        shutil.copyfile(ROOT / "tools/sync-targets.json", self.checkout / "tools/sync-targets.json")
+        for name in ("sync-targets.json", "link-install.py"):
+            shutil.copyfile(ROOT / "tools" / name, self.checkout / "tools" / name)
+        gitconfig = self.root / "gitconfig"
+        gitconfig.write_bytes(b"")
         self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
                     "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
                     "CODEX_HOME": str(self.home / ".codex"),
-                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(gitconfig)}
         for args in (("init", "-q", "-b", "main"), ("add", "."),
                      ("-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "fixture")):
             subprocess.run(["git", "-C", str(self.checkout), *args], env=self.env, check=True)
@@ -392,71 +395,184 @@ module.main(sys.argv[2:])
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(credential.read_bytes(), b"SYNTH_SECRET")
 
-    def test_repointed_public_entry_retires_old_artifact_without_deadlock(self):
-        # 新版渲染器把同一公开入口改指另一份生成文件：旧文件必须按改指前核实的归属退役，
-        # 不因软链已改指被误判成非受管，也不让改指后的重跑卡住。
+    def test_installer_change_stops_before_writes(self):
+        # 安装器自身改变就可能改渲染路径，两个版本的 action 都由当前安装器算出，看不出差异：
+        # 首版以两份 tools/link-install.py 的 blob 一致作为必要判据，不一致就在写前停止。
         self.assertEqual(self.call("--apply")[0], 0)
-        artifact = self.home / ".luno/generated/claude-code/agents/forge.md"
-        public = self.home / ".claude/agents/forge.md"
-        self.assertTrue(artifact.is_file())
+        baseline = self.snapshot()
         old = self.git("rev-parse", "HEAD")
-        script = self.root / "repoint.py"
-        script.write_text('''import importlib.util, sys
-from pathlib import Path
-spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-render = module.render
-def repointed(obj, renderer, checkout, home, tree, read):
-    artifact, content = render(obj, renderer, checkout, home, tree, read)
-    if read is Path.read_bytes and artifact.name == "forge.md":
-        artifact = artifact.with_name("forge-v2.md")
-    return artifact, content
-module.render = repointed
-sys.exit(module.main(sys.argv[2:]))
-''')
-        run = [sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout)]
-        # 合成中断：旧文件已按已核 inode 退役，公开软链还没改指就退出。
-        interrupt = self.root / "repoint-interrupt.py"
-        interrupt.write_text('''import importlib.util, os, sys
-from pathlib import Path
-spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-render = module.render
-def repointed(obj, renderer, checkout, home, tree, read):
-    artifact, content = render(obj, renderer, checkout, home, tree, read)
-    if read is Path.read_bytes and artifact.name == "forge.md":
-        artifact = artifact.with_name("forge-v2.md")
-    return artifact, content
-def stop(*args, **kwargs):
-    os._exit(99)
-module.render = repointed
-module.os.symlink = stop
-sys.exit(module.main(sys.argv[2:]))
-''')
-        proc = subprocess.run([sys.executable, "-B", str(interrupt), str(TOOL), "--checkout", str(self.checkout),
-                               "--apply", "--previous", old], env=self.env, capture_output=True, timeout=30)
-        self.assertEqual(proc.returncode, 99, proc.stdout + proc.stderr)
-        self.assertFalse(artifact.exists())
-        self.assertEqual(os.readlink(public), str(artifact))  # 悬空窗口：软链尚未改指
-        proc = subprocess.run(run + ["--apply", "--previous", old],
-                              env=self.env, capture_output=True, timeout=30)
-        report = json.loads(proc.stdout)
-        self.assertEqual((proc.returncode, report["status"]), (0, "completed"), report["errors"])
-        self.assertEqual(report["retirements"], [])  # 旧文件已在中断前退役，重跑无重复删除
-        self.assertIn((str(artifact.with_name("forge-v2.md")), "create"),
-                      {(a["path"], a["state"]) for a in report["created"]})
-        self.assertEqual(os.readlink(public), str(artifact.with_name("forge-v2.md")))
-        # 改指后重跑同一入口不改写已完成状态，也不残留暂存文件。
-        proc = subprocess.run(run + ["--apply", "--previous", old],
-                              env=self.env, capture_output=True, timeout=30)
-        report = json.loads(proc.stdout)
-        self.assertEqual((proc.returncode, report["status"]), (0, "completed"), report["errors"])
+        tool = self.checkout / "tools/link-install.py"
+        tool.write_bytes(tool.read_bytes() + b"\n# upgraded renderer\n")
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"]), (2, "blocked"))
+        self.assertIn("installer_changed", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), baseline)
+        self.git("checkout", "-q", new)
+        rc, report = self.call("--apply", "--previous", old)
+        self.assertEqual((rc, report["status"]), (2, "blocked"))
+        self.assertIn("installer_changed", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), baseline)
+
+    def test_registry_layout_change_stops_before_writes(self):
+        # 安装器相同，但登记把同一公开入口推导到别的目标，同样不算已证明的同布局。
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        old = self.git("rev-parse", "HEAD")
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["id"] == "subagents/LENS.md":
+                obj["ends"]["claude-code"]["renderer"] = "codex-main"
+        registry_file.write_text(json.dumps(registry))
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"]), (2, "blocked"))
+        self.assertIn("layout_changed", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), baseline)
+        self.git("checkout", "-q", new)
+        rc, report = self.call("--apply", "--previous", old)
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("layout_changed", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), baseline)
+
+    def test_preexisting_staging_items_are_reported_and_kept(self):
+        # 历史遗留的链接与生成文件暂存项只报不删，也不跟随其内容。
+        self.assertEqual(self.call("--apply")[0], 0)
+        generated = self.home / ".luno/generated/codex/AGENTS.md"
+        link_dir = self.home / ".claude/agents"
+        old_staging = generated.with_name(".AGENTS.md.link-install.tmp")
+        link_staging = link_dir / ".forge.md.link-install.tmp.0123456789abcdef"
+        old_staging.write_bytes(b"OLD_GENERATED_RESIDUE")
+        link_staging.symlink_to(self.home / ".codex/auth.json")
+        before = self.snapshot()
+        rc, report = self.call("--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertIn(str(old_staging), report["residue"])
+        self.assertIn(str(link_staging), report["residue"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(old_staging.read_bytes(), b"OLD_GENERATED_RESIDUE")
+
+    def test_valid_registry_all_false_retires_managed_items(self):
+        # 正控：同安装器 blob 的两版，新版本把各端显式 present:false 仍属有效完整登记，
+        # 预检就绪、升级按受管项精确退役，登录态不动。
+        self.assertEqual(self.call("--apply")[0], 0)
+        login = self.home / ".codex/auth.json"
+        login.write_bytes(b"SYNTH_LOGIN")
+        login.chmod(0o600)
+        public = self.home / ".claude/CLAUDE.md"
+        generated = self.home / ".luno/generated/claude-code/CLAUDE.md"
+        old = self.git("rev-parse", "HEAD")
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            for end in ("claude-code", "codex", "paseo"):
+                if end in obj["ends"]:
+                    obj["ends"][end] = {"present": False}
+        registry_file.write_text(json.dumps(registry))
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"]), (0, "ready"), report)
+        self.git("checkout", "-q", new)
+        rc, report = self.call("--apply", "--previous", old)
+        self.assertEqual((rc, report["status"]), (0, "completed"), report["errors"])
+        retired = [a["path"] for a in report["retirements"]]
+        self.assertIn(str(public), retired)
+        self.assertIn(str(generated), retired)
+        self.assertFalse(public.is_symlink())
+        self.assertFalse(generated.exists())
+        self.assertEqual(login.read_bytes(), b"SYNTH_LOGIN")
+        self.assertEqual(self.call("--check")[0], 0)
+
+    def test_preflight_with_partial_current_ends_has_no_retirement_preview(self):
+        # 当前检出部分缺键、目标版有效且会退役一个已知入口：必须 blocked 且不给退役预览。
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["id"] == "subagents/LENS.md":
+                obj["ends"]["claude-code"] = {"present": False}
+        registry_file.write_text(json.dumps(registry))
+        target = self.commit()
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["id"] == "subagents/LENS.md":
+                obj["ends"].pop("codex", None)
+        registry_file.write_text(json.dumps(registry))
+        self.commit()
+        rc, report = self.call("--preflight", target)
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_end_missing", [e["code"] for e in report["errors"]])
+        self.assertEqual((report["retirements"], self.snapshot()), ([], baseline))
+
+    def test_registry_without_host_ends_stops_for_current_and_target(self):
+        # 当前检出整版没有宿主端键时不能当作可写的宿主版本。
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        old = self.git("rev-parse", "HEAD")
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            for end in ("claude-code", "codex", "paseo"):
+                obj["ends"].pop(end, None)
+        registry_file.write_text(json.dumps(registry))
+        new = self.commit()
+        rc, report = self.call("--apply")
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_without_host_ends", [e["code"] for e in report["errors"]])
+        self.assertEqual((report["retirements"], self.snapshot()), ([], baseline))
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_without_host_ends", [e["code"] for e in report["errors"]])
+        # 无键的预检目标不假报只属于 --previous 历史基线的停止码
+        self.assertNotIn("previous_without_host_installation", [e["code"] for e in report["errors"]])
         self.assertEqual(report["retirements"], [])
-        self.assertEqual(report["residue"], [])
-        proc = subprocess.run(run + ["--check"], env=self.env, capture_output=True, timeout=30)
-        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertEqual(self.snapshot(), baseline)
+
+    def test_partial_host_end_keys_stop_without_writes(self):
+        # 已登记宿主端时，任一对象缺三端键之一即停止，两方向都无写。
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        old = self.git("rev-parse", "HEAD")
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["id"] == "subagents/LENS.md":
+                for end in ("claude-code", "codex", "paseo"):
+                    if end in obj["ends"]:
+                        obj["ends"].pop(end)
+                        break
+        registry_file.write_text(json.dumps(registry))
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call("--preflight", new)
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_end_missing", [e["code"] for e in report["errors"]])
+        self.assertEqual((report["retirements"], self.snapshot()), ([], baseline))
+        self.git("checkout", "-q", new)
+        rc, report = self.call("--apply", "--previous", old)
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_end_missing", [e["code"] for e in report["errors"]])
+        self.assertEqual((report["retirements"], self.snapshot()), ([], baseline))
+
+    def test_non_boolean_present_stops_without_writes(self):
+        self.assertEqual(self.call("--apply")[0], 0)
+        baseline = self.snapshot()
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["id"] == "subagents/LENS.md":
+                obj["ends"]["codex"] = {"present": "false", "kind": "link", "paths": []}
+        registry_file.write_text(json.dumps(registry))
+        rc, report = self.call("--apply")
+        self.assertEqual((rc, report["status"]), (2, "blocked"), report)
+        self.assertIn("registry_end_invalid_present", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), baseline)
 
     def test_created_report_covers_first_install_and_existing_state_is_preserved(self):
         login = self.home / ".codex/auth.json"
@@ -488,15 +604,17 @@ sys.exit(module.main(sys.argv[2:]))
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
             for end in ("claude-code", "codex", "paseo"):
-                obj["ends"].pop(end, None)   # 与宿主端登记之前的真实 main 一致：没有这些键
+                obj["ends"].pop(end, None)
         registry_file.write_text(json.dumps(registry))
+        (self.checkout / "tools/link-install.py").unlink()  # 旧基线真实没有安装器
         old_without_host = self.commit()
         registry_file.write_text(json.dumps(json.loads((ROOT / "tools/sync-targets.json").read_text())))
         self.commit()
         before = self.snapshot()
         rc, report = self.call("--apply", "--previous", old_without_host)
-        self.assertEqual((rc, report["status"], report["retirements"]), (0, "completed", []))
-        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((rc, report["status"], report["retirements"]), (2, "blocked", []))
+        self.assertIn("previous_without_host_installation", [e["code"] for e in report["errors"]])
+        self.assertEqual((report["retirements"], self.snapshot()), ([], before))
         self.assertEqual(self.call("--check")[0], 0)
 
     def test_successful_install_preserves_existing_login_and_settings_files(self):

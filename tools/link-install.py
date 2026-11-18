@@ -147,7 +147,7 @@ def staging_residue(actions, tree):
     """
     residue, seen = [], set()
     for action in actions:
-        if action["kind"] != "generated":
+        if action["kind"] not in ("generated", "link"):
             continue
         parent = tree.directory(action["path"].parent)
         if parent is None:
@@ -196,8 +196,7 @@ def state(action, tree):
     if action["kind"] == "link":
         if tree.link_matches(path, action["target"]):
             return "match"
-        if "previousTarget" in action and tree.link_matches(path, action["previousTarget"]):
-            return "update"
+        # 首版不支持链接改指：目标不同的既有入口一律冲突，不借旧目标放行。
         return "conflict" if info is not None else "create"
     if info is None:
         return "create"
@@ -240,20 +239,45 @@ def duplicate_skills(home, names, tree):
     return errors
 
 
-def desired(checkout, home, tree, read):
-    registry = json.loads(read(checkout / "tools/sync-targets.json"))
+def desired(checkout, home, tree, read, baseline=False):
+    """baseline=True 只用于读取旧基线：整版没有宿主端键时才允许返回空动作。
+
+    当前检出与预检目标都必须证明是完整登记的宿主版本；任一对象缺键或 present 非严格布尔即停止，
+    不推导可清理动作，也不把缺键当成退役依据。
+    """
+    registry_path = checkout / "tools/sync-targets.json"
+    registry = json.loads(read(registry_path))
     if registry["schemaVersion"] != 1:
-        raise InstallError("unsupported_registry_version", checkout / "tools/sync-targets.json")
+        raise InstallError("unsupported_registry_version", registry_path)
     actions, errors = [], []
-    skill_names = {o["id"] for o in registry["objects"] if o["type"] == "skill"}
+    objects = registry["objects"]
+    registered = any(end in (obj.get("ends") or {}) for obj in objects for end in ENDS)
+    if not registered and not baseline:
+        errors.append({"code": "registry_without_host_ends", "path": str(registry_path)})
+        return [], errors
+    skill_names = {o["id"] for o in objects if o["type"] == "skill"}
     errors.extend(duplicate_skills(home, skill_names, tree))
-    for obj in registry["objects"]:
+    for obj in objects:
         source = checkout / obj["source"]
         read(source)
+        ends = obj.get("ends")
+        if not isinstance(ends, dict):
+            errors.append({"code": "registry_ends_invalid", "path": str(registry_path), "object": obj["id"]})
+            continue
+        missing = [end for end in ENDS if end not in ends]
+        if missing:
+            if not registered:
+                continue  # 只可能是 baseline：整版没有宿主端键，按首装基线处理
+            errors.append({"code": "registry_end_missing", "path": str(registry_path), "object": obj["id"]})
+            continue
         for end in ENDS:
-            # 宿主端登记之前的旧版本没有这些键，按未登记处理；当前检出的显式登记由 check-rules 保证。
-            target = obj["ends"].get(end, {"present": False})
-            if not target["present"]:
+            target = ends[end]
+            present = target.get("present") if isinstance(target, dict) else None
+            if not isinstance(present, bool):
+                errors.append({"code": "registry_end_invalid_present", "path": str(registry_path),
+                               "object": obj["id"], "end": end})
+                continue
+            if not present:
                 continue
             destinations = [home_path(p, home) for p in target["paths"]]
             if target["kind"] == "generated":
@@ -285,16 +309,13 @@ def desired(checkout, home, tree, read):
     return actions, errors
 
 
-def plan(checkout, home, tree, read=Path.read_bytes, previous=()):
+def plan(checkout, home, tree, read=Path.read_bytes):
     actions, errors = desired(checkout, home, tree, read)
-    previous_links = {a["path"]: a["target"] for a in previous if a["kind"] == "link"}
     for path in (home / ".codex/AGENTS.override.md", home / ".luno/homes/lens-codex/AGENTS.override.md",
                  home / ".luno/homes/forge-codex/AGENTS.override.md"):
         if tree.stat(path) is not None:
             errors.append({"code": "agents_override_shadowing", "path": str(path)})
     for action in actions:
-        if action["kind"] == "link" and action["path"] in previous_links:
-            action["previousTarget"] = previous_links[action["path"]]
         action["state"] = state(action, tree)
         if action["state"] == "conflict":
             errors.append({"code": "path_conflict", "path": str(action["path"])})
@@ -345,18 +366,6 @@ def delete_retired(action, tree):
     tree.unlink(path)
 
 
-def retire_before_repoint(actions, retired, tree):
-    """改指会切断旧生成文件的归属证据：先按已核 inode 删它，中断后重跑不会撞冲突。
-
-    删除发生在公开软链改指之前，这段窗口内该入口可能悬空，须在维护窗口内暂停新会话。
-    """
-    moving = {a["path"] for a in actions
-              if a["kind"] == "link" and a.get("previousTarget") is not None}
-    for action in retired:
-        if action["kind"] == "generated" and any(p in moving for p in action["public"]):
-            delete_retired(action, tree)
-
-
 def write_generated(action, tree):
     path = action["path"]
     parent = tree.directory(path.parent)
@@ -386,6 +395,44 @@ def discard_staging(temporary, parent, created):
         os.unlink(temporary.name, dir_fd=parent)
 
 
+REGISTRY_ERRORS = ("registry_without_host_ends", "registry_ends_invalid",
+                   "registry_end_missing", "registry_end_invalid_present")
+
+
+def host_registered(read, checkout):
+    """显式解析状态：整版是否声明了任一宿主端键。全端显式 false 仍算已声明。"""
+    registry = json.loads(read(checkout / "tools/sync-targets.json"))
+    return any(end in (obj.get("ends") or {}) for obj in registry["objects"] for end in ENDS)
+
+
+def registry_invalid(errors):
+    return any(e.get("code") in REGISTRY_ERRORS for e in errors)
+
+
+def compatibility_errors(checkout, other_head, other_read, other_actions, current_actions):
+    """首版只支持安装器与登记推导布局都相同的升级/回退；证明不了就在写入前停止。
+
+    安装器自身改变就能改变渲染路径，而两个版本的 action 都由当前安装器算出，比对它们看不出差异；
+    所以先要求两份 tools/link-install.py 的 blob 一致，再核登记推导出的共用公开入口精确目标。
+    """
+    if not host_registered(other_read, checkout):
+        return [{"code": "previous_without_host_installation", "path": str(checkout)}]
+    try:
+        other_blob = git_value(checkout, "rev-parse", other_head + ":tools/link-install.py")
+    except InstallError:
+        return [{"code": "previous_installer_missing", "path": str(checkout)}]
+    if other_blob != git_value(checkout, "rev-parse", "HEAD:tools/link-install.py"):
+        return [{"code": "installer_changed", "path": str(checkout)}]
+    other_links = {str(a["path"]): str(a["target"]) for a in other_actions if a["kind"] == "link"}
+    for action in current_actions:
+        if action["kind"] != "link":
+            continue
+        path = str(action["path"])
+        if path in other_links and other_links[path] != str(action["target"]):
+            return [{"code": "layout_changed", "path": path}]
+    return []
+
+
 def apply(actions, tree):
     """按计划写入，返回本次实际执行过的项（state=create/update）；未执行的项不列入。"""
     done = []
@@ -399,20 +446,8 @@ def apply(actions, tree):
         if action["kind"] == "directory":
             tree.directory(action["path"], create=True)
         elif action["kind"] == "link":
-            parent = tree.directory(action["path"].parent)
-            if current == "create":
-                os.symlink(str(action["target"]), action["path"].name, dir_fd=parent)
-            else:
-                # 改指用同目录临时软链改名替换，链接本身不留缺失态；生成文件改指时旧文件已先退役，见 retire_before_repoint。
-                temporary = action["path"].with_name(
-                    "." + action["path"].name + ".link-install.tmp." + os.urandom(8).hex())
-                os.symlink(str(action["target"]), temporary.name, dir_fd=parent)
-                try:
-                    os.rename(temporary.name, action["path"].name, src_dir_fd=parent, dst_dir_fd=parent)
-                except BaseException:
-                    discard_staging(temporary, parent,
-                                    os.stat(temporary.name, dir_fd=parent, follow_symlinks=False))
-                    raise
+            os.symlink(str(action["target"]), action["path"].name,
+                       dir_fd=tree.directory(action["path"].parent))
         else:
             write_generated(action, tree)
         done.append(action)
@@ -447,23 +482,34 @@ def main(argv=None):
         previous, previous_errors = [], []
         if args.previous:
             report["previousHead"], read = revision_reader(checkout, args.previous)
-            previous, previous_errors = desired(checkout, home, tree, read)
-        actions, errors = plan(checkout, home, tree, previous=previous)
+            previous, previous_errors = desired(checkout, home, tree, read, baseline=True)
+        actions, errors = plan(checkout, home, tree)
         errors.extend(previous_errors)
+        if args.previous:
+            errors.extend(compatibility_errors(checkout, report["previousHead"], read, previous, actions))
         retired = []
         if args.preflight:
             if report["trackedState"] != "clean" or any(a["state"] != "match" for a in actions):
                 errors.append({"code": "current_installation_not_clean", "path": str(checkout)})
             report["targetHead"], read = revision_reader(checkout, args.preflight)
-            candidate, candidate_errors = plan(checkout, home, tree, read, previous=actions)
-            retired, cleanup_errors = retirements(actions, candidate, tree)
+            candidate, candidate_errors = plan(checkout, home, tree, read)
+            installed = actions
             actions = candidate
-            errors.extend(candidate_errors + cleanup_errors)
+            # 不可信的登记不参与兼容比较：历史基线的停止只属于 --previous，不能附到预检目标上。
+            if not registry_invalid(candidate_errors):
+                candidate_errors = candidate_errors + compatibility_errors(
+                    checkout, report["targetHead"], read, candidate, installed)
+            errors.extend(candidate_errors)
+            # 双方登记都要可信才算退役：当前检出非法时不能给出退役预览。
+            if not registry_invalid(errors):
+                retired, cleanup_errors = retirements(installed, candidate, tree)
+                errors.extend(cleanup_errors)
         elif args.previous:
             if report["trackedState"] != "clean":
                 errors.append({"code": "checkout_dirty", "path": str(checkout)})
-            retired, cleanup_errors = retirements(previous, actions, tree)
-            errors.extend(cleanup_errors)
+            if not registry_invalid(errors):
+                retired, cleanup_errors = retirements(previous, actions, tree)
+                errors.extend(cleanup_errors)
         report["residue"] = staging_residue(actions + previous, tree)
         report["retirements"] = [public_action(a) for a in retired]
         report["actions"] = [public_action(a) for a in actions]
@@ -471,7 +517,6 @@ def main(argv=None):
         if errors:
             report["status"], code = "blocked", 2
         elif args.apply:
-            retire_before_repoint(actions, retired, tree)
             report["created"] = [public_action(a) for a in apply(actions, tree)]
             for action in retired:
                 delete_retired(action, tree)
