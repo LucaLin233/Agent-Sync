@@ -25,7 +25,7 @@ Minis 工具结果自动卸载按 `references/minis.md`〔分支 minis-runtime-c
 
 ## 执行环境
 
-- 本端执行环境是 Minis iSH/Alpine。来源可信、入口及依赖已静态核对的测试可以把 Minis/iSH 当作原生执行环境。
+- 本端执行环境是 Minis iSH/Alpine。来源可信、入口及依赖已静态核对的测试可以把 Minis/iSH 当作原生执行环境。并行执行在 iSH 上的收益没有验证过，不作推荐手段。
 - 下列资源属于 `luno-ops`，读取前先完整读该技能入口：
   - Minis 端的执行环境选址、脚本运行或测试、派发选址：`luno-ops/references/execution-environment.md`〔分支 execution-environment〕；纯咨询，或已确定在本机做的静态只读检查不必读。
   - 已选定 OnlyBoxes 之后的调用、会话、依赖和回传：`luno-ops/references/execution-environment.md`〔分支 onlyboxes〕。
