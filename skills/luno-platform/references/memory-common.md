@@ -4,7 +4,7 @@
 <!-- BEGIN memory-common -->
 # LUNO｜经验与记忆纠错
 
-日志及未指定的其他记忆各端自持，不互导。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向私人副本，Minis 为唯一真源；宿主端副本是 `~/.luno/memory/GLOBAL.md`，按 `luno-core/references/sync.md`〔分支 sync-host〕复制；LobeHub 优先私人助理空间文件，仅在确认该能力不可用时以私有知识库文档兜底，均须按已核实的文件路径或文档 ID 完整读取，不以检索片段或摘要代替，不导入原生记忆。目标独有修改或冲突即停，不回写或双向合并；涉及该私人副本时，完整读 `references/lobehub-knowledge.md`〔分支 knowledge〕。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有实际涉及记忆更正、整理、保存经验或实施经验固化时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
+日志及未指定的其他记忆各端自持，不互导。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向私人副本，Minis 为唯一真源；宿主端副本是 `~/.luno/memory/GLOBAL.md`，按 `luno-core/references/sync.md`〔分支 sync-host〕复制；LobeHub 优先私人助理空间文件，仅在确认该能力不可用时以私有知识库文档兜底，均须按已核实的文件路径或文档 ID 完整读取，不以检索片段或摘要代替，不导入原生记忆。目标独有修改或冲突即停，不回写或双向合并；涉及 LobeHub 私人副本时，完整读 `references/lobehub-knowledge.md`〔分支 knowledge〕；涉及宿主端副本时，按 `luno-core/references/sync.md`〔分支 sync-host〕及 `references/runtime-host.md`〈记忆入口〉。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有实际涉及记忆更正、整理、保存经验或实施经验固化时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
 
 ## 资源与触发
 
