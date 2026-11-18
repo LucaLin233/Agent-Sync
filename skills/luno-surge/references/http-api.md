@@ -20,10 +20,10 @@ HTTP API 仍须满足入口的实例、认证、平台和版本门槛：默认�
 
 ## 用 `policy-descriptor` 测未配置的节点
 
-`POST /v1/policies/test` 只接受已配置的策略名。想不动 Profile 测新节点，可以执行一个 cron 脚本，让它的 `$httpClient` 请求带一条完整的 Surge 策略行作为 `policy-descriptor`（**优先于** `policy`）。它会发真实请求，不修改 Profile 不等于没有副作用。用自带的助手：
+`POST /v1/policies/test` 只接受已配置的策略名。想不动 Profile 测新节点，可以执行一个 cron 脚本，让它的 `$httpClient` 请求带一条完整的 Surge 策略行作为 `policy-descriptor`（**优先于** `policy`）。它会发真实请求，不修改 Profile 不等于没有副作用。用自带的助手（`<技能根>` 按 `luno-platform`〈运行端〉当前端〈技能根〉）：
 
 ```sh
-python3 /var/minis/skills/luno-surge/scripts/test_policy_descriptor.py \
+python3 <技能根>/scripts/test_policy_descriptor.py \
   --descriptor-file - --url http://checkip.amazonaws.com
 ```
 
@@ -37,7 +37,7 @@ python3 /var/minis/skills/luno-surge/scripts/test_policy_descriptor.py \
 `GET /v1/metrics` 输出 Prometheus 文本，不是 JSON，同样需要 `X-Key`；指标清单和抓取配置见官方 HTTP API 页。用助手可以避免在 curl 命令里暴露 key：
 
 ```sh
-python3 /var/minis/skills/luno-surge/scripts/surge_ios.py metrics
+python3 <技能根>/scripts/surge_ios.py metrics
 ```
 
 2026-09-02 在正式版 iOS 5.22.0 build 3830 上实测过这个端点（不代表当前版本）。流量计数器在引擎重启时归零。Prometheus 用 `x-key` 查询参数抓取时，这个 key 不得进入聊天、日志或共享配置。

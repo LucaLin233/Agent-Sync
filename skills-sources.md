@@ -139,6 +139,10 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## luno-platform
 
+### 运行端适配
+
+`references/runtime-minis.md`、`references/runtime-lobehub.md` 为自编的本端槽位取值。其中自 `luno-core`（execution、review）、`luno-ops`（入口、github、service-runtime）和 `luno-surge`（入口、http-api）迁入的本端句子，来源性质随原文件，不新增吸收件；完整 MIT 正文随包为 `LICENSE.matt-pocock.txt`、`LICENSE.openminis.txt`。
+
 ### Minis
 
 全部来自 **OpenMinis/MinisSkills（共用固定提交，见〈共用上游〉）**，精选改写进 `references/minis.md`〔分支 minis-runtime-device〕〈本机特性〉，许可见〈OpenMinis/MinisSkills〉，完整 MIT 正文随包为 `LICENSE.openminis.txt`。
