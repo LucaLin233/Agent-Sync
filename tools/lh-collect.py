@@ -855,6 +855,7 @@ def main(argv=None):
     sys.stdout.write(json.dumps(summary, ensure_ascii=True) + "\n")
     if err is None:
         return 0
+    _notify(cleanup_fd, {"event": "result", "error": err.code})
     sys.stderr.write(json.dumps({"ok": False, "error": err.code}) + "\n")
     return err.exit
 

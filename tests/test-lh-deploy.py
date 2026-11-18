@@ -431,6 +431,46 @@ class Case(unittest.TestCase):
         self.assertEqual(self.argv_log(), [])
         self.assertFalse(os.path.isdir(os.path.join(self.out, "pre-0")))
 
+    def test_collect_failure_preserves_only_known_codes(self):
+        """真实子进程通知保留 rc2/3 类别；旧子进程和未知内容沿用通用码，不泄漏输出。"""
+        secret = "SYNTH_PRIVATE_CHILD_OUTPUT"
+        for index, (code, rc, expected) in enumerate((
+                ("resource_read_error", 2, "resource_read_error"),
+                ("source_unverified", 3, "source_unverified"),
+                (None, 2, "cli_error"),
+                (secret, 2, "cli_error"))):
+            with self.subTest(code=code):
+                self.out = os.path.join(self.tmp, "out-failure-%d" % index)
+                program = (
+                    "import json,os,sys\n"
+                    "fd=int(sys.argv[sys.argv.index('--_cleanup-fd')+1])\n"
+                    "os.write(fd,b'{\"event\":\"cleanup\",\"residuals\":[]}\\n')\n")
+                if code is not None:
+                    program += "os.write(fd,%r)\n" % (json.dumps(
+                        {"event": "result", "error": code}) + "\n").encode()
+                program += ("sys.stdout.write(%r * 100000)\n"
+                            "sys.stderr.write(%r * 100000)\n"
+                            "sys.exit(%d)\n") % (secret, secret, rc)
+                self.write("tools/lh-collect.py", program)
+                self.lh(0)
+                proc = self.run_tool()
+                self.assertEqual(proc.returncode, rc, proc.stderr)
+                self.assertEqual(json.loads(proc.stdout)["objects"][0]["code"], expected)
+                self.assertEqual(json.loads(proc.stderr)["error"], expected)
+                self.assertNotIn(secret.encode(), proc.stdout + proc.stderr)
+                self.assertEqual(self.argv_log(), [])
+
+    def test_real_collect_reports_missing_named_variable(self):
+        """真实 collect 的早期失败也带清理确认和固定错误码，不依赖假通知互证。"""
+        shutil.copyfile(TOOL_REAL_COLLECT, os.path.join(self.repo, "tools/lh-collect.py"))
+        self.lh(0)
+        proc = self.run_tool()
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        expected = "missing_variable:SSH_PRIVATE_KEY_B64"
+        self.assertEqual(json.loads(proc.stdout)["objects"][0]["code"], expected)
+        self.assertEqual(json.loads(proc.stderr)["error"], expected)
+        self.assertEqual(self.argv_log(), [])
+
 class DependencySeamTest(unittest.TestCase):
     """只注入「yaml 导入缺失」：正文契约缺依赖必须归执行错误 rc2，不得当成 source_unverified 或缺证。"""
 
