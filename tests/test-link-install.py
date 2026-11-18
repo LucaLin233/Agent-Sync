@@ -21,8 +21,8 @@ class InstallTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="link-install-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.home = self.root / "home"
-        self.home.mkdir()
+        self.home = self.root / "home/paseo"
+        self.home.mkdir(parents=True)
         self.checkout = self.root / "checkout with space"
         self.checkout.mkdir()
         for name in ("skills", "prompt", "subagents"):
@@ -30,6 +30,8 @@ class InstallTest(unittest.TestCase):
         (self.checkout / "tools").mkdir()
         shutil.copyfile(ROOT / "tools/sync-targets.json", self.checkout / "tools/sync-targets.json")
         self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
+                    "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
+                    "CODEX_HOME": str(self.home / ".codex"),
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
         for args in (("init", "-q", "-b", "main"), ("add", "."),
                      ("-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "fixture")):
@@ -185,6 +187,7 @@ class InstallTest(unittest.TestCase):
 
     def test_paseo_provider_example_matches_installed_role_homes(self):
         config = json.loads((ROOT / "platforms/paseo/config.example.json").read_text())
+        self.assertNotIn("listen", config["daemon"])
         self.assertIs(config["daemon"]["mcp"]["injectIntoAgents"], True)
         self.assertEqual(self.call("--apply")[0], 0)
         for role in ("lens", "forge"):
@@ -193,7 +196,7 @@ class InstallTest(unittest.TestCase):
                 key = role + "-" + provider
                 fragment = config["agents"]["providers"][key]
                 self.assertEqual(fragment["extends"], provider)
-                relative = fragment["env"][variable].removeprefix("/home/USER/")
+                relative = fragment["env"][variable].removeprefix("/home/paseo/")
                 self.assertEqual(relative, ".luno/homes/" + key)
                 self.assertEqual((self.home / relative / entry).read_bytes(),
                                  (self.checkout / f"subagents/{role.upper()}.md").read_bytes())
