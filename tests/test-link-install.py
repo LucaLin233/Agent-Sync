@@ -256,7 +256,8 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 def interrupt(action, tree):
     if action["path"].name == "forge.md":
-        fd = os.open(module.staging_path(action).name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+        name = "." + action["path"].name + module.STAGING_SUFFIX
+        fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
                      dir_fd=tree.directory(action["path"].parent))
         os.write(fd, b"INTERRUPTED_PARTIAL_CONTENT")
         os._exit(99)
@@ -281,7 +282,9 @@ module.main(sys.argv[2:])
         self.assertEqual((rc, report["status"]), (0, "completed"), report["errors"])
         self.assertFalse((self.home / ".claude/agents/forge.md").is_symlink())
         self.assertFalse((self.home / ".luno/generated/claude-code/agents/forge.md").exists())
-        self.assertFalse(staging.exists())
+        # 归属不可证的暂存残留不清理，只报告：重跑与回退都不删它。
+        self.assertIn(str(staging), report["residue"])
+        self.assertEqual(staging.read_bytes(), b"INTERRUPTED_PARTIAL_CONTENT")
         self.assertFalse((self.home / ".luno/homes/forge-codex/AGENTS.md").is_symlink())
         self.assertEqual(login.read_bytes(), b"SYNTH_LOGIN")
         self.assertEqual(self.call("--check")[0], 0)
@@ -352,7 +355,7 @@ module.main(sys.argv[2:])
         self.assertEqual(credential.read_bytes(), b"SYNTH_CREDENTIAL_FILE")
         self.assertNotIn("SYNTH_CREDENTIAL_FILE", json.dumps(report))
 
-    def test_atomic_update_and_staging_conflict(self):
+    def test_atomic_update_and_unowned_staging_residue_is_reported_not_deleted(self):
         self.assertEqual(self.call("--apply")[0], 0)
         artifact = self.home / ".luno/generated/codex/AGENTS.md"
         original = artifact.read_bytes()
@@ -365,18 +368,70 @@ module.main(sys.argv[2:])
             with self.assertRaises(INSTALL.InstallError):
                 INSTALL.apply(actions, tree)
         self.assertEqual(artifact.read_bytes(), original)
-        staging = artifact.with_name(".AGENTS.md.link-install.tmp")
-        self.assertTrue(staging.is_file())
-        self.assertEqual(self.call("--apply")[0], 0)
-        self.assertFalse(staging.exists())
+        # 中断失败时目标文件没有被替换，本次自己的暂存也不留；正常生成仍是原子的。
+        self.assertEqual([p.name for p in artifact.parent.iterdir()
+                          if p.name.startswith(".AGENTS.md.link-install.tmp")], [])
+        # 未知归属的残留（中断或旧版固定名留下）不属于本次创建，后续运行只报告不清理。
+        residue = artifact.with_name(".AGENTS.md.link-install.tmp.0123456789abcdef")
+        residue.write_bytes(b"INTERRUPTED_PARTIAL_CONTENT")
+        residue.chmod(0o600)
+        rc, report = self.call("--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertIn(str(residue), report["residue"])
+        self.assertEqual(residue.read_bytes(), b"INTERRUPTED_PARTIAL_CONTENT")
         self.assertNotEqual(artifact.read_bytes(), original)
+        # 旧版固定名上的残留同样不清退，指向秘密时也不跟随、不删除。
+        legacy = artifact.with_name(".AGENTS.md.link-install.tmp")
         credential = self.home / ".codex/auth.json"
         credential.write_bytes(b"SYNTH_SECRET")
-        staging.symlink_to(credential)
+        legacy.symlink_to(credential)
         before = self.snapshot()
-        self.assertEqual(self.call("--apply")[0], 2)
+        rc, report = self.call("--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertIn(str(legacy), report["residue"])
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(credential.read_bytes(), b"SYNTH_SECRET")
+
+    def test_repointed_public_entry_retires_old_artifact_without_deadlock(self):
+        # 新版渲染器把同一公开入口改指另一份生成文件：旧文件必须按改指前核实的归属退役，
+        # 不因软链已改指被误判成非受管，也不让改指后的重跑卡住。
+        self.assertEqual(self.call("--apply")[0], 0)
+        artifact = self.home / ".luno/generated/claude-code/agents/forge.md"
+        public = self.home / ".claude/agents/forge.md"
+        self.assertTrue(artifact.is_file())
+        old = self.git("rev-parse", "HEAD")
+        script = self.root / "repoint.py"
+        script.write_text('''import importlib.util, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+render = module.render
+def repointed(obj, renderer, checkout, home, tree, read):
+    artifact, content = render(obj, renderer, checkout, home, tree, read)
+    if read is Path.read_bytes and artifact.name == "forge.md":
+        artifact = artifact.with_name("forge-v2.md")
+    return artifact, content
+module.render = repointed
+sys.exit(module.main(sys.argv[2:]))
+''')
+        run = [sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout)]
+        proc = subprocess.run(run + ["--apply", "--previous", old],
+                              env=self.env, capture_output=True, timeout=30)
+        report = json.loads(proc.stdout)
+        self.assertEqual((proc.returncode, report["status"]), (0, "completed"), report["errors"])
+        self.assertIn(str(artifact), [a["path"] for a in report["retirements"]])
+        self.assertFalse(artifact.exists())
+        self.assertEqual(os.readlink(public), str(artifact.with_name("forge-v2.md")))
+        # 改指后重跑同一入口不改写已完成状态，也不残留暂存文件。
+        proc = subprocess.run(run + ["--apply", "--previous", old],
+                              env=self.env, capture_output=True, timeout=30)
+        report = json.loads(proc.stdout)
+        self.assertEqual((proc.returncode, report["status"]), (0, "completed"), report["errors"])
+        self.assertEqual(report["retirements"], [])
+        self.assertEqual(report["residue"], [])
+        proc = subprocess.run(run + ["--check"], env=self.env, capture_output=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
 
     def test_successful_install_preserves_existing_login_and_settings_files(self):
         paths = (".claude/.credentials.json", ".claude/settings.json", ".codex/auth.json", ".codex/config.toml")

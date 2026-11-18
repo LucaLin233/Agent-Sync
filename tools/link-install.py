@@ -131,19 +131,34 @@ def private_file(info):
     return stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and stat.S_IMODE(info.st_mode) == 0o600
 
 
+STAGING_SUFFIX = ".link-install.tmp"
+
+
 def staging_path(action):
-    return action["path"].with_name("." + action["path"].name + ".link-install.tmp")
+    """本次运行独占的暂存名：同目录、随机后缀，只能由排他创建得到。"""
+    token = os.urandom(8).hex()
+    return action["path"].with_name("." + action["path"].name + STAGING_SUFFIX + "." + token)
 
 
-def staging_errors(actions, tree):
-    errors = []
+def staging_residue(actions, tree):
+    """只按前缀报告暂存残留，不判断也不清理其归属。
+
+    同 UID 加 0600 不证明归属，旧版安装器使用的固定名也在此列；残留一律交用户核对后处置。
+    """
+    residue, seen = [], set()
     for action in actions:
-        if action["kind"] == "generated":
-            temporary = staging_path(action)
-            info = tree.stat(temporary)
-            if info is not None and not private_file(info):
-                errors.append({"code": "staging_conflict", "path": str(temporary)})
-    return errors
+        if action["kind"] != "generated":
+            continue
+        parent = tree.directory(action["path"].parent)
+        if parent is None:
+            continue
+        prefix = "." + action["path"].name + STAGING_SUFFIX
+        for name in sorted(os.listdir(parent)):
+            path = action["path"].with_name(name)
+            if name.startswith(prefix) and str(path) not in seen:
+                seen.add(str(path))
+                residue.append(str(path))
+    return residue
 
 
 def render(obj, renderer, checkout, home, tree, read):
@@ -282,12 +297,15 @@ def plan(checkout, home, tree, read=Path.read_bytes, previous=()):
         action["state"] = state(action, tree)
         if action["state"] == "conflict":
             errors.append({"code": "path_conflict", "path": str(action["path"])})
-    errors.extend(staging_errors(actions, tree))
     return actions, errors
 
 
 def retirements(previous, current, tree):
-    """两版登记的差集；目录可能含登录态，永不因退役删除。"""
+    """两版登记的差集；目录可能含登录态，永不因退役删除。
+
+    生成文件的归属在公开软链改指之前核实，并把 inode 记进 identity：改指之后不再靠软链
+    现指判断，否则同一入口改指新文件会把旧文件误判成非受管并卡住重跑。
+    """
     retained = {a["path"] for a in current}
     retired, errors = [], []
     for action in previous:
@@ -300,13 +318,30 @@ def retirements(previous, current, tree):
             info = tree.stat(path)
             owned = private_file(info) and any(
                 tree.link_matches(p, path) for p in action["public"])
+            if owned:
+                action = dict(action, identity=[info.st_dev, info.st_ino])
         if not owned:
             errors.append({"code": "retired_path_conflict", "path": str(path)})
         else:
             retired.append(action)
-    # 先删生成文件，后删证明其归属的公开入口；重复恢复时缺项即已清理。
+    # 先删生成文件，后删证明其归属的公开软链；其余入口按登记顺序。
     retired.sort(key=lambda a: a["kind"] != "generated")
     return retired, errors
+
+
+def delete_retired(action, tree):
+    """删除已核过归属的退役项；文件必须仍是当时核实的那个 inode，否则停止。"""
+    path = action["path"]
+    info = tree.stat(path)
+    if info is None:
+        return
+    if action["kind"] == "link":
+        owned = tree.link_matches(path, action["target"])
+    else:
+        owned = private_file(info) and [info.st_dev, info.st_ino] == action.get("identity")
+    if not owned:
+        raise InstallError("retired_path_conflict", path)
+    tree.unlink(path)
 
 
 def write_generated(action, tree):
@@ -314,29 +349,28 @@ def write_generated(action, tree):
     parent = tree.directory(path.parent)
     temporary = staging_path(action)
     fd = os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(action["content"])
-        handle.flush()
-        os.fsync(handle.fileno())
-    if action["state"] == "create":
-        os.link(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
-        tree.unlink(temporary)
-    else:
-        os.replace(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+    created = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(action["content"])
+            handle.flush()
+            os.fsync(handle.fileno())
+        if action["state"] == "create":
+            os.link(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+        else:
+            os.replace(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+    finally:
+        discard_staging(temporary, parent, created)
 
 
-def clear_staging(actions, tree):
-    # 精确保留名只在登记的私有生成目录使用；不扫描或清理目录中的其他文件。
-    for action in actions:
-        if action["kind"] != "generated":
-            continue
-        temporary = staging_path(action)
-        info = tree.stat(temporary)
-        if info is None:
-            continue
-        if not private_file(info):
-            raise InstallError("staging_conflict", temporary)
-        tree.unlink(temporary)
+def discard_staging(temporary, parent, created):
+    """只清本次排他创建的那一个暂存文件：名字已不是它原本的 inode 就不动。"""
+    try:
+        info = os.stat(temporary.name, dir_fd=parent, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if (info.st_dev, info.st_ino) == (created.st_dev, created.st_ino):
+        os.unlink(temporary.name, dir_fd=parent)
 
 
 def apply(actions, tree):
@@ -359,7 +393,7 @@ def apply(actions, tree):
 
 def public_action(action):
     return {key: str(value) if isinstance(value, Path) else value for key, value in action.items()
-            if key not in ("content", "public")}
+            if key not in ("content", "public", "identity")}
 
 
 def main(argv=None):
@@ -387,7 +421,7 @@ def main(argv=None):
             report["previousHead"], read = revision_reader(checkout, args.previous)
             previous, previous_errors = desired(checkout, home, tree, read)
         actions, errors = plan(checkout, home, tree, previous=previous)
-        errors.extend(previous_errors + staging_errors(previous, tree))
+        errors.extend(previous_errors)
         retired = []
         if args.preflight:
             if report["trackedState"] != "clean" or any(a["state"] != "match" for a in actions):
@@ -402,20 +436,16 @@ def main(argv=None):
                 errors.append({"code": "checkout_dirty", "path": str(checkout)})
             retired, cleanup_errors = retirements(previous, actions, tree)
             errors.extend(cleanup_errors)
+        report["residue"] = staging_residue(actions + previous, tree)
         report["retirements"] = [public_action(a) for a in retired]
         report["actions"] = [public_action(a) for a in actions]
         report["errors"] = errors
         if errors:
             report["status"], code = "blocked", 2
         elif args.apply:
-            clear_staging(actions + previous, tree)
             apply(actions, tree)
             for action in retired:
-                remaining, conflicts = retirements([action], [], tree)
-                if conflicts:
-                    raise InstallError("retired_path_conflict", action["path"])
-                if remaining:
-                    tree.unlink(action["path"])
+                delete_retired(action, tree)
             actions, errors = plan(checkout, home, tree)
             report["actions"] = [public_action(a) for a in actions]
             report["errors"] = errors
