@@ -251,7 +251,8 @@ def desired(checkout, home, tree, read):
         source = checkout / obj["source"]
         read(source)
         for end in ENDS:
-            target = obj["ends"][end]
+            # 宿主端登记之前的旧版本没有这些键，按未登记处理；当前检出的显式登记由 check-rules 保证。
+            target = obj["ends"].get(end, {"present": False})
             if not target["present"]:
                 continue
             destinations = [home_path(p, home) for p in target["paths"]]
@@ -402,7 +403,7 @@ def apply(actions, tree):
             if current == "create":
                 os.symlink(str(action["target"]), action["path"].name, dir_fd=parent)
             else:
-                # 改指用同目录临时软链改名替换，窗口内旧入口仍可解析，不留缺失态。
+                # 改指用同目录临时软链改名替换，链接本身不留缺失态；生成文件改指时旧文件已先退役，见 retire_before_repoint。
                 temporary = action["path"].with_name(
                     "." + action["path"].name + ".link-install.tmp." + os.urandom(8).hex())
                 os.symlink(str(action["target"]), temporary.name, dir_fd=parent)

@@ -488,8 +488,7 @@ sys.exit(module.main(sys.argv[2:]))
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
             for end in ("claude-code", "codex", "paseo"):
-                if end in obj["ends"]:
-                    obj["ends"][end] = {"present": False}
+                obj["ends"].pop(end, None)   # 与宿主端登记之前的真实 main 一致：没有这些键
         registry_file.write_text(json.dumps(registry))
         old_without_host = self.commit()
         registry_file.write_text(json.dumps(json.loads((ROOT / "tools/sync-targets.json").read_text())))
