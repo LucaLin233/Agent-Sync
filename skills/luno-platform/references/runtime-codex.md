@@ -12,6 +12,14 @@ Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，
 
 官方依据（2026-11-19 核对）：[全局指令发现](https://learn.chatgpt.com/docs/agent-configuration/agents-md)；[0.170.0 技能根源码](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/host_roots.rs)；[同版软链策略](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/loader/host.rs)。
 
+## 原生运行与观察
+
+日常交互优先使用官方 Codex CLI；脚本化非交互任务可用 `codex exec`。`codex app-server` 面向自定义富客户端集成，不是日常运行或原生角色验收的必经层。原生子代理可在 CLI 中用 `/subagents` 观察和切换线程；实际身份及成功判定仍按下文与总控核验。
+
+在非交互流程或无法呈现新审批的运行中，需要新审批的动作会失败并向父流程返回错误；这不等于角色不可用或权限已获批准。
+
+官方依据（2026-11-19 核对）：[CLI](https://learn.chatgpt.com/docs/codex/cli)；[原生子代理](https://learn.chatgpt.com/docs/agent-configuration/subagents?surface=cli)；[App Server](https://learn.chatgpt.com/docs/app-server)。
+
 ## 派发通道
 
 - Codex CLI 0.170.0 支持通过 `[agents.<角色名>]` 的 `config_file` 注册原生角色，并由角色文件中的 `developer_instructions` 指定 LENS 或 FORGE。只有在当次授权内完成配置、必要审查及实际角色和模型元数据核验后，才能把它作为相应角色通道采用；原文资源存在、角色说明、昵称和自述都不算注册或运行成功。未注册、不可用或身份不可核时，仍按 `luno-core/references/review.md`〔分支 delegation〕〈任务归属〉停止依赖任务并报告；已获准且可用的 paseo 角色通道保留原用途，不自动迁移。
