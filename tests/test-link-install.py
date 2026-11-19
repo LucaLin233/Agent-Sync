@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""宿主安装器离线回归：临时 HOME、真实进程、文件与软链；不访问真实登录态。"""
+"""宿主安装器离线回归：临时 HOME、真实进程、文件与软链；不访问真实登录态。
+预算：升级/回退与真实进程、软链边界并入同族按需入口，不进 full；iSH 整套超过 10 秒，主验收留给 CI，裁定与实测记当次 PR。"""
 import json
 import importlib.util
 import os
@@ -628,6 +629,68 @@ module.main(sys.argv[2:])
         for name in paths:
             self.assertEqual((self.home / name).read_bytes(), b"SYNTH_EXISTING_USER_STATE")
         self.assertNotIn("SYNTH_EXISTING_USER_STATE", json.dumps(report))
+
+    def test_native_codex_only_relocates_without_changing_process_home(self):
+        # 显式采用 0.170.0 CODEX_HOME/skills 兼容根；不冒充 CLI 行为实测。
+        install_root = self.root / "native-install"
+        memory = install_root / ".luno/memory/GLOBAL.md"
+        memory.parent.mkdir(parents=True)
+        memory.write_bytes(b"synthetic native global\r\n\n")
+        memory.chmod(0o600)
+        codex_home = install_root / "codex-home"
+        options = ("--home", str(install_root), "--ends", "codex",
+                   "--codex-home", str(codex_home))
+        before = self.snapshot()
+        rc, report = self.call(*options)
+        self.assertEqual((rc, report["status"]), (0, "planned"))
+        self.assertFalse(codex_home.exists())
+        self.assertEqual(self.call(*options, "--apply")[0], 0)
+        self.assertEqual(self.call(*options, "--check")[0], 0)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(report["ends"], ["codex"])
+        self.assertEqual((codex_home / "AGENTS.md").read_bytes(),
+                         (self.checkout / "prompt/LUNO.md").read_bytes() + b"\n" + memory.read_bytes())
+        registry = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        for obj in registry["objects"]:
+            if obj["type"] == "skill" and obj["ends"]["codex"]["present"]:
+                self.assertEqual(os.readlink(codex_home / "skills" / obj["id"]),
+                                 str((self.checkout / obj["source"]).parent))
+        for relative in (".claude", ".agents", ".codex", ".luno/homes"):
+            self.assertFalse((install_root / relative).exists())
+        rc, report = self.call(*options, "--apply")
+        self.assertEqual((rc, report["created"]), (0, []))
+        memory.write_bytes(b"updated synthetic global\n")
+        self.assertEqual(self.call(*options, "--check")[0], 1)
+        self.assertEqual(self.call(*options, "--apply")[0], 0)
+        self.assertEqual(self.call(*options, "--check")[0], 0)
+        override = codex_home / "AGENTS.override.md"
+        override.write_bytes(b"synthetic override")
+        rc, report = self.call(*options, "--apply")
+        self.assertEqual(rc, 2)
+        self.assertIn({"code": "agents_override_shadowing", "path": str(override)}, report["errors"])
+        self.assertEqual(override.read_bytes(), b"synthetic override")
+
+    def test_native_codex_layout_requires_selected_end_and_contained_root(self):
+        cases = ((["--ends", "codex", "--codex-home", str(self.root / "outside")],
+                  "codex_home_outside_install_root"),
+                 (["--codex-home", str(self.home / "custom")], "invalid_native_codex_layout"))
+        before = self.snapshot()
+        for options, expected in cases:
+            with self.subTest(options=options):
+                rc, report = self.call(*options, "--apply")
+                self.assertEqual(rc, 2)
+                self.assertEqual(report["errors"][0]["code"], expected)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_codex_only_does_not_touch_unselected_override_or_role_homes(self):
+        role = self.home / ".luno/homes/lens-codex"
+        role.mkdir(parents=True)
+        (role / "AGENTS.override.md").write_bytes(b"unselected override")
+        rc, report = self.call("--ends", "codex", "--apply")
+        self.assertEqual(rc, 0, report["errors"])
+        self.assertFalse((self.home / ".claude").exists())
+        self.assertEqual(sorted(p.name for p in role.iterdir()), ["AGENTS.override.md"])
+        self.assertFalse((self.home / ".luno/homes/forge-codex").exists())
 
     def test_paseo_provider_example_matches_installed_role_homes(self):
         config = json.loads((ROOT / "platforms/paseo/config.example.json").read_text())

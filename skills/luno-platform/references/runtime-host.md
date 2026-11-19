@@ -1,42 +1,45 @@
 # 宿主端运行适配（Claude Code、Codex 共用）
 
-本资源是 `luno-platform` 入口〈运行端〉在宿主端的共用槽位取值。宿主端指 Debian 主机上用 Docker Compose 运行的 paseo 容器：Claude Code 与 Codex 在容器内以非 root 用户 `paseo` 运行，本仓库提示词与技能由容器内的 `tools/link-install.py` 安装。本资源中的 `~` 指容器内的 `/home/paseo`（持久卷）。只在当前端为 Claude Code 或 Codex 时读取，并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用，同一槽位两处都写时以后者为准。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
+本资源是 `luno-platform` 入口〈运行端〉在宿主端的共用槽位约定，适用于原生 CLI 和既有 Compose/paseo 容器。只在当前端为 Claude Code 或 Codex 时读取，并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用，同一槽位两处都写时以后者为准。义务、授权和停止条件以引用处为准，本资源不新增或放宽权限。
+
+## 环境取值
+
+运行身份、托管方式、目录、已安装依赖和实际入口以当次获准的运行元数据、明确配置及必要的有界核验为准，不因旧部署说明就假定容器、非 root、特定镜像或固定家目录。用户指定的落点优先；`~` 只表示运行进程的实际 HOME，安装器的 `--home` 只是受管安装根，不改变进程 HOME。未取得取值就停止依赖操作，不猜路径，不枚举环境、不读凭据、不广扫或跨设备探测。环境可用不授予操作权。
 
 ## 临时目录
 
-含秘密的临时文件用 `mktemp -d` 在 `/tmp` 下创建独占目录（700），文件 600，用完即删，并满足 `luno-core/references/execution.md`〔分支 writing-safety〕中「`/tmp` 默认范围」一条的创建、清理和核验条件；不放进受管检出、paseo worktree 或其他会被提交、同步的目录。
+含秘密的临时文件用 `mktemp -d` 在 `/tmp` 下创建独占目录（700），文件 600，用完即删，并满足 `luno-core/references/execution.md`〔分支 writing-safety〕中「`/tmp` 默认范围」一条的创建、清理和核验条件；不放进受管检出、任务副本或其他会被提交、同步的目录。
 
 ## 执行环境
 
-- 本端执行环境是 paseo 容器（Debian 12 基础镜像，非 root 用户 `paseo`，uid/gid 1000），Python 3 与 PyYAML 由仓库 `platforms/paseo/Dockerfile` 的子镜像提供；持久的可写路径是 `/home/paseo` 与 `/workspace` 两个挂载，容器内 `/tmp` 可写但不持久。Claude Code 与 Codex 各自的沙箱和审批设置按其运行端资源。来源可信、入口及依赖已静态核对的测试可以把容器当作原生执行环境。
-- 容器内没有 Docker 和 systemd，也不挂载 Docker socket；需要它们的测试和重测试另选隔离环境，前提和限制按 `luno-ops` 入口〈安全与测试〉。
-- 并行执行在容器内的收益没有验证过，不作推荐手段。
+- 在本次指定且获准的环境中核实执行入口、资源控制、权限边界和依赖。Claude Code 与 Codex 的沙箱和审批沿用各端资源及当次已核配置，适配不改这些设置。来源可信、入口及依赖已静态核对的测试可以把满足所需边界的宿主环境当作原生执行环境；root 身份、容器或最小白名单环境均不单独证明权限隔离。
+- 只有实际具备并获准使用的 Docker、systemd 等能力才能使用；不因 CLI 在宿主机运行就借用主机服务、生产数据或 Docker socket。执行环境和重测试按 `luno-ops` 入口〈安全与测试〉。
+- 既有 Compose 部署继续按仓库 README 的容器安装说明；本资源不要求迁移、重建或改变其用户、挂载与配置。
 
 ## 秘密注入
 
-秘密由容器环境或 paseo provider 的 `env` 注入运行会话。容器环境来自用户在仓库外部署目录中维护的 Compose env 文件 `paseo.env`（权限 600），AI 不创建、不读取该文件。缺失时报告变量名，请用户在该文件中设置并重建容器，不提供在聊天里粘贴的入口。paseo 的 `config.json` 是明文，只放非秘密值；Claude Code 与 Codex 的登录态保存在 `/home/paseo` 持久卷中，由用户在容器内登录。
+秘密只由本次明确授权的机制按指定变量注入，不把配置或登录态当作秘密来源。Compose 部署沿用由用户在仓库外维护的 `paseo.env`（权限 600）和 provider `env`；AI 不创建、不读取该 env 文件，paseo 的明文 `config.json` 仍只放非秘密值。原生 CLI 不继承这项容器假设；变量缺失时只报告变量名，不换来源、环境或交互补取。登录态与凭据不由规则安装器读取、复制或迁移。
 
 ## 技能根
 
-Claude Code 为 `~/.claude/skills/<技能名>/`（paseo 的 Claude Code 角色家目录为 `~/.luno/homes/<角色 provider>/skills/<技能名>/`），Codex 为 `~/.agents/skills/<技能名>/`；都是指向受管检出 `skills/<技能名>/` 的软链。
+实际技能根按对应运行端及版本的官方发现规则和本次配置核实。Claude Code 的既有安装布局为 `~/.claude/skills/<技能名>/`，paseo 角色用 `~/.luno/homes/<角色 provider>/skills/<技能名>/`；Codex 的 HOME、CODEX_HOME 和技能搜索根不能混为一项，见 `references/runtime-codex.md`。安装器支持的入口指向受管检出 `skills/<技能名>/`，安装根重定位本身不证明 CLI 会发现技能。
 
 ## 工作副本
 
-- 受管检出是 `~/.luno/agent-sync`（位于持久卷）：只由收口者在干净状态下快进到已合并的 main，供软链和安装器使用，不在其中编辑。
-- 候选在 `/workspace` 下的独立 clone 或 paseo 为任务创建的 worktree 中编辑：一个任务一个分支、一个写入者，不写受管检出或共享集成副本。
+受管检出和任务副本的位置以本次明确配置为准；受管检出只由收口者在干净状态下快进到已合并版本，供软链和安装器使用，不在其中编辑。候选使用独立 clone，一个任务一个分支、一个写入者；已获准的 paseo worktree 保留原用途，不因原生迁移自动复制或迁移。
 
 ## 远端工作目录
 
-**宿主端登录的其他主机**：过程产物（脚本草稿和被测副本、夹具、日志、克隆副本、样本、临时快照）统一放在 `/root/workdir/host/<项目>/`，根目录不存在就 `install -d -m 700 /root/workdir/host`。**项目目录按任务对象命名，同一对象始终复用，不在 `/root` 顶层散落文件。**目录 700、文件 600；保留结论性产物。
+登录其他主机前必须取得当次获准的主机、项目目录及写入范围；未指定就停止依赖的落盘，不沿用其他端的目录或自行新建公共入口。过程产物的权限、前态、恢复和清理仍按总控及命中的 `luno-ops` 资源；项目目录 700、文件 600，保留结论性产物。
 
 ## 连接清单
 
-SSH 主机清单和连接约定在 `~/.luno/memory/GLOBAL.md`（Minis `GLOBAL.md` 的单向只读副本）。
+只使用本次明确指定的非秘密连接配置；若来自 GLOBAL 私人副本，按下述记忆入口完整读取。未指定时报告缺口，不枚举凭据或试连默认主机。
 
 ## 记忆入口
 
-- `~/.luno/memory/GLOBAL.md`：Minis `/var/minis/memory/GLOBAL.md` 的整份单向只读副本，经安装器生成的常驻提示词在每个主会话注入；AI 不修改。复制与冲突处理按 `luno-core/references/sync.md`〔分支 sync-host〕。
-- `~/.luno/memory/MEMORY.md`：宿主端自持的经验日志，Claude Code 与 Codex 共读共写；写法、容量和整理按 `references/memory-common.md`〔分支 maintenance〕，纯检索按〔分支 memory-common〕。
+- GLOBAL 是 Minis 唯一真源的整份单向私人只读副本，AI 不修改。副本和本端日志的确切路径以当次明确配置为准；安装器的既有相对布局为 `<安装根>/.luno/memory/GLOBAL.md` 与 `MEMORY.md`。复制、冲突、提示词重新生成及恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。
+- 经验日志仅在本端及明确指定的共享范围内自持，不因同机存在另一个 CLI 就自动共写；写法、容量和整理按 `references/memory-common.md`〔分支 maintenance〕，纯检索按〔分支 memory-common〕。
 - Claude Code 的 auto memory 和 Codex 的 memories 不作为 LUNO 记忆：不往里写，也不据此采用经验。
 
 ## Surge 控制目标

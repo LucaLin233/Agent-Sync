@@ -1,6 +1,6 @@
 # Agent-Sync
 
-LUNO 提示词、技能与子代理的版本化资产。Minis/LobeHub 是运行端，仓库是管理落点；合并不等于部署，`present` 不等于已回读。记忆各端自持。
+LUNO 提示词、技能与子代理的版本化资产。Minis/LobeHub 与已授权宿主 CLI 是运行端，仓库是管理落点；合并不等于部署，`present` 不等于已回读。记忆各端自持。
 
 ## 入口与许可
 
@@ -276,6 +276,25 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
    - 首版只支持同布局：升级与回退要求两版的 `tools/link-install.py` 逐字节相同、并由登记推导出相同的公开入口目标。安装器一变（可能改变渲染路径）就在 `--preflight` 和 `--apply --previous` 写入前停止并报告 `installer_changed`；同一公开入口目标不同报 `layout_changed`；旧基线没有宿主端登记或没有安装器时报 `previous_without_host_installation`。首版不承诺跨布局回退，也不迁移布局；维护窗口从 Git 切换前一直开到 `--check` 结束，期间暂停新会话。
 - 回退（升级失败或中断）：`CO reset --keep <旧版>`，再运行 `LI --apply --previous <新版>` 与 `LI --check`，清理新版独有的受管入口并恢复旧版的生成文件。这条适用于两个宿主版本都已登记宿主端（旧版 `tools/sync-targets.json` 里已有 `claude-code`、`codex`、`paseo` 端条目）的情形；旧代码看不到新版渲染布局时按上一条停在报告，改按下面首装撤回处置。
    - 首次安装的撤回：旧基线里还没有宿主端登记、也没有 `tools/link-install.py` 时，`--previous <旧版>` 表达不出任何退役项，安装器不会删除新版装上的文件，此时直接回退会留下新装与旧基线混合的状态。安全默认是保留新版安装器与已装入口，不撤回；确需撤回时，只按本次 `--apply` 报告 `created` 里 `state=create` 的项逐项核对归属：源链接按登记推导出的精确 target 核，生成文件按仍指向它的公开软链核（生成文件须同 UID、0600 且仍被对应公开软链指向，软链须指向本次生成文件）后删除这些项（先全部核完再删，生成文件在指向它的公开软链仍在时删除；源链接与生成文件分开核），`~/.luno/generated/`、`~/.luno/homes/*`、`~/.luno/memory/GLOBAL.md`、settings 与登录态一律保留；项数或归属对不上就停下交你处理，不删目录、不整目录删除；报告缺失、`created` 为空（例如刚成功的重跑）或无法区分是否本次新增时，只停不删，不拿计划项或前态已有的受管项充当本次新增。
+
+## 独立原生 Codex（0.170.0）
+
+此模式不迁移 paseo、会话或登录态，沿用原有秘密、审批和角色分工。主提示词源仍是 `prompt/LUNO.md`，LENS/FORGE 原文仍在受管检出 `subagents/`；保留原文不等于独立 Codex 已具备角色派发。MCP 非秘密配置可另按目标支持的现有接口预置；服务凭据独立授权，缺失不阻塞无依赖的提示词安装。本安装器不配置 MCP、不注入任何凭据，也不请求模型。
+
+`--home` 是已存在的受管安装根，不改变进程 HOME。`--ends` 只选择登记端；省略时维持 Compose 的三端布局。`--codex-home` 仅允许与 `--ends codex` 合用，且须是安装根内的绝对目录：把登记 Codex 的全局入口映射到该目录的 `AGENTS.md`，把技能入口映射到该目录的 `skills/<名称>`；生成物和 GLOBAL 仍在安装根的 `.luno/` 布局中。登记对象、源文件与默认模板不变，不新增同步对象或私有实例登记。
+
+实际 HOME 下的 `.agents/skills` 不随 CODEX_HOME 改变。此模式明确采用 0.170.0 仍支持、但已弃用的 `$CODEX_HOME/skills` 兼容根，避免改 HOME 或建立根外链接；版本变化必须重核，不承诺未来继续支持。对应官方源码与指令优先级见 `skills/luno-platform/references/runtime-codex.md`。要采用其他根或改 HOME，另定方案，不由安装器自动迁移。
+
+先按 `skills/luno-core/references/sync.md`〔分支 sync-host〕准备已授权私人 GLOBAL 副本，再运行下列命令；路径变量均为本次明确核实的非秘密值，不是自动探测入口：
+
+```sh
+python3 -B tools/link-install.py --checkout "$CHECKOUT" --home "$INSTALL_ROOT" \
+  --ends codex --codex-home "$CODEX_HOME"
+```
+
+计划无冲突后，在已有授权内同参数加 `--apply`，再加 `--check` 回读。该模式不检查、创建、删除或修复未选端的用户入口；登记结构仍整体校验。原有未受管占位、父目录软链、GLOBAL 缺失及实际 CODEX_HOME 下的 override 均在写前阻断。不会扫描实际 HOME、项目或其他技能根以排除全部同名对象；调用方须按明确范围核实际加载，不把离线匹配报告为模型行为实测。
+
+GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时停依赖部分。新参数与旧安装器 blob 不同，所以既有 Compose 安装跨到此安装器版本时，原有 `--preflight` / `--apply --previous` 会按 `installer_changed` 停止；不绕过该门禁，也不借原生首装迁移 Compose。首装撤回和同布局恢复沿用上节规则，必须保留本次 create 报告；更换安装根或 CODEX_HOME 不是已支持的原位升级。
 
 ## 测试与历史
 
