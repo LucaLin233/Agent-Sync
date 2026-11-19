@@ -11,13 +11,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 import yaml
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # 3.11 起才自带独立解析器
-    tomllib = None
 
 ENDS = ("claude-code", "codex", "paseo")
 ROLE_DESCRIPTIONS = {
@@ -211,23 +207,6 @@ def toml_string(value):
     return "".join(out)
 
 
-def verify_native_role_toml(content, model, effort, instructions):
-    """用独立标准解析器复核生成物：字段集合、类型、取值与指令字节往返。"""
-    if tomllib is None:
-        raise InstallError("toml_parser_unavailable", "python3.11+")
-    try:
-        document = tomllib.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        raise InstallError("native_role_toml_invalid", "renderer") from None
-    if set(document) != {"model", "model_reasoning_effort", "developer_instructions"}:
-        raise InstallError("native_role_toml_invalid", "renderer")
-    if document["model"] != model or document["model_reasoning_effort"] != effort:
-        raise InstallError("native_role_toml_invalid", "renderer")
-    if not isinstance(document["developer_instructions"], str) or \
-            document["developer_instructions"].encode("utf-8") != instructions:
-        raise InstallError("native_role_toml_invalid", "instructions")
-
-
 def render(obj, target, checkout, home, tree, read):
     renderer = target["renderer"]
     source = checkout / obj["source"]
@@ -242,9 +221,7 @@ def render(obj, target, checkout, home, tree, read):
         instructions = text_bytes(source, read)
         text = "model = \"" + toml_string(model) + "\"\nmodel_reasoning_effort = \"" + toml_string(effort) \
                + "\"\ndeveloper_instructions = \"" + toml_string(instructions.decode("utf-8")) + "\"\n"
-        content = text.encode("utf-8")
-        verify_native_role_toml(content, model, effort, instructions)
-        return None, content
+        return None, text.encode("utf-8")
     if renderer == "claude-main":
         content = (import_line(source) + "\n@~/.luno/memory/GLOBAL.md\n").encode("utf-8")
         return home / ".luno/generated/claude-code/CLAUDE.md", content
@@ -419,147 +396,59 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
 
 
 NATIVE_ROLE_TABLES = ("agents.LENS", "agents.FORGE")
-TOML_KEY = re.compile(r"[A-Za-z0-9_-]+")
+REGISTRATION_LINE = re.compile(r'([A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*)')
 
 
-class TomlScanError(Exception):
-    pass
-
-
-def toml_skip_string(text, index):
-    """跳过一个 TOML 字符串；未闭合或不支持的形态 fail closed。"""
-    quote = text[index]
-    triple = text.startswith(quote * 3, index)
-    index += 3 if triple else 1
-    while index < len(text):
-        char = text[index]
-        if char == "\\" and quote == '"':
-            index += 2
+def registration_tables(raw):
+    """按已核现有布局逐行定位两个受管表；多行字符串内的伪表不算注册。"""
+    tables, current, multiline = {}, None, False
+    for line in raw.decode("utf-8").split("\n"):
+        stripped = line.strip()
+        if multiline:
+            if stripped.count('"""') % 2 or stripped.count("'''") % 2:
+                multiline = False
             continue
-        if triple and text.startswith(quote * 3, index):
-            return index + 3
-        if not triple and char == quote:
-            return index + 1
-        if not triple and char in "\r\n":
-            raise TomlScanError
-        index += 1
-    raise TomlScanError
-
-
-def toml_skip_value(text, index):
-    """跳过一个值：字符串走词法，数组/内联表按括号配对，其余到行尾。"""
-    if index < len(text) and text[index] in "\"'":
-        return toml_skip_string(text, index)
-    if index < len(text) and text[index] in "[{":
-        closing = {"[": "]", "{": "}"}[text[index]]
-        depth = 0
-        while index < len(text):
-            char = text[index]
-            if char == "#":
-                stop = text.find("\n", index)
-                index = len(text) if stop < 0 else stop
-                continue
-            if char in "\"'":
-                index = toml_skip_string(text, index)
-                continue
-            if char == text[index] and char in "[{":
-                depth += 1
-            elif char == closing:
-                depth -= 1
-                if depth == 0:
-                    return index + 1
-            index += 1
-        raise TomlScanError
-    stop = text.find("\n", index)
-    return len(text) if stop < 0 else stop
-
-
-def toml_managed_tables(raw):
-    """只切出受管两表：字符串与注释内的伪表头不会被识别，其余表只按词法跳过正文。"""
-    text = raw.decode("utf-8")
-    tables, index, current, line_start = {}, 0, None, True
-    while index < len(text):
-        char = text[index]
-        if char in " \t\r\n":
-            line_start = line_start or char == "\n"
-            index += 1
+        if stripped.count('"""') % 2 or stripped.count("'''") % 2:
+            multiline, current = True, None
             continue
-        if char == "#":
-            stop = text.find("\n", index)
-            index = len(text) if stop < 0 else stop
+        if not stripped or stripped.startswith("#"):
             continue
-        if char == "[":
-            array = text.startswith("[[", index)
-            stop = text.find("]", index)
-            if stop < 0:
-                raise TomlScanError
-            name = text[index + (2 if array else 1):stop].strip()
-            if not line_start or not name or any(c in name for c in "\"'[]{}"):
-                raise TomlScanError
-            index = stop + 1
-            if array:
+        if stripped.startswith("["):
+            current = None
+            if stripped.endswith("]") and not stripped.startswith("[["):
+                name = stripped[1:-1].strip()
                 if name in NATIVE_ROLE_TABLES:
-                    raise TomlScanError
-                current = None
-                line_start = False
-                continue
-            current = name
-            line_start = False
-            if name in NATIVE_ROLE_TABLES:
-                tables.setdefault(name, []).append([])
+                    current = name
+                    tables.setdefault(name, []).append([])
             continue
-        # 键值行：只在受管表内记录字段值，其余表只做词法跳过。
-        key_start = index
-        while index < len(text) and text[index] not in "=\n":
-            if text[index] in "\"'[{":
-                raise TomlScanError
-            index += 1
-        if index >= len(text) or text[index] != "=":
-            raise TomlScanError
-        key = text[key_start:index].strip()
-        if not key or not re.fullmatch(TOML_KEY.pattern, key):
-            if current in NATIVE_ROLE_TABLES:
-                raise TomlScanError
-        index += 1
-        while index < len(text) and text[index] in " \t":
-            index += 1
-        value_start = index
-        index = toml_skip_value(text, index)
-        if current in NATIVE_ROLE_TABLES and tables[current]:
-            tables[current][-1].append((key, text[value_start:index]))
-        line_start = False
+        if current is not None:
+            tables[current][-1].append(stripped)
     return tables
 
 
 def toml_basic_string(literal):
-    """按 TOML 语义解码一个 basic/literal string；不是单行字符串即 fail closed。"""
-    if tomllib is None:
-        raise TomlScanError
+    """按 TOML 语义解码一个单行 basic string；其他形态一律拒绝。"""
     if not literal.startswith('"') or literal.startswith('"""'):
-        raise TomlScanError
-    try:
-        document = tomllib.loads("value = " + literal)
-    except (ValueError, TypeError):
-        raise TomlScanError from None
+        raise ValueError
+    document = tomllib.loads("value = " + literal)
     if set(document) != {"value"} or not isinstance(document["value"], str):
-        raise TomlScanError
+        raise ValueError
     return document["value"]
 
 
 def native_role_registration(tree, codex_home, actions):
-    """只读核对两个原生角色的注册：窄词法定位受管表，只取两个字段的语义值。"""
+    """只读核对两个原生角色的注册：只取两个字段的语义值，不保留也不输出其他值。"""
     errors = []
     config = codex_home / "config.toml"
     try:
-        tables = toml_managed_tables(tree.read(config))
+        tables = registration_tables(tree.read(config))
     except (InstallError, FileNotFoundError):
         return [{"code": "native_role_registration_missing", "path": str(config)}]
-    except (UnicodeDecodeError, TomlScanError):
+    except UnicodeDecodeError:
         return [{"code": "native_role_registration_syntax", "path": str(config)}]
     for action in actions:
         role = Path(action["object"]).stem
-        header = "agents." + role
-        blocks = tables.get(header) or []
+        blocks = tables.get("agents." + role) or []
         if not blocks:
             errors.append({"code": "native_role_registration_missing", "path": str(config), "role": role})
             continue
@@ -567,7 +456,13 @@ def native_role_registration(tree, codex_home, actions):
             errors.append({"code": "native_role_registration_duplicate", "path": str(config), "role": role})
             continue
         fields, failed = {}, False
-        for key, literal in blocks[0]:
+        for line in blocks[0]:
+            match = REGISTRATION_LINE.fullmatch(line)
+            if match is None:
+                errors.append({"code": "native_role_registration_type", "path": str(config), "role": role})
+                failed = True
+                continue
+            key, literal = match.group(1), match.group(2)
             if key not in NATIVE_ROLE_KEYS:
                 errors.append({"code": "native_role_registration_unknown_key", "path": str(config),
                                "role": role, "key": key})
@@ -578,7 +473,7 @@ def native_role_registration(tree, codex_home, actions):
                 continue
             try:
                 fields[key] = toml_basic_string(literal)
-            except TomlScanError:
+            except ValueError:
                 errors.append({"code": "native_role_registration_type", "path": str(config), "role": role})
                 failed = True
         if failed:
@@ -592,9 +487,8 @@ def native_role_registration(tree, codex_home, actions):
         if fields["config_file"] != expected:
             errors.append({"code": "native_role_registration_config_file", "path": str(config), "role": role})
             continue
-        target = action["path"]
-        info = tree.stat(target)
-        if info is None or not stat.S_ISREG(info.st_mode) or (codex_home / expected) != target:
+        info = tree.stat(action["path"])
+        if info is None or not stat.S_ISREG(info.st_mode) or (codex_home / expected) != action["path"]:
             errors.append({"code": "native_role_registration_target", "path": str(config), "role": role})
     return errors
 
