@@ -14,7 +14,8 @@ Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，
 
 ## 派发通道
 
-- 本端不安装 LENS、FORGE 的会话内自定义 agent：Codex 子代理继承父会话的常驻 `AGENTS.md`（即 LUNO）和沙箱、审批设置，做不到角色隔离。需要 LENS 或 FORGE 时按 `references/runtime-paseo.md` 经 paseo 角色 provider 派发；不在 paseo 中运行时，按 `luno-core/references/review.md`〔分支 delegation〕〈任务归属〉报告角色不可用。
+- Codex CLI 0.170.0 支持通过 `[agents.<角色名>]` 的 `config_file` 注册原生角色，并由角色文件中的 `developer_instructions` 指定 LENS 或 FORGE。只有在当次授权内完成配置、必要审查及实际角色和模型元数据核验后，才能把它作为相应角色通道采用；原文资源存在、角色说明、昵称和自述都不算注册或运行成功。未注册、不可用或身份不可核时，仍按 `luno-core/references/review.md`〔分支 delegation〕〈任务归属〉停止依赖任务并报告；已获准且可用的 paseo 角色通道保留原用途，不自动迁移。
+- 原生子代理保留父会话的 AGENTS 指令及其权限上下文；角色 developer instructions 可以覆盖角色身份指令，但不删除、隐藏父提示词或私人内容，也不构成操作系统、凭据或数据隔离。子代理继承父当前 provider、审批、沙箱及 MCP 配置，角色配置不得扩大父权限或绕过审批。角色可按明确授权分别指定模型和思考强度；不得将配置值冒充实际运行模型，其他版本须重新核证。
 - 平台不设单次或累计时限，负责人为每次派发设定时限。
 - 会话内通用子代理的身份核验：以线程元数据 `agentRole`、线程 ID 和父线程为运行元数据，模型以线程启动返回的解析结果为准；昵称和自述都不算。
 
