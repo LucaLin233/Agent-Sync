@@ -94,6 +94,17 @@ def home_path(value, home):
     return home / value[2:]
 
 
+def codex_destination(value, home, codex_home):
+    destination = home_path(value, home)
+    if codex_home is None:
+        return destination
+    if value.startswith("~/.codex/"):
+        return codex_home / value[len("~/.codex/"):]
+    if value.startswith("~/.agents/skills/"):
+        return codex_home / "skills" / value[len("~/.agents/skills/"):]
+    raise InstallError("unsupported_native_codex_destination", value)
+
+
 def git_bytes(checkout, *args):
     proc = subprocess.run(
         ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(checkout), *args],
@@ -239,7 +250,7 @@ def duplicate_skills(home, names, tree):
     return errors
 
 
-def desired(checkout, home, tree, read, baseline=False):
+def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None):
     """baseline=True 只用于读取旧基线：整版没有宿主端键时才允许返回空动作。
 
     当前检出与预检目标都必须证明是完整登记的宿主版本；任一对象缺键或 present 非严格布尔即停止，
@@ -256,30 +267,32 @@ def desired(checkout, home, tree, read, baseline=False):
         errors.append({"code": "registry_without_host_ends", "path": str(registry_path)})
         return [], errors
     skill_names = {o["id"] for o in objects if o["type"] == "skill"}
-    errors.extend(duplicate_skills(home, skill_names, tree))
+    if "codex" in ends and codex_home is None:
+        errors.extend(duplicate_skills(home, skill_names, tree))
     for obj in objects:
         source = checkout / obj["source"]
         read(source)
-        ends = obj.get("ends")
-        if not isinstance(ends, dict):
+        object_ends = obj.get("ends")
+        if not isinstance(object_ends, dict):
             errors.append({"code": "registry_ends_invalid", "path": str(registry_path), "object": obj["id"]})
             continue
-        missing = [end for end in ENDS if end not in ends]
+        missing = [end for end in ENDS if end not in object_ends]
         if missing:
             if not registered:
                 continue  # 只可能是 baseline：整版没有宿主端键，按首装基线处理
             errors.append({"code": "registry_end_missing", "path": str(registry_path), "object": obj["id"]})
             continue
         for end in ENDS:
-            target = ends[end]
+            target = object_ends[end]
             present = target.get("present") if isinstance(target, dict) else None
             if not isinstance(present, bool):
                 errors.append({"code": "registry_end_invalid_present", "path": str(registry_path),
                                "object": obj["id"], "end": end})
                 continue
-            if not present:
+            if not present or end not in ends:
                 continue
-            destinations = [home_path(p, home) for p in target["paths"]]
+            destinations = [codex_destination(p, home, codex_home) if end == "codex"
+                            else home_path(p, home) for p in target["paths"]]
             if target["kind"] == "generated":
                 try:
                     artifact, content = render(obj, target["renderer"], checkout, home, tree, read)
@@ -309,10 +322,15 @@ def desired(checkout, home, tree, read, baseline=False):
     return actions, errors
 
 
-def plan(checkout, home, tree, read=Path.read_bytes):
-    actions, errors = desired(checkout, home, tree, read)
-    for path in (home / ".codex/AGENTS.override.md", home / ".luno/homes/lens-codex/AGENTS.override.md",
-                 home / ".luno/homes/forge-codex/AGENTS.override.md"):
+def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None):
+    actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home)
+    overrides = []
+    if "codex" in ends:
+        overrides.append((codex_home or home / ".codex") / "AGENTS.override.md")
+    if "paseo" in ends:
+        overrides.extend(home / (".luno/homes/" + role + "-codex/AGENTS.override.md")
+                         for role in ("lens", "forge"))
+    for path in overrides:
         if tree.stat(path) is not None:
             errors.append({"code": "agents_override_shadowing", "path": str(path)})
     for action in actions:
@@ -462,6 +480,10 @@ def public_action(action):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkout", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--home", type=Path, default=Path.home(), help="受管安装根；不改变 CLI 的 HOME")
+    parser.add_argument("--ends", nargs="+", choices=ENDS, default=ENDS, help="只处理所选登记端，默认全部")
+    parser.add_argument("--codex-home", type=Path,
+                        help="仅 --ends codex：安装根内的 CODEX_HOME；技能采用 0.170.0 兼容根 skills")
     parser.add_argument("--previous", help="--apply 时清理此本地 Git 版本独有的受管入口；不删除目录或登录态")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--apply", action="store_true")
@@ -475,15 +497,28 @@ def main(argv=None):
     try:
         if not args.checkout.is_absolute():
             raise InstallError("checkout_must_be_absolute", args.checkout)
-        checkout, home = args.checkout.resolve(), Path.home()
+        checkout, home = args.checkout.resolve(), args.home
+        ends, codex_home = tuple(args.ends), args.codex_home
+        if not home.is_absolute() or ".." in home.parts:
+            raise InstallError("home_must_be_absolute", home)
+        if codex_home is not None:
+            if ends != ("codex",) or not codex_home.is_absolute() or ".." in codex_home.parts:
+                raise InstallError("invalid_native_codex_layout", codex_home)
+            try:
+                relative = codex_home.relative_to(home)
+            except ValueError:
+                raise InstallError("codex_home_outside_install_root", codex_home) from None
+            if not relative.parts:
+                raise InstallError("invalid_native_codex_layout", codex_home)
         tree = HomeTree(home)
+        report.update(home=str(home), ends=list(ends), codexHome=str(codex_home) if codex_home else None)
         report.update(checkout=str(checkout), head=git_value(checkout, "rev-parse", "HEAD"),
                       trackedState="dirty" if git_value(checkout, "status", "--porcelain") else "clean")
         previous, previous_errors = [], []
         if args.previous:
             report["previousHead"], read = revision_reader(checkout, args.previous)
-            previous, previous_errors = desired(checkout, home, tree, read, baseline=True)
-        actions, errors = plan(checkout, home, tree)
+            previous, previous_errors = desired(checkout, home, tree, read, baseline=True, ends=ends, codex_home=codex_home)
+        actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home)
         errors.extend(previous_errors)
         if args.previous:
             errors.extend(compatibility_errors(checkout, report["previousHead"], read, previous, actions))
@@ -492,7 +527,7 @@ def main(argv=None):
             if report["trackedState"] != "clean" or any(a["state"] != "match" for a in actions):
                 errors.append({"code": "current_installation_not_clean", "path": str(checkout)})
             report["targetHead"], read = revision_reader(checkout, args.preflight)
-            candidate, candidate_errors = plan(checkout, home, tree, read)
+            candidate, candidate_errors = plan(checkout, home, tree, read, ends=ends, codex_home=codex_home)
             installed = actions
             actions = candidate
             # 不可信的登记不参与兼容比较：历史基线的停止只属于 --previous，不能附到预检目标上。
@@ -520,7 +555,7 @@ def main(argv=None):
             report["created"] = [public_action(a) for a in apply(actions, tree)]
             for action in retired:
                 delete_retired(action, tree)
-            actions, errors = plan(checkout, home, tree)
+            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home)
             report["actions"] = [public_action(a) for a in actions]
             report["errors"] = errors
             matched = not errors and all(a["state"] == "match" for a in actions)

@@ -2,13 +2,27 @@
 
 本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
-本端常驻提示词 `~/.codex/AGENTS.md` 由安装器生成，是 `prompt/LUNO.md` 原文与 `~/.luno/memory/GLOBAL.md` 原文的拼接；GLOBAL 副本更新后须重新生成。
+本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
+
+## 原生安装与技能发现
+
+Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，另保留已弃用的 `$CODEX_HOME/skills` 兼容根；设置 CODEX_HOME 不会把前者一起搬走。当前版本源码支持用户技能目录软链。原生安装须先选定并核实实际加载入口，不能只按安装器输出推定；其他版本或配置变化须重核。
+
+安装器默认保留既有 Compose 三端布局。只选 Codex 时用 `--ends codex`；`--home` 指定受管安装根，不能冒充 Codex 的 HOME。显式指定 `--codex-home` 时，仅在 Codex 单端模式下，把登记的 Codex 全局指令和用户技能入口重定位到该目录的 `AGENTS.md`、`skills/<技能名>`，采用上述 0.170.0 兼容根；该目录须位于安装根内。此模式不改 HOME、不建根外链接、不安装或迁移 paseo、Claude Code、角色家目录、会话、登录态、秘密、审批或沙箱配置。兼容根已弃用，不承诺未来版本；需要改 HOME 或采用其他根时另定明确方案，不自动改公共入口。
+
+官方依据（2026-11-19 核对）：[全局指令发现](https://learn.chatgpt.com/docs/agent-configuration/agents-md)；[0.170.0 技能根源码](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/host_roots.rs)；[同版软链策略](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/loader/host.rs)。
 
 ## 派发通道
 
 - 本端不安装 LENS、FORGE 的会话内自定义 agent：Codex 子代理继承父会话的常驻 `AGENTS.md`（即 LUNO）和沙箱、审批设置，做不到角色隔离。需要 LENS 或 FORGE 时按 `references/runtime-paseo.md` 经 paseo 角色 provider 派发；不在 paseo 中运行时，按 `luno-core/references/review.md`〔分支 delegation〕〈任务归属〉报告角色不可用。
 - 平台不设单次或累计时限，负责人为每次派发设定时限。
 - 会话内通用子代理的身份核验：以线程元数据 `agentRole`、线程 ID 和父线程为运行元数据，模型以线程启动返回的解析结果为准；昵称和自述都不算。
+
+## 提示词资源与 MCP
+
+主 LUNO 提示词可先按上述规则生成、离线回读；LENS、FORGE 原文随已合并受管检出的 `subagents/` 保留为可读资源，不因此启用角色或取得派发资格。没有可核的角色通道时，需要相应角色的任务仍按总控停止并报告，不用自述、会话内改名或通用子代理冒充。不得把已有提示词文件报告成角色调用成功。
+
+MCP 的非秘密配置可在当次授权内按目标支持的现有接口预置；服务各自的凭据须另按指定变量授权与注入，不存在由模型凭据统一替代的约定。模型凭据、MCP 凭据与管理、SSH、GitHub 凭据用途分开，不能互换或自行补取。缺 MCP 凭据只停止对应连接或调用，不阻塞不依赖它的提示词安装与离线回读；配置存在不证明连通或可用。本资源不固定服务清单，不自动复制秘密或现有保存态。
 
 ## 通用兜底
 
