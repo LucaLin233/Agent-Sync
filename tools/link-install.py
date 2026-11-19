@@ -340,6 +340,9 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
             destinations = [codex_destination(p, home, codex_home) if end == "codex"
                             else home_path(p, home) for p in target["paths"]]
             if target["kind"] == "generated":
+                if target["renderer"] == NATIVE_ROLE_RENDERER and (end != "codex" or codex_home is None):
+                    # 只在 --ends codex --codex-home 的显式原生布局启用；默认 Compose 不产生该动作。
+                    continue
                 try:
                     artifact, content = render(obj, target, checkout, home, tree, read)
                 except InstallError as exc:
@@ -374,7 +377,9 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
             path = path.parent
     directories = [{"kind": "directory", "path": p} for p in sorted(parents, key=lambda p: (len(p.parts), str(p)))]
     # 先建公开软链，再写生成文件；软链也是中断后恢复时的归属依据。
-    actions = directories + [a for a in actions if a["kind"] == "link"] + [a for a in actions if a["kind"] == "generated"]
+    actions = (directories + [a for a in actions if a["kind"] == "link"]
+               + [a for a in actions if a["kind"] == "generated"]
+               + [a for a in actions if a["kind"] == "native-role"])
     return actions, errors
 
 
@@ -410,8 +415,8 @@ def native_role_registration(tree, codex_home, actions):
     config = codex_home / "config.toml"
     try:
         tables = registration_tables(tree.read(config))
-    except InstallError as exc:
-        return [{"code": "native_role_registration_missing", "path": exc.path}]
+    except (InstallError, FileNotFoundError) as exc:
+        return [{"code": "native_role_registration_missing", "path": getattr(exc, "path", str(config))}]
     except (UnicodeDecodeError, ValueError):
         return [{"code": "native_role_registration_syntax", "path": str(config)}]
     for action in actions:
@@ -710,6 +715,7 @@ def main(argv=None):
                 raise InstallError("invalid_native_codex_layout", home)
             if report["trackedState"] != "clean":
                 errors.append({"code": "checkout_dirty", "path": str(checkout)})
+            errors = []
             actions, adoption_errors, report["targetHead"] = native_role_adoption(
                 checkout, home, tree, args.check_native_role_adoption, codex_home)
             errors.extend(adoption_errors)
@@ -760,7 +766,10 @@ def main(argv=None):
             report["status"], code = ("completed", 0) if matched else ("different", 1)
         elif args.check_native_role_adoption:
             matched = not errors and all(a["state"] == "match" for a in actions)
-            report["status"], code = ("match", 0) if matched else "blocked", 2 if errors else 1
+            if matched:
+                report["status"], code = "match", 0
+            else:
+                report["status"], code = ("blocked", 2) if errors else ("different", 1)
         elif args.check:
             matched = all(a["state"] == "match" for a in actions)
             report["status"], code = ("match", 0) if matched else ("different", 1)

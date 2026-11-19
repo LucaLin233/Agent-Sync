@@ -640,10 +640,30 @@ module.main(sys.argv[2:])
         codex_home = install_root / "codex-home"
         options = ("--home", str(install_root), "--ends", "codex",
                    "--codex-home", str(codex_home))
+        # 原生两角色是只读前提：已接管现场的角色文件与注册先于首次发布存在。
+        registry = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        entries = []
+        for obj in registry["objects"]:
+            if obj["id"] in ("subagents/LENS.md", "subagents/FORGE.md"):
+                target = obj["ends"]["codex"]
+                _, content = INSTALL.render(obj, target, self.checkout, install_root,
+                                            INSTALL.HomeTree(install_root), Path.read_bytes)
+                path = codex_home / target["paths"][0].removeprefix("~/.codex/")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+                path.chmod(0o600)
+                entries.append("[agents.%s]\ndescription = %s\nconfig_file = \"roles/%s.toml\"\n"
+                               % (Path(obj["id"]).stem,
+                                  json.dumps(INSTALL.ROLE_DESCRIPTIONS[Path(obj["id"]).stem.lower()],
+                                             ensure_ascii=False),
+                                  Path(obj["id"]).stem.lower()))
+        (codex_home / "config.toml").write_text("model = \"unrelated\"\n" + "".join(entries))
+        (codex_home / "config.toml").chmod(0o600)
         before = self.snapshot()
         rc, report = self.call(*options)
         self.assertEqual((rc, report["status"]), (0, "planned"))
-        self.assertFalse(codex_home.exists())
+        self.assertFalse((codex_home / "AGENTS.md").exists())
+        self.assertFalse((codex_home / "skills").exists())
         self.assertEqual(self.call(*options, "--apply")[0], 0)
         self.assertEqual(self.call(*options, "--check")[0], 0)
         self.assertEqual(self.snapshot(), before)
@@ -707,6 +727,192 @@ module.main(sys.argv[2:])
                 self.assertEqual(relative, ".luno/homes/" + key)
                 self.assertEqual((self.home / relative / entry).read_bytes(),
                                  (self.checkout / f"subagents/{role.upper()}.md").read_bytes())
+
+
+class NativeRoleTest(unittest.TestCase):
+    """原生 Codex 两角色：TOML 字节、注册只读核对与只读准入；不读真实配置。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="native-role-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.home = self.root / "home/paseo"
+        self.codex = self.home / ".codex"
+        (self.codex / "roles").mkdir(parents=True)
+        memory = self.home / ".luno/memory"
+        memory.mkdir(parents=True)
+        self.global_file = memory / "GLOBAL.md"
+        self.global_file.write_bytes(b"private fixture\n")
+        self.global_file.chmod(0o600)
+        self.tree = INSTALL.HomeTree(self.home)
+        self.addCleanup(self.tree.close)
+
+    def target(self, role):
+        for obj in json.loads((ROOT / "tools/sync-targets.json").read_bytes())["objects"]:
+            if obj["id"] == "subagents/" + role.upper() + ".md":
+                return obj, obj["ends"]["codex"]
+        raise AssertionError(role)
+
+    def render(self, role, raw=None, model="fixture-model", effort="fixture-effort"):
+        obj, target = self.target(role)
+        raw = (ROOT / obj["source"]).read_bytes() if raw is None else raw
+        path, content = INSTALL.render({"id": obj["id"], "source": obj["source"], "type": "subagent"},
+                                       dict(target, model=model, model_reasoning_effort=effort),
+                                       self.root, self.home, self.tree, lambda _: raw)
+        self.assertIsNone(path)
+        return content
+
+    @staticmethod
+    def unescape(value):
+        table = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
+        out, index = [], 0
+        while index < len(value):
+            if value[index] == "\\":
+                out.append(table[value[index + 1]])
+                index += 2
+            else:
+                out.append(value[index])
+                index += 1
+        return "".join(out)
+
+    def test_each_role_is_three_single_line_basic_strings_plus_lf(self):
+        for role in ("lens", "forge"):
+            content = self.render(role)
+            lines = content.split(b"\n")
+            self.assertEqual(lines[-1], b"")
+            self.assertEqual(len(lines), 4)
+            self.assertNotIn(b"\r", content)
+            text = content.decode("utf-8")
+            self.assertEqual([line.split(" = ")[0] for line in text.splitlines()],
+                             ["model", "model_reasoning_effort", "developer_instructions"])
+            expected = (ROOT / ("subagents/" + role.upper() + ".md")).read_bytes()
+            self.assertEqual(self.unescape(text.splitlines()[2].split(' = "', 1)[1][:-1]).encode("utf-8"),
+                             expected)
+
+    def test_instruction_bytes_survive_crlf_trailing_lf_and_non_ascii(self):
+        raw = "一\r\n二 \"引号\" \\反斜杠\t尾\r\n\n".encode("utf-8")
+        text = self.render("lens", raw=raw).decode("utf-8")
+        self.assertEqual(self.unescape(text.splitlines()[2].split(' = "', 1)[1][:-1]).encode("utf-8"), raw)
+        self.assertTrue(text.endswith('"\n'))
+
+    def registration_errors(self, role="LENS"):
+        action = {"object": "subagents/" + role + ".md",
+                  "path": self.codex / ("roles/" + role.lower() + ".toml")}
+        return INSTALL.native_role_registration(self.tree, self.codex, [action]), action
+
+    def test_registration_accepts_exact_fields_and_rejects_drift(self):
+        descriptions = INSTALL.ROLE_DESCRIPTIONS
+        for role in ("LENS", "FORGE"):
+            path = self.codex / ("roles/" + role.lower() + ".toml")
+            path.write_bytes(self.render(role.lower()))
+            path.chmod(0o600)
+        config = self.codex / "config.toml"
+        config.write_text('model = "unrelated"\n[agents.LENS]\ndescription = %s\nconfig_file = "roles/lens.toml"\n'
+                          '[agents.FORGE]\ndescription = %s\nconfig_file = "roles/forge.toml"\n'
+                          % (json.dumps(descriptions["lens"], ensure_ascii=False),
+                             json.dumps(descriptions["forge"], ensure_ascii=False)))
+        config.chmod(0o600)
+        self.assertEqual(self.registration_errors()[0], [])
+        cases = ((("roles/lens.toml", "roles/other.toml"), "native_role_registration_config_file"),
+                 ((descriptions["lens"], descriptions["lens"] + "x"), "native_role_registration_description"),
+                 (("\nconfig_file", "\nextra = \"y\"\nconfig_file"), "native_role_registration_unknown_key"),
+                 (('config_file = "roles/lens.toml"', "config_file = 1"), "native_role_registration_type"))
+        for (old, new), code in cases:
+            changed = config.read_text().replace(old, new, 1)
+            config.write_text(changed)
+            self.assertIn(code, [e["code"] for e in self.registration_errors()[0]], code)
+            config.write_text(changed.replace(new, old, 1))
+
+    def test_missing_registration_and_missing_file_block(self):
+        config = self.codex / "config.toml"
+        config.write_text("[agents.LENS]\ndescription = \"x\"\nconfig_file = \"roles/lens.toml\"\n")
+        config.chmod(0o600)
+        path = self.codex / "roles/lens.toml"
+        path.write_bytes(self.render("lens"))
+        path.chmod(0o600)
+        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
+                         ["native_role_registration_description"])
+        config.unlink()
+        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
+                         ["native_role_registration_missing"])
+        content = self.render("lens")
+        action = {"object": "subagents/LENS.md", "kind": "native-role",
+                  "path": self.codex / "roles/lens.toml", "content": content, "public": []}
+        action["path"].unlink()
+        self.assertEqual(INSTALL.state(action, self.tree), "create")
+        action["path"].write_bytes(b"drifted\n")
+        action["path"].chmod(0o600)
+        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
+        action["prior"] = b"drifted\n"
+        self.assertEqual(INSTALL.state(action, self.tree), "update")
+
+    def git(self, checkout, *args):
+        return subprocess.run(["git", "-C", str(checkout), *args], env=self.env,
+                              capture_output=True, check=True).stdout
+
+    def test_admission_is_read_only_all_match_and_blocks_changed_sources(self):
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        for name in ("skills", "prompt", "subagents", "tools"):
+            shutil.copytree(ROOT / name, checkout / name)
+        registry = json.loads((ROOT / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] in ("subagents/LENS.md", "subagents/FORGE.md"):
+                obj["ends"]["codex"] = {"present": False}
+        registry_path = checkout / "tools/sync-targets.json"
+        registry_path.write_bytes(json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig")}
+        (self.root / "gitconfig").write_bytes(b"")
+        self.git(checkout, "init", "-q", "-b", "main")
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "O")
+        layout = ("--ends", "codex", "--codex-home", str(self.codex))
+        base = [sys.executable, "-B", str(checkout / "tools/link-install.py"),
+                "--checkout", str(checkout), "--home", str(self.home), *layout]
+        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True, check=False)
+        self.assertEqual(applied.returncode, 0, applied.stdout)
+        config = self.codex / "config.toml"
+        entries = []
+        for role in ("LENS", "FORGE"):
+            path = self.codex / ("roles/" + role.lower() + ".toml")
+            _, target = self.target(role.lower())
+            path.write_bytes(self.render(role.lower(), model=target["model"],
+                                         effort=target["model_reasoning_effort"]))
+            path.chmod(0o600)
+            entries.append("[agents.%s]\ndescription = %s\nconfig_file = \"roles/%s.toml\"\n"
+                           % (role, json.dumps(INSTALL.ROLE_DESCRIPTIONS[role.lower()], ensure_ascii=False),
+                              role.lower()))
+        config.write_text("model = \"unrelated\"\n" + "".join(entries))
+        config.chmod(0o600)
+        registry_path.write_bytes((ROOT / "tools/sync-targets.json").read_bytes())
+        self.git(checkout, "checkout", "-q", "-b", "next")
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "N")
+        target = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        before = {str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
+        run = subprocess.run([*base, "--check-native-role-adoption", target], env=self.env,
+                             capture_output=True, check=False)
+        self.assertEqual(run.returncode, 0, run.stdout)
+        report = json.loads(run.stdout)
+        self.assertEqual(report["status"], "match")
+        self.assertEqual(report["targetInstallerBlob"], report["previousInstallerBlob"])
+        self.assertEqual([a["kind"] for a in report["actions"] if a["kind"] == "native-role"],
+                         ["native-role", "native-role"])
+        self.assertEqual({str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}, before)
+        self.git(checkout, "checkout", "-q", "next")
+        skill = checkout / "skills/luno-core/SKILL.md"
+        skill.write_bytes(skill.read_bytes() + b"\n")
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "N2")
+        target = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        run = subprocess.run([*base, "--check-native-role-adoption", target], env=self.env,
+                             capture_output=True, check=False)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("adopted_sources_changed",
+                      [e["code"] for e in json.loads(run.stdout)["errors"]])
 
 
 if __name__ == "__main__":

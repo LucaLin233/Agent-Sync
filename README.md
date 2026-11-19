@@ -296,6 +296,8 @@ python3 -B tools/link-install.py --checkout "$CHECKOUT" --home "$INSTALL_ROOT" \
 
 GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时停依赖部分。新参数与旧安装器 blob 不同，所以既有 Compose 安装跨到此安装器版本时，原有 `--preflight` / `--apply --previous` 会按 `installer_changed` 停止；不绕过该门禁，也不借原生首装迁移 Compose。首装撤回和同布局恢复沿用上节规则，必须保留本次 create 报告；更换安装根或 CODEX_HOME 不是已支持的原位升级。
 
+原生两角色（`subagents/LENS.md`、`subagents/FORGE.md`）的 Codex 落点是 `$CODEX_HOME/roles/{lens,forge}.toml`，由登记里的 `generated/codex-role` renderer 生成：`model`、`model_reasoning_effort`、`developer_instructions` 三键各一行，前者取该端登记的模型参数，后者是指令真源原文按 TOML basic string 转义的 UTF-8 字节（不 strip、不归一换行）。这两个文件**只在 `--ends codex --codex-home` 的显式布局启用**，默认 Compose 三端不产生它们。注册（主 `config.toml` 的 `[agents.LENS]` / `[agents.FORGE]`，字段 `description`、`config_file`）和角色文件都是**只读前提**：plan/check 只核对，`--apply` 对相等文件仅 no-op，缺文件、缺注册、字段/类型/指向不符或正文漂移一律停止，不创建、不代修，没有首次接管记录也不把等字节的普通文件当成已接管。接管是零安装动作的检出升级：维护窗口内核 HEAD=旧版且干净，用旧版安装器自己的 `--check` 取投影，再用新版 `--check-native-role-adoption <新版>` 对同一实际根只读核对（不写文件、不 fetch、不切版本，要求全部 match 且只新增两个角色文件与注册断言），随后只 ff-only 到新版并跑新版 `--check`。已经接管的同布局更新沿用 check→`--preflight`→ff→`--apply --previous`→check，只有现场旧文件全字节等于上一登记版本的渲染结果时才改写角色文件；失败按已记录版本回读角色文件、注册与共同入口，不反向跨 blob apply，也不删除文件。
+
 ## 测试与历史
 
 用法、选路及白名单环境见 `tests/run-tests.sh` 头部与实现；准入和成本见 `skills/luno-core/references/test-authoring.md`。结构守卫退出码见 `tools/check-rules.py` 头部；测试将任何非零记为失败，`sync-all.sh` 只阻断 rc=1/3。结构通过不代替行为审查。
