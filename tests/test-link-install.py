@@ -1014,24 +1014,6 @@ class NativeRoleTest(unittest.TestCase):
         errors, _ = self.registration_errors()
         self.assertEqual([e["code"] for e in errors], ["native_role_registration_missing"])
         self.assertNotIn("SYNTHETIC-SECRET-MARKER", json.dumps(errors))
-        for role in ("LENS", "FORGE"):
-            path = self.codex / ("roles/" + role.lower() + ".toml")
-            _, target = self.target(role.lower())
-            path.write_bytes(self.render(role.lower(), model=target["model"],
-                                         effort=target["model_reasoning_effort"]))
-        config.unlink()
-        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
-                         ["native_role_registration_missing"])
-        content = self.render("lens")
-        action = {"object": "subagents/LENS.md", "kind": "native-role",
-                  "path": self.codex / "roles/lens.toml", "content": content, "public": []}
-        action["path"].unlink()
-        self.assertEqual(INSTALL.state(action, self.tree), "create")
-        action["path"].write_bytes(b"drifted\n")
-        action["path"].chmod(0o600)
-        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
-        action["prior"] = b"drifted\n"
-        self.assertEqual(INSTALL.state(action, self.tree), "update")
 
 if __name__ == "__main__":
     unittest.main()

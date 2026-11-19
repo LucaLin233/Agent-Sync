@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -673,7 +672,9 @@ def apply(actions, tree):
         if action["kind"] == "native-role" and current_states[id(action)] == "update":
             verified[id(action)] = native_role_identity(action, tree)
     for action in actions:
-        current = current_states[id(action)]
+        current = state(action, tree)
+        if current == "conflict":
+            raise InstallError("path_conflict", action["path"])
         if current == "match":
             continue
         action["state"] = current
@@ -722,6 +723,7 @@ def run_previous_check(checkout, home, codex_home, commit, blob):
     if git_blob_hash(data) != blob:
         raise InstallError("adoption_previous_blob_mismatch", "O:tools/link-install.py")
     directory = Path(tempfile.mkdtemp(prefix="link-install-adopt-"))
+    root = os.stat(directory, follow_symlinks=False)
     try:
         tool = directory / "link-install.py"
         fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -733,7 +735,20 @@ def run_previous_check(checkout, home, codex_home, commit, blob):
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=120)
         return proc.returncode, json.loads(proc.stdout)
     finally:
-        shutil.rmtree(directory, ignore_errors=True)
+        try:
+            current = os.stat(directory, follow_symlinks=False)
+        except OSError:
+            raise InstallError("adoption_temp_root_missing", directory) from None
+        if (current.st_dev, current.st_ino) != (root.st_dev, root.st_ino) or \
+                not stat.S_ISDIR(current.st_mode):
+            raise InstallError("adoption_temp_root_changed", directory)
+        try:
+            os.remove(directory / "link-install.py")
+            os.rmdir(directory)
+        except OSError:
+            raise InstallError("adoption_temp_cleanup_failed", directory) from None
+        if os.path.lexists(directory):
+            raise InstallError("adoption_temp_cleanup_failed", directory)
 
 
 def action_key(action):
