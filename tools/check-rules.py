@@ -17,6 +17,10 @@ CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
 HOST_ENDS = ('claude-code','codex','paseo')
 # 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
+NATIVE_ROLES = {'subagents/LENS.md': ('lens', 'gpt-6.2-astra', 'medium'),
+               'subagents/FORGE.md': ('forge', 'deepseek-flash', 'high')}
+NATIVE_ROLE_KEYS = {'present', 'kind', 'paths', 'renderer', 'model', 'model_reasoning_effort'}
+
 REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
                   ('subagents/LENS.md', 'luno-core'),
                   ('subagents/FORGE.md', 'luno-core'),
@@ -285,6 +289,13 @@ class Guard:
             want='link'
         elif kind=='prompt' and end in ('claude-code','codex'):
             want='generated';renderer='claude-main' if end=='claude-code' else 'codex-main'
+        elif name in NATIVE_ROLES and end=='codex':
+            # 原生 Codex 角色：两角色、此 renderer、精确路径与模型参数，其余键名一律冲突。
+            role, model, effort = NATIVE_ROLES[name]
+            want='generated';renderer='codex-role'
+            if (set(value)!=NATIVE_ROLE_KEYS or value.get('paths')!=['~/.codex/roles/'+role+'.toml']
+                    or value.get('model')!=model or value.get('model_reasoning_effort')!=effort):
+                self.problem('宿主端原生角色登记冲突');return
         elif name in ('subagents/LENS.md','subagents/FORGE.md') and end in ('claude-code','paseo'):
             want='generated' if end=='claude-code' else 'link'
             if end=='claude-code':renderer='claude-role'
