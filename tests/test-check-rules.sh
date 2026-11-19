@@ -223,6 +223,12 @@ def shared_host_path(p):
         sk[1]['ends']['codex']['paths']=sk[0]['ends']['codex']['paths']
     registry(p,fn)
 case('宿主端路径不能被不同对象占用',1,'宿主端身份多占',shared_host_path)
+case('原生角色 renderer',1,'宿主端身份种类冲突',
+     lambda p:registry(p,lambda d:[o for o in d['objects'] if o['id']=='subagents/LENS.md'][0]['ends']['codex'].__setitem__('renderer','claude-role')))
+case('原生角色 model',1,'宿主端原生角色登记冲突',
+     lambda p:registry(p,lambda d:[o for o in d['objects'] if o['id']=='subagents/LENS.md'][0]['ends']['codex'].__setitem__('model','other-model')))
+case('原生角色 model_reasoning_effort',1,'宿主端原生角色登记冲突',
+     lambda p:registry(p,lambda d:[o for o in d['objects'] if o['id']=='subagents/LENS.md'][0]['ends']['codex'].__setitem__('model_reasoning_effort','low')))
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']

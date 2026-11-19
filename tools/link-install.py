@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """宿主端安装：默认列计划，--apply 安装，--check 回读；不读取登录态或配置凭据。"""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
+import tempfile
+import tomllib
 
 import yaml
 
@@ -172,8 +176,51 @@ def staging_residue(actions, tree):
     return residue
 
 
-def render(obj, renderer, checkout, home, tree, read):
+NATIVE_ROLE_RENDERER = "codex-role"
+NATIVE_ROLE_KEYS = ("description", "config_file")
+
+
+def toml_string(value):
+    """TOML basic string：转义必需与禁止的控制码，非 ASCII 原样保留。"""
+    out = []
+    for char in value:
+        code = ord(char)
+        if char == "\\":
+            out.append("\\\\")
+        elif char == '"':
+            out.append('\\"')
+        elif char == "\n":
+            out.append("\\n")
+        elif char == "\t":
+            out.append("\\t")
+        elif char == "\r":
+            out.append("\\r")
+        elif char == "\b":
+            out.append("\\b")
+        elif char == "\f":
+            out.append("\\f")
+        elif code < 0x20 or code == 0x7f:
+            out.append("\\u%04x" % code)
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def render(obj, target, checkout, home, tree, read):
+    renderer = target["renderer"]
     source = checkout / obj["source"]
+    if renderer == NATIVE_ROLE_RENDERER:
+        role = source.stem.lower()
+        if role not in ROLE_DESCRIPTIONS:
+            raise InstallError("unknown_native_role", source)
+        model, effort = target.get("model"), target.get("model_reasoning_effort")
+        for value in (model, effort):
+            if not isinstance(value, str) or not value:
+                raise InstallError("native_role_model_missing", source)
+        instructions = text_bytes(source, read)
+        text = "model = \"" + toml_string(model) + "\"\nmodel_reasoning_effort = \"" + toml_string(effort) \
+               + "\"\ndeveloper_instructions = \"" + toml_string(instructions.decode("utf-8")) + "\"\n"
+        return None, text.encode("utf-8")
     if renderer == "claude-main":
         content = (import_line(source) + "\n@~/.luno/memory/GLOBAL.md\n").encode("utf-8")
         return home / ".luno/generated/claude-code/CLAUDE.md", content
@@ -209,6 +256,16 @@ def state(action, tree):
             return "match"
         # 首版不支持链接改指：目标不同的既有入口一律冲突，不借旧目标放行。
         return "conflict" if info is not None else "create"
+    if action["kind"] == "native-role":
+        if info is None:
+            return "create"
+        if not private_file(info) or info.st_nlink != 1:
+            return "conflict"
+        content = tree.read(path)
+        if content == action["content"]:
+            return "match"
+        # 只有真实旧文件等于上一登记版本渲染结果时才允许改写，其余漂移一律停止。
+        return "update" if content == action.get("prior") else "conflict"
     if info is None:
         return "create"
     # 归属先于正文：即使 bytes 相同，没有公开入口指向的旧文件也不是受管文件。
@@ -250,7 +307,7 @@ def duplicate_skills(home, names, tree):
     return errors
 
 
-def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None):
+def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None, priors=None):
     """baseline=True 只用于读取旧基线：整版没有宿主端键时才允许返回空动作。
 
     当前检出与预检目标都必须证明是完整登记的宿主版本；任一对象缺键或 present 非严格布尔即停止，
@@ -294,10 +351,23 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
             destinations = [codex_destination(p, home, codex_home) if end == "codex"
                             else home_path(p, home) for p in target["paths"]]
             if target["kind"] == "generated":
+                if target["renderer"] == NATIVE_ROLE_RENDERER and (end != "codex" or codex_home is None):
+                    # 只在 --ends codex --codex-home 的显式原生布局启用；默认 Compose 不产生该动作。
+                    continue
                 try:
-                    artifact, content = render(obj, target["renderer"], checkout, home, tree, read)
+                    artifact, content = render(obj, target, checkout, home, tree, read)
                 except InstallError as exc:
                     errors.append({"code": exc.code, "path": exc.path, "object": obj["id"], "end": end})
+                    continue
+                if target["renderer"] == NATIVE_ROLE_RENDERER:
+                    # 原生角色是单一直接文件：没有公开软链，也不拿旧 generated 的归属证明。
+                    if len(destinations) != 1:
+                        errors.append({"code": "native_role_paths_invalid", "path": str(registry_path),
+                                       "object": obj["id"], "end": end})
+                        continue
+                    actions.append({"object": obj["id"], "end": end, "kind": "native-role",
+                                    "path": destinations[0], "content": content, "public": [],
+                                    "prior": (priors or {}).get(str(destinations[0]))})
                     continue
                 actions.append({"object": obj["id"], "end": end, "kind": "generated",
                                 "path": artifact, "content": content, "public": destinations})
@@ -318,12 +388,112 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
             path = path.parent
     directories = [{"kind": "directory", "path": p} for p in sorted(parents, key=lambda p: (len(p.parts), str(p)))]
     # 先建公开软链，再写生成文件；软链也是中断后恢复时的归属依据。
-    actions = directories + [a for a in actions if a["kind"] == "link"] + [a for a in actions if a["kind"] == "generated"]
+    actions = (directories + [a for a in actions if a["kind"] == "link"]
+               + [a for a in actions if a["kind"] == "generated"]
+               + [a for a in actions if a["kind"] == "native-role"])
     return actions, errors
 
 
-def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None):
-    actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home)
+NATIVE_ROLE_TABLES = ("agents.LENS", "agents.FORGE")
+REGISTRATION_LINE = re.compile(r'([A-Za-z0-9_-]+)[ \t]*=[ \t]*(.*)')
+
+
+def registration_tables(raw):
+    """按已核现有布局逐行定位两个受管表；多行字符串内的伪表不算注册。"""
+    tables, current, multiline = {}, None, False
+    for line in raw.decode("utf-8").split("\n"):
+        stripped = line.strip()
+        if multiline:
+            if stripped.count('"""') % 2 or stripped.count("'''") % 2:
+                multiline = False
+            continue
+        if stripped.count('"""') % 2 or stripped.count("'''") % 2:
+            multiline, current = True, None
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            current = None
+            if stripped.endswith("]") and not stripped.startswith("[["):
+                name = stripped[1:-1].strip()
+                if name in NATIVE_ROLE_TABLES:
+                    current = name
+                    tables.setdefault(name, []).append([])
+            continue
+        if current is not None:
+            tables[current][-1].append(stripped)
+    return tables
+
+
+def toml_basic_string(literal):
+    """按 TOML 语义解码一个单行 basic string；其他形态一律拒绝。"""
+    if not literal.startswith('"') or literal.startswith('"""'):
+        raise ValueError
+    document = tomllib.loads("value = " + literal)
+    if set(document) != {"value"} or not isinstance(document["value"], str):
+        raise ValueError
+    return document["value"]
+
+
+def native_role_registration(tree, codex_home, actions):
+    """只读核对两个原生角色的注册：只取两个字段的语义值，不保留也不输出其他值。"""
+    errors = []
+    config = codex_home / "config.toml"
+    try:
+        tables = registration_tables(tree.read(config))
+    except (InstallError, FileNotFoundError):
+        return [{"code": "native_role_registration_missing", "path": str(config)}]
+    except UnicodeDecodeError:
+        return [{"code": "native_role_registration_syntax", "path": str(config)}]
+    for action in actions:
+        role = Path(action["object"]).stem
+        blocks = tables.get("agents." + role) or []
+        if not blocks:
+            errors.append({"code": "native_role_registration_missing", "path": str(config), "role": role})
+            continue
+        if len(blocks) > 1:
+            errors.append({"code": "native_role_registration_duplicate", "path": str(config), "role": role})
+            continue
+        fields, failed = {}, False
+        for line in blocks[0]:
+            match = REGISTRATION_LINE.fullmatch(line)
+            if match is None:
+                errors.append({"code": "native_role_registration_type", "path": str(config), "role": role})
+                failed = True
+                continue
+            key, literal = match.group(1), match.group(2)
+            if key not in NATIVE_ROLE_KEYS:
+                errors.append({"code": "native_role_registration_unknown_key", "path": str(config),
+                               "role": role, "key": key})
+                continue
+            if key in fields:
+                errors.append({"code": "native_role_registration_duplicate", "path": str(config), "role": role})
+                failed = True
+                continue
+            try:
+                fields[key] = toml_basic_string(literal)
+            except ValueError:
+                errors.append({"code": "native_role_registration_type", "path": str(config), "role": role})
+                failed = True
+        if failed:
+            continue
+        if set(fields) != set(NATIVE_ROLE_KEYS):
+            errors.append({"code": "native_role_registration_missing_field", "path": str(config), "role": role})
+            continue
+        if fields["description"] != ROLE_DESCRIPTIONS[role.lower()]:
+            errors.append({"code": "native_role_registration_description", "path": str(config), "role": role})
+        expected = "roles/" + role.lower() + ".toml"
+        if fields["config_file"] != expected:
+            errors.append({"code": "native_role_registration_config_file", "path": str(config), "role": role})
+            continue
+        info = tree.stat(action["path"])
+        if info is None or not stat.S_ISREG(info.st_mode) or (codex_home / expected) != action["path"]:
+            errors.append({"code": "native_role_registration_target", "path": str(config), "role": role})
+    return errors
+
+
+def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None, priors=None):
+    actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors)
     overrides = []
     if "codex" in ends:
         overrides.append((codex_home or home / ".codex") / "AGENTS.override.md")
@@ -337,6 +507,15 @@ def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None)
         action["state"] = state(action, tree)
         if action["state"] == "conflict":
             errors.append({"code": "path_conflict", "path": str(action["path"])})
+        elif action["kind"] == "native-role" and action["state"] == "create":
+            # 首次接管不创建角色文件：文件必须已存在且与渲染结果逐字节相等。
+            errors.append({"code": "native_role_missing", "path": str(action["path"])})
+    native = [a for a in actions if a["kind"] == "native-role"]
+    if native:
+        if codex_home is None:
+            errors.append({"code": "native_role_registration_unavailable", "path": str(home)})
+        else:
+            errors.extend(native_role_registration(tree, codex_home, native))
     return actions, errors
 
 
@@ -451,9 +630,47 @@ def compatibility_errors(checkout, other_head, other_read, other_actions, curren
     return []
 
 
+def native_role_identity(action, tree):
+    """写前重核：受控父 fd 下的普通文件身份与完整旧字节。"""
+    path = action["path"]
+    info = tree.stat(path)
+    if info is None or not private_file(info) or info.st_nlink != 1:
+        raise InstallError("native_role_changed", path)
+    return [[info.st_dev, info.st_ino, info.st_mode, info.st_uid], tree.read(path)]
+
+
+def write_native_role(action, tree, identity):
+    """原子写角色文件；改名之前再从同一父 fd 核身份，落后于并发写者即拒写。"""
+    path = action["path"]
+    parent = tree.directory(path.parent)
+    temporary = staging_path(action)
+    fd = os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+    created = os.fstat(fd)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(action["content"])
+            handle.flush()
+            os.fsync(handle.fileno())
+        info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if [info.st_dev, info.st_ino, info.st_mode, info.st_uid] != identity or info.st_nlink != 1:
+            raise InstallError("native_role_changed", path)
+        os.replace(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+    finally:
+        discard_staging(temporary, parent, created)
+
+
 def apply(actions, tree):
     """按计划写入，返回本次实际执行过的项（state=create/update）；未执行的项不列入。"""
-    done = []
+    done, current_states, verified = [], {}, {}
+    for action in actions:
+        current = state(action, tree)
+        if current == "conflict":
+            raise InstallError("path_conflict", action["path"])
+        current_states[id(action)] = current
+    # 两角先完成全量准入，再进入写循环；写前身份与旧字节先取一次。
+    for action in actions:
+        if action["kind"] == "native-role" and current_states[id(action)] == "update":
+            verified[id(action)] = native_role_identity(action, tree)
     for action in actions:
         current = state(action, tree)
         if current == "conflict":
@@ -466,6 +683,14 @@ def apply(actions, tree):
         elif action["kind"] == "link":
             os.symlink(str(action["target"]), action["path"].name,
                        dir_fd=tree.directory(action["path"].parent))
+        elif action["kind"] == "native-role":
+            if current != "update":
+                raise InstallError("native_role_missing", action["path"])
+            identity, previous_bytes = verified[id(action)]
+            if native_role_identity(action, tree) != [identity, previous_bytes] or \
+                    previous_bytes not in (action.get("prior"), action["content"]):
+                raise InstallError("native_role_changed", action["path"])
+            write_native_role(action, tree, identity)
         else:
             write_generated(action, tree)
         done.append(action)
@@ -474,7 +699,115 @@ def apply(actions, tree):
 
 def public_action(action):
     return {key: str(value) if isinstance(value, Path) else value for key, value in action.items()
-            if key not in ("content", "public", "identity")}
+            if key not in ("content", "public", "identity", "prior")}
+
+
+def git_is_ancestor(checkout, ancestor, descendant):
+    proc = subprocess.run(
+        ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(checkout),
+         "merge-base", "--is-ancestor", ancestor, descendant],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=30)
+    return proc.returncode == 0
+
+
+ADOPTION_SOURCES = ("skills", "subagents", "prompt")
+
+
+def git_blob_hash(data):
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def run_previous_check(checkout, home, codex_home, commit, blob):
+    """用 O 自己的安装器字节在同一实际根只读执行 check，取真实旧动作投影。"""
+    data = git_bytes(checkout, "show", commit + ":tools/link-install.py")
+    if git_blob_hash(data) != blob:
+        raise InstallError("adoption_previous_blob_mismatch", "O:tools/link-install.py")
+    directory = Path(tempfile.mkdtemp(prefix="link-install-adopt-"))
+    root = os.stat(directory, follow_symlinks=False)
+    try:
+        tool = directory / "link-install.py"
+        fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        proc = subprocess.run(
+            [sys.executable, "-B", str(tool), "--checkout", str(checkout), "--home", str(home),
+             "--ends", "codex", "--codex-home", str(codex_home), "--check"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=120)
+        return proc.returncode, json.loads(proc.stdout)
+    finally:
+        try:
+            current = os.stat(directory, follow_symlinks=False)
+        except OSError:
+            raise InstallError("adoption_temp_root_missing", directory) from None
+        if (current.st_dev, current.st_ino) != (root.st_dev, root.st_ino) or \
+                not stat.S_ISDIR(current.st_mode):
+            raise InstallError("adoption_temp_root_changed", directory)
+        try:
+            os.remove(directory / "link-install.py")
+            os.rmdir(directory)
+        except OSError:
+            raise InstallError("adoption_temp_cleanup_failed", directory) from None
+        if os.path.lexists(directory):
+            raise InstallError("adoption_temp_cleanup_failed", directory)
+
+
+def action_key(action):
+    return (action.get("object"), action.get("end"), action["kind"], str(action["path"]),
+            str(action.get("target", "")))
+
+
+def adoption_delta(previous, current):
+    """逐项比对旧投影与新计划：只准两个角色文件与已有目录的 match 增量。"""
+    errors = []
+    old = {action_key(a): a for a in previous["actions"]}
+    new = {action_key(a): a for a in current}
+    for key in old:
+        if key not in new:
+            errors.append({"code": "adoption_lost_action", "path": key[3]})
+    added = [new[key] for key in new if key not in old]
+    roles = [a for a in added if a["kind"] == "native-role"]
+    for action in added:
+        if action in roles:
+            continue
+        if action["kind"] == "directory" and action.get("state") == "match":
+            continue
+        errors.append({"code": "adoption_unexpected_action", "path": str(action["path"])})
+    if len(roles) != 2 or any(action.get("state") != "match" for action in roles):
+        errors.append({"code": "adoption_role_delta", "path": "actions"})
+    if any(action.get("state") != "match" for action in old.values()):
+        errors.append({"code": "adoption_previous_not_match", "path": "actions"})
+    return errors
+
+
+def native_role_adoption(checkout, home, tree, target, base, blobs, codex_home):
+    """只读准入：绑定真实 O/旧 blob 与新工具字节，执行 O 自己的 check 并与 N 计划逐项比对。"""
+    errors = []
+    if len(blobs) != 2 or any(not re.fullmatch(r"[0-9a-f]{40}", blob) for blob in blobs):
+        raise InstallError("adoption_blob_binding_missing", "O,N")
+    old_blob, new_blob = blobs
+    commit, read = revision_reader(checkout, target)
+    base_commit, _ = revision_reader(checkout, base)
+    if base_commit != git_value(checkout, "rev-parse", "HEAD"):
+        errors.append({"code": "adoption_base_not_checkout", "path": str(checkout)})
+    if not git_is_ancestor(checkout, base_commit, commit):
+        errors.append({"code": "target_not_descendant", "path": str(checkout)})
+    if git_value(checkout, "rev-parse", base_commit + ":tools/link-install.py") != old_blob:
+        errors.append({"code": "adoption_previous_blob_mismatch", "path": str(checkout)})
+    if git_value(checkout, "rev-parse", commit + ":tools/link-install.py") != new_blob:
+        errors.append({"code": "adoption_target_blob_mismatch", "path": str(checkout)})
+    if git_blob_hash(Path(__file__).read_bytes()) != new_blob:
+        errors.append({"code": "adoption_running_tool_mismatch", "path": "tools/link-install.py"})
+    previous_code, previous = run_previous_check(checkout, home, codex_home, base_commit, old_blob)
+    if previous_code != 0 or previous.get("status") != "match" or previous.get("errors"):
+        errors.append({"code": "adoption_previous_check_failed", "path": str(checkout)})
+    actions, plan_errors = plan(checkout, home, tree, read, ends=("codex",), codex_home=codex_home)
+    errors.extend(plan_errors)
+    if not errors:
+        errors.extend(adoption_delta(previous, actions))
+    if git_bytes(checkout, "diff-tree", "-r", "--raw", "--no-commit-id", base_commit, commit,
+                 "--", *ADOPTION_SOURCES):
+        errors.append({"code": "adopted_sources_changed", "path": str(checkout)})
+    return actions, errors, [base_commit, commit, old_blob, new_blob]
 
 
 def main(argv=None):
@@ -485,14 +818,19 @@ def main(argv=None):
     parser.add_argument("--codex-home", type=Path,
                         help="仅 --ends codex：安装根内的 CODEX_HOME；技能采用 0.170.0 兼容根 skills")
     parser.add_argument("--previous", help="--apply 时清理此本地 Git 版本独有的受管入口；不删除目录或登录态")
+    parser.add_argument("--adoption-base", default="HEAD", help="只读准入的旧版 O；默认当前 HEAD")
+    parser.add_argument("--adoption-blobs", help="只读准入绑定的旧、新安装器 blob：OLD,NEW（40 位十六进制）")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--apply", action="store_true")
     modes.add_argument("--check", action="store_true")
     modes.add_argument("--preflight", metavar="TARGET_REV", help="切版本前只读预检本地 Git 目标版本")
+    modes.add_argument("--check-native-role-adoption", metavar="TARGET_REV",
+                       help="只读：新版登记对同一实际根的全 match 与两原生角色新增范围；不写文件")
     args = parser.parse_args(argv)
     if args.previous and not args.apply:
         parser.error("--previous requires --apply")
-    report = {"schemaVersion": 1, "mode": "apply" if args.apply else "check" if args.check else "preflight" if args.preflight else "plan",
+    report = {"schemaVersion": 1, "mode": "apply" if args.apply else "check" if args.check else "preflight" if args.preflight
+              else "check-native-role-adoption" if args.check_native_role_adoption else "plan",
               "actions": [], "errors": []}
     try:
         if not args.checkout.is_absolute():
@@ -514,11 +852,25 @@ def main(argv=None):
         report.update(home=str(home), ends=list(ends), codexHome=str(codex_home) if codex_home else None)
         report.update(checkout=str(checkout), head=git_value(checkout, "rev-parse", "HEAD"),
                       trackedState="dirty" if git_value(checkout, "status", "--porcelain") else "clean")
-        previous, previous_errors = [], []
+        previous, previous_errors, priors = [], [], {}
         if args.previous:
             report["previousHead"], read = revision_reader(checkout, args.previous)
             previous, previous_errors = desired(checkout, home, tree, read, baseline=True, ends=ends, codex_home=codex_home)
-        actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home)
+            priors = {str(a["path"]): a["content"] for a in previous if a["kind"] == "native-role"}
+        if args.check_native_role_adoption:
+            errors = []
+            if ends != ("codex",) or codex_home is None:
+                raise InstallError("invalid_native_codex_layout", home)
+            if report["trackedState"] != "clean":
+                errors.append({"code": "checkout_dirty", "path": str(checkout)})
+            actions, adoption_errors, binding = native_role_adoption(
+                checkout, home, tree, args.check_native_role_adoption, args.adoption_base,
+                (args.adoption_blobs or "").split(","), codex_home)
+            errors.extend(adoption_errors)
+            report.update(previousHead=binding[0], targetHead=binding[1],
+                          previousInstallerBlob=binding[2], targetInstallerBlob=binding[3])
+        else:
+            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home, priors=priors)
         errors.extend(previous_errors)
         if args.previous:
             errors.extend(compatibility_errors(checkout, report["previousHead"], read, previous, actions))
@@ -527,8 +879,24 @@ def main(argv=None):
             if report["trackedState"] != "clean" or any(a["state"] != "match" for a in actions):
                 errors.append({"code": "current_installation_not_clean", "path": str(checkout)})
             report["targetHead"], read = revision_reader(checkout, args.preflight)
-            candidate, candidate_errors = plan(checkout, home, tree, read, ends=ends, codex_home=codex_home)
             installed = actions
+            candidate, candidate_errors = plan(checkout, home, tree, read, ends=ends,
+                                               codex_home=codex_home)
+            # 预检只做预览：旧版登记看不到角色，按当前真实已核角色内容作候选的精确 prior；
+            # 严格的旧版本字节比对仍由 --apply --previous 执行。
+            for action in candidate:
+                if action["kind"] != "native-role" or action.get("prior") is not None:
+                    continue
+                info = tree.stat(action["path"])
+                if info is None or not private_file(info) or info.st_nlink != 1:
+                    continue
+                action["prior"] = tree.read(action["path"])
+                action["state"] = state(action, tree)
+                candidate_errors = [e for e in candidate_errors
+                                    if not (e.get("code") == "path_conflict"
+                                            and e.get("path") == str(action["path"]))]
+                if action["state"] == "conflict":
+                    candidate_errors.append({"code": "path_conflict", "path": str(action["path"])})
             actions = candidate
             # 不可信的登记不参与兼容比较：历史基线的停止只属于 --previous，不能附到预检目标上。
             if not registry_invalid(candidate_errors):
@@ -560,6 +928,12 @@ def main(argv=None):
             report["errors"] = errors
             matched = not errors and all(a["state"] == "match" for a in actions)
             report["status"], code = ("completed", 0) if matched else ("different", 1)
+        elif args.check_native_role_adoption:
+            matched = not errors and all(a["state"] == "match" for a in actions)
+            if matched:
+                report["status"], code = "match", 0
+            else:
+                report["status"], code = ("blocked", 2) if errors else ("different", 1)
         elif args.check:
             matched = all(a["state"] == "match" for a in actions)
             report["status"], code = ("match", 0) if matched else ("different", 1)

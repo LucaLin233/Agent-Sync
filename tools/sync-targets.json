@@ -91,7 +91,14 @@
           "renderer": "claude-role"
         },
         "codex": {
-          "present": false
+          "present": true,
+          "kind": "generated",
+          "paths": [
+            "~/.codex/roles/lens.toml"
+          ],
+          "renderer": "codex-role",
+          "model": "gpt-6.2-astra",
+          "model_reasoning_effort": "medium"
         },
         "paseo": {
           "present": true,
@@ -132,7 +139,14 @@
           "renderer": "claude-role"
         },
         "codex": {
-          "present": false
+          "present": true,
+          "kind": "generated",
+          "paths": [
+            "~/.codex/roles/forge.toml"
+          ],
+          "renderer": "codex-role",
+          "model": "deepseek-flash",
+          "model_reasoning_effort": "high"
         },
         "paseo": {
           "present": true,
