@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 import yaml
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools/link-install.py"
@@ -850,7 +851,15 @@ class NativeRoleTest(unittest.TestCase):
         return subprocess.run(["git", "-C", str(checkout), *args], env=self.env,
                               capture_output=True, check=True).stdout
 
-    def test_admission_is_read_only_all_match_and_blocks_changed_sources(self):
+    def commit(self, checkout, message):
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", message)
+
+    def make_site(self, distinct_blobs):
+        """合成夹具：O 提交（旧登记）→ 已接管现场 → next 分支 N 提交（新登记）。
+
+        distinct_blobs=True 时 N 的工具字节与 O 不同，用来演练跨 blob 绑定；不是历史快照。
+        """
         checkout = self.root / "checkout"
         checkout.mkdir()
         for name in ("skills", "prompt", "subagents", "tools"):
@@ -865,14 +874,60 @@ class NativeRoleTest(unittest.TestCase):
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig")}
         (self.root / "gitconfig").write_bytes(b"")
         self.git(checkout, "init", "-q", "-b", "main")
-        self.git(checkout, "add", ".")
-        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "O")
+        self.commit(checkout, "O")
         layout = ("--ends", "codex", "--codex-home", str(self.codex))
         base = [sys.executable, "-B", str(checkout / "tools/link-install.py"),
                 "--checkout", str(checkout), "--home", str(self.home), *layout]
-        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True, check=False)
+        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True)
         self.assertEqual(applied.returncode, 0, applied.stdout)
-        config = self.codex / "config.toml"
+        entries = []
+        config.unlink()
+        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
+                         ["native_role_registration_missing"])
+        content = self.render("lens")
+        action = {"object": "subagents/LENS.md", "kind": "native-role",
+                  "path": self.codex / "roles/lens.toml", "content": content, "public": []}
+        action["path"].unlink()
+        self.assertEqual(INSTALL.state(action, self.tree), "create")
+        action["path"].write_bytes(b"drifted\n")
+        action["path"].chmod(0o600)
+        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
+        action["prior"] = b"drifted\n"
+        self.assertEqual(INSTALL.state(action, self.tree), "update")
+
+    def git(self, checkout, *args):
+        return subprocess.run(["git", "-C", str(checkout), *args], env=self.env,
+                              capture_output=True, check=True).stdout
+
+    def commit(self, checkout, message):
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", message)
+
+    def make_site(self, distinct_blobs):
+        """合成夹具：O 提交（旧登记）→ 已接管现场 → next 分支 N 提交（新登记）。
+
+        distinct_blobs=True 时 N 的工具字节与 O 不同，用来演练跨 blob 绑定；不是历史快照。
+        """
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        for name in ("skills", "prompt", "subagents", "tools"):
+            shutil.copytree(ROOT / name, checkout / name)
+        registry = json.loads((ROOT / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] in ("subagents/LENS.md", "subagents/FORGE.md"):
+                obj["ends"]["codex"] = {"present": False}
+        registry_path = checkout / "tools/sync-targets.json"
+        registry_path.write_bytes(json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig")}
+        (self.root / "gitconfig").write_bytes(b"")
+        self.git(checkout, "init", "-q", "-b", "main")
+        self.commit(checkout, "O")
+        layout = ("--ends", "codex", "--codex-home", str(self.codex))
+        base = [sys.executable, "-B", str(checkout / "tools/link-install.py"),
+                "--checkout", str(checkout), "--home", str(self.home), *layout]
+        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True)
+        self.assertEqual(applied.returncode, 0, applied.stdout)
         entries = []
         for role in ("LENS", "FORGE"):
             path = self.codex / ("roles/" + role.lower() + ".toml")
@@ -883,36 +938,388 @@ class NativeRoleTest(unittest.TestCase):
             entries.append("[agents.%s]\ndescription = %s\nconfig_file = \"roles/%s.toml\"\n"
                            % (role, json.dumps(INSTALL.ROLE_DESCRIPTIONS[role.lower()], ensure_ascii=False),
                               role.lower()))
+        config = self.codex / "config.toml"
         config.write_text("model = \"unrelated\"\n" + "".join(entries))
         config.chmod(0o600)
         registry_path.write_bytes((ROOT / "tools/sync-targets.json").read_bytes())
+        if distinct_blobs:
+            tool = checkout / "tools/link-install.py"
+            tool.write_bytes(tool.read_bytes() + b"\n# native-role candidate\n")
         self.git(checkout, "checkout", "-q", "-b", "next")
-        self.git(checkout, "add", ".")
-        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "N")
-        target = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.commit(checkout, "N")
+        new_head = self.git(checkout, "rev-parse", "HEAD").decode().strip()
         self.git(checkout, "checkout", "-q", "main")
+        old_head = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        blobs = [self.git(checkout, "rev-parse", c + ":tools/link-install.py").decode().strip()
+                 for c in (old_head, new_head)]
+        if distinct_blobs:
+            copy = self.root / "next-copy"
+            shutil.copytree(checkout, copy)
+            self.git(copy, "checkout", "-q", "next")
+        else:
+            copy = checkout
+        return checkout, copy, layout, old_head, new_head, blobs
+
+    def admission(self, copy, checkout, layout, target, blobs):
+        return subprocess.run(
+            [sys.executable, "-B", str(copy / "tools/link-install.py"), "--checkout", str(checkout),
+             "--home", str(self.home), *layout, "--check-native-role-adoption", target,
+             "--adoption-blobs", ",".join(blobs)], env=self.env, capture_output=True)
+
+    def test_admission_binds_real_old_blob_and_compares_full_projection(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=True)
+        self.assertNotEqual(blobs[0], blobs[1])
         before = {str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
-        run = subprocess.run([*base, "--check-native-role-adoption", target], env=self.env,
-                             capture_output=True, check=False)
-        self.assertEqual(run.returncode, 0, run.stdout)
+        run = self.admission(copy, checkout, layout, new, blobs)
         report = json.loads(run.stdout)
-        self.assertEqual(report["status"], "match")
-        self.assertEqual(report["targetInstallerBlob"], report["previousInstallerBlob"])
-        self.assertEqual([a["kind"] for a in report["actions"] if a["kind"] == "native-role"],
-                         ["native-role", "native-role"])
+        self.assertEqual((run.returncode, report["status"], report["errors"]), (0, "match", []))
+        self.assertEqual(report["previousInstallerBlob"], blobs[0])
+        self.assertEqual(report["targetInstallerBlob"], blobs[1])
+        self.assertEqual(report["previousHead"], old)
+        added = [a for a in report["actions"] if a.get("state") != "match"]
+        self.assertEqual(added, [])
+        self.assertEqual(len([a for a in report["actions"] if a["kind"] == "native-role"]), 2)
         self.assertEqual({str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}, before)
+        run = self.admission(copy, checkout, layout, new, [blobs[1], blobs[1]])
+        report = json.loads(run.stdout)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("adoption_previous_blob_mismatch", [e["code"] for e in report["errors"]])
+        # 旧工具真实投影里的动作缺失（真实旧 check rc0，但新登记删掉了一个旧技能动作）：
         self.git(checkout, "checkout", "-q", "next")
-        skill = checkout / "skills/luno-core/SKILL.md"
-        skill.write_bytes(skill.read_bytes() + b"\n")
-        self.git(checkout, "add", ".")
-        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", "N2")
+        registry = json.loads((checkout / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] == "luno-core":
+                obj["ends"]["codex"] = {"present": False}
+        (checkout / "tools/sync-targets.json").write_bytes(
+            json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.commit(checkout, "N2")
         target = self.git(checkout, "rev-parse", "HEAD").decode().strip()
         self.git(checkout, "checkout", "-q", "main")
-        run = subprocess.run([*base, "--check-native-role-adoption", target], env=self.env,
-                             capture_output=True, check=False)
+        run = self.admission(copy, checkout, layout, target, [blobs[0], blobs[1]])
+        report = json.loads(run.stdout)
         self.assertEqual(run.returncode, 2)
-        self.assertIn("adopted_sources_changed",
-                      [e["code"] for e in json.loads(run.stdout)["errors"]])
+        self.assertIn("adoption_lost_action", [e["code"] for e in report["errors"]])
+
+    def test_admission_dirty_checkout_is_blocked_with_json(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=True)
+        (checkout / "skills/luno-ops/SKILL.md").write_bytes(b"dirty\n")
+        run = self.admission(copy, checkout, layout, new, blobs)
+        report = json.loads(run.stdout)
+        self.assertEqual((run.returncode, report["status"]), (2, "blocked"))
+        self.assertIn("checkout_dirty", [e["code"] for e in report["errors"]])
+
+    def test_same_blob_update_runs_preflight_apply_check_and_rejects_third_state(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=False)
+        tool = str(checkout / "tools/link-install.py")
+
+        def run(*args):
+            return subprocess.run([sys.executable, "-B", tool, "--checkout", str(checkout),
+                                   "--home", str(self.home), *layout, *args],
+                                  env=self.env, capture_output=True)
+
+        source = checkout / "subagents/LENS.md"
+        source.write_bytes(source.read_bytes() + b"\n\xe8\xa1\xa5\xe4\xb8\x81\n")
+        self.git(checkout, "checkout", "-q", "next")
+        self.git(checkout, "checkout", "-q", "-b", "future")
+        self.commit(checkout, "F")
+        future = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        report = json.loads(run("--preflight", future).stdout)
+        self.assertEqual(report["status"], "ready", report["errors"])
+        self.assertEqual([e["code"] for e in report["errors"]], [])
+        self.git(checkout, "checkout", "-q", "future")
+        run_apply = run("--apply", "--previous", new)
+        report = json.loads(run_apply.stdout)
+        self.assertEqual((run_apply.returncode, report["status"]), (0, "completed"), report["errors"])
+        self.assertNotIn("prior", run_apply.stdout.decode())
+        content = (self.codex / "roles/lens.toml").read_bytes()
+        _, target = self.target("lens")
+        expected, rendered = INSTALL.render(
+            {"id": "subagents/LENS.md", "source": "subagents/LENS.md", "type": "subagent"},
+            dict(target, model=target["model"], model_reasoning_effort=target["model_reasoning_effort"]),
+            checkout, self.home, INSTALL.HomeTree(self.home), Path.read_bytes)
+        self.assertEqual(content, rendered)
+        self.assertEqual(run("--apply", "--previous", new).returncode, 0)
+        self.assertEqual(json.loads(run("--apply", "--previous", new).stdout)["created"], [])
+        forge = self.codex / "roles/forge.toml"
+        forge.write_bytes(b"third state\n")
+        forge.chmod(0o600)
+        before = forge.read_bytes()
+        blocked = run("--apply", "--previous", new)
+        report = json.loads(blocked.stdout)
+        self.assertEqual((blocked.returncode, report["status"]), (2, "blocked"))
+        self.assertEqual(forge.read_bytes(), before)
+
+    def test_registration_ignores_tables_inside_multiline_strings(self):
+        config = self.codex / "config.toml"
+        config.write_text('note = """\n[agents.LENS]\ndescription = "fake"\nconfig_file = "roles/lens.toml"\n'
+                          '[agents.FORGE]\ndescription = "fake"\nconfig_file = "roles/forge.toml"\n"""\n'
+                          '[ignored]\nkey = "SYNTHETIC-SECRET-MARKER"\n')
+        config.chmod(0o600)
+        for role in ("LENS", "FORGE"):
+            path = self.codex / ("roles/" + role.lower() + ".toml")
+            path.write_bytes(self.render(role.lower()))
+            path.chmod(0o600)
+        errors, _ = self.registration_errors()
+        self.assertEqual([e["code"] for e in errors], ["native_role_registration_missing"])
+        self.assertNotIn("SYNTHETIC-SECRET-MARKER", json.dumps(errors))
+        for role in ("LENS", "FORGE"):
+            path = self.codex / ("roles/" + role.lower() + ".toml")
+            _, target = self.target(role.lower())
+            path.write_bytes(self.render(role.lower(), model=target["model"],
+                                         effort=target["model_reasoning_effort"]))
+        config.unlink()
+        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
+                         ["native_role_registration_missing"])
+        content = self.render("lens")
+        action = {"object": "subagents/LENS.md", "kind": "native-role",
+                  "path": self.codex / "roles/lens.toml", "content": content, "public": []}
+        action["path"].unlink()
+        self.assertEqual(INSTALL.state(action, self.tree), "create")
+        action["path"].write_bytes(b"drifted\n")
+        action["path"].chmod(0o600)
+        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
+        action["prior"] = b"drifted\n"
+        self.assertEqual(INSTALL.state(action, self.tree), "update")
+
+    def git(self, checkout, *args):
+        return subprocess.run(["git", "-C", str(checkout), *args], env=self.env,
+                              capture_output=True, check=True).stdout
+
+    def commit(self, checkout, message):
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", message)
+
+    def make_site(self, distinct_blobs):
+        """合成夹具：O 提交（旧登记）→ 已接管现场 → next 分支 N 提交（新登记）。
+
+        distinct_blobs=True 时 N 的工具字节与 O 不同，用来演练跨 blob 绑定；不是历史快照。
+        """
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        for name in ("skills", "prompt", "subagents", "tools"):
+            shutil.copytree(ROOT / name, checkout / name)
+        registry = json.loads((ROOT / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] in ("subagents/LENS.md", "subagents/FORGE.md"):
+                obj["ends"]["codex"] = {"present": False}
+        registry_path = checkout / "tools/sync-targets.json"
+        registry_path.write_bytes(json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig")}
+        (self.root / "gitconfig").write_bytes(b"")
+        self.git(checkout, "init", "-q", "-b", "main")
+        self.commit(checkout, "O")
+        layout = ("--ends", "codex", "--codex-home", str(self.codex))
+        base = [sys.executable, "-B", str(checkout / "tools/link-install.py"),
+                "--checkout", str(checkout), "--home", str(self.home), *layout]
+        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True)
+        self.assertEqual(applied.returncode, 0, applied.stdout)
+        entries = []
+        config.unlink()
+        self.assertEqual([e["code"] for e in self.registration_errors()[0]],
+                         ["native_role_registration_missing"])
+        content = self.render("lens")
+        action = {"object": "subagents/LENS.md", "kind": "native-role",
+                  "path": self.codex / "roles/lens.toml", "content": content, "public": []}
+        action["path"].unlink()
+        self.assertEqual(INSTALL.state(action, self.tree), "create")
+        action["path"].write_bytes(b"drifted\n")
+        action["path"].chmod(0o600)
+        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
+        action["prior"] = b"drifted\n"
+        self.assertEqual(INSTALL.state(action, self.tree), "update")
+
+    def git(self, checkout, *args):
+        return subprocess.run(["git", "-C", str(checkout), *args], env=self.env,
+                              capture_output=True, check=True).stdout
+
+    def commit(self, checkout, message):
+        self.git(checkout, "add", ".")
+        self.git(checkout, "-c", "user.name=t", "-c", "user.email=t@local", "commit", "-qm", message)
+
+    def make_site(self, distinct_blobs):
+        """合成夹具：O 提交（旧登记）→ 已接管现场 → next 分支 N 提交（新登记）。
+
+        distinct_blobs=True 时 N 的工具字节与 O 不同，用来演练跨 blob 绑定；不是历史快照。
+        """
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        for name in ("skills", "prompt", "subagents", "tools"):
+            shutil.copytree(ROOT / name, checkout / name)
+        registry = json.loads((ROOT / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] in ("subagents/LENS.md", "subagents/FORGE.md"):
+                obj["ends"]["codex"] = {"present": False}
+        registry_path = checkout / "tools/sync-targets.json"
+        registry_path.write_bytes(json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig")}
+        (self.root / "gitconfig").write_bytes(b"")
+        self.git(checkout, "init", "-q", "-b", "main")
+        self.commit(checkout, "O")
+        layout = ("--ends", "codex", "--codex-home", str(self.codex))
+        base = [sys.executable, "-B", str(checkout / "tools/link-install.py"),
+                "--checkout", str(checkout), "--home", str(self.home), *layout]
+        applied = subprocess.run([*base, "--apply"], env=self.env, capture_output=True)
+        self.assertEqual(applied.returncode, 0, applied.stdout)
+        entries = []
+        for role in ("LENS", "FORGE"):
+            path = self.codex / ("roles/" + role.lower() + ".toml")
+            _, target = self.target(role.lower())
+            path.write_bytes(self.render(role.lower(), model=target["model"],
+                                         effort=target["model_reasoning_effort"]))
+            path.chmod(0o600)
+            entries.append("[agents.%s]\ndescription = %s\nconfig_file = \"roles/%s.toml\"\n"
+                           % (role, json.dumps(INSTALL.ROLE_DESCRIPTIONS[role.lower()], ensure_ascii=False),
+                              role.lower()))
+        config = self.codex / "config.toml"
+        config.write_text("model = \"unrelated\"\n" + "".join(entries))
+        config.chmod(0o600)
+        registry_path.write_bytes((ROOT / "tools/sync-targets.json").read_bytes())
+        if distinct_blobs:
+            tool = checkout / "tools/link-install.py"
+            tool.write_bytes(tool.read_bytes() + b"\n# native-role candidate\n")
+        self.git(checkout, "checkout", "-q", "-b", "next")
+        self.commit(checkout, "N")
+        new_head = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        old_head = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        blobs = [self.git(checkout, "rev-parse", c + ":tools/link-install.py").decode().strip()
+                 for c in (old_head, new_head)]
+        if distinct_blobs:
+            copy = self.root / "next-copy"
+            shutil.copytree(checkout, copy)
+            self.git(copy, "checkout", "-q", "next")
+        else:
+            copy = checkout
+        return checkout, copy, layout, old_head, new_head, blobs
+
+    def admission(self, copy, checkout, layout, target, blobs):
+        return subprocess.run(
+            [sys.executable, "-B", str(copy / "tools/link-install.py"), "--checkout", str(checkout),
+             "--home", str(self.home), *layout, "--check-native-role-adoption", target,
+             "--adoption-blobs", ",".join(blobs)], env=self.env, capture_output=True)
+
+    def test_admission_binds_real_old_blob_and_compares_full_projection(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=True)
+        self.assertNotEqual(blobs[0], blobs[1])
+        before = {str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
+        run = self.admission(copy, checkout, layout, new, blobs)
+        report = json.loads(run.stdout)
+        self.assertEqual((run.returncode, report["status"], report["errors"]), (0, "match", []))
+        self.assertEqual(report["previousInstallerBlob"], blobs[0])
+        self.assertEqual(report["targetInstallerBlob"], blobs[1])
+        self.assertEqual(report["previousHead"], old)
+        added = [a for a in report["actions"] if a.get("state") != "match"]
+        self.assertEqual(added, [])
+        self.assertEqual(len([a for a in report["actions"] if a["kind"] == "native-role"]), 2)
+        self.assertEqual({str(p): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}, before)
+        run = self.admission(copy, checkout, layout, new, [blobs[1], blobs[1]])
+        report = json.loads(run.stdout)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("adoption_previous_blob_mismatch", [e["code"] for e in report["errors"]])
+        # 旧工具真实投影里的动作缺失（真实旧 check rc0，但新登记删掉了一个旧技能动作）：
+        self.git(checkout, "checkout", "-q", "next")
+        registry = json.loads((checkout / "tools/sync-targets.json").read_bytes())
+        for obj in registry["objects"]:
+            if obj["id"] == "luno-core":
+                obj["ends"]["codex"] = {"present": False}
+        (checkout / "tools/sync-targets.json").write_bytes(
+            json.dumps(registry, ensure_ascii=False, indent=2).encode() + b"\n")
+        self.commit(checkout, "N2")
+        target = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        run = self.admission(copy, checkout, layout, target, [blobs[0], blobs[1]])
+        report = json.loads(run.stdout)
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("adoption_lost_action", [e["code"] for e in report["errors"]])
+
+    def test_admission_dirty_checkout_is_blocked_with_json(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=True)
+        (checkout / "skills/luno-ops/SKILL.md").write_bytes(b"dirty\n")
+        run = self.admission(copy, checkout, layout, new, blobs)
+        report = json.loads(run.stdout)
+        self.assertEqual((run.returncode, report["status"]), (2, "blocked"))
+        self.assertIn("checkout_dirty", [e["code"] for e in report["errors"]])
+
+    def test_same_blob_update_runs_preflight_apply_check_and_rejects_third_state(self):
+        checkout, copy, layout, old, new, blobs = self.make_site(distinct_blobs=False)
+        tool = str(checkout / "tools/link-install.py")
+
+        def run(*args):
+            return subprocess.run([sys.executable, "-B", tool, "--checkout", str(checkout),
+                                   "--home", str(self.home), *layout, *args],
+                                  env=self.env, capture_output=True)
+
+        source = checkout / "subagents/LENS.md"
+        source.write_bytes(source.read_bytes() + b"\n\xe8\xa1\xa5\xe4\xb8\x81\n")
+        self.git(checkout, "checkout", "-q", "next")
+        self.git(checkout, "checkout", "-q", "-b", "future")
+        self.commit(checkout, "F")
+        future = self.git(checkout, "rev-parse", "HEAD").decode().strip()
+        self.git(checkout, "checkout", "-q", "main")
+        report = json.loads(run("--preflight", future).stdout)
+        self.assertEqual(report["status"], "ready", report["errors"])
+        self.assertEqual([e["code"] for e in report["errors"]], [])
+        self.git(checkout, "checkout", "-q", "future")
+        run_apply = run("--apply", "--previous", new)
+        report = json.loads(run_apply.stdout)
+        self.assertEqual((run_apply.returncode, report["status"]), (0, "completed"), report["errors"])
+        self.assertNotIn("prior", run_apply.stdout.decode())
+        content = (self.codex / "roles/lens.toml").read_bytes()
+        _, target = self.target("lens")
+        expected, rendered = INSTALL.render(
+            {"id": "subagents/LENS.md", "source": "subagents/LENS.md", "type": "subagent"},
+            dict(target, model=target["model"], model_reasoning_effort=target["model_reasoning_effort"]),
+            checkout, self.home, INSTALL.HomeTree(self.home), Path.read_bytes)
+        self.assertEqual(content, rendered)
+        self.assertEqual(run("--apply", "--previous", new).returncode, 0)
+        self.assertEqual(json.loads(run("--apply", "--previous", new).stdout)["created"], [])
+        forge = self.codex / "roles/forge.toml"
+        forge.write_bytes(b"third state\n")
+        forge.chmod(0o600)
+        before = forge.read_bytes()
+        blocked = run("--apply", "--previous", new)
+        report = json.loads(blocked.stdout)
+        self.assertEqual((blocked.returncode, report["status"]), (2, "blocked"))
+        self.assertEqual(forge.read_bytes(), before)
+
+    def test_control_characters_are_rendered_as_legal_toml(self):
+        raw = "a\x00b\x08c\x0cd\x7fe\r\nf\n".encode("utf-8")
+        content = self.render("lens", raw=raw)
+        document = tomllib.loads(content.decode("utf-8"))
+        self.assertEqual(document["developer_instructions"].encode("utf-8"), raw)
+        self.assertEqual(document["model"], "fixture-model")
+        self.assertEqual(document["model_reasoning_effort"], "fixture-effort")
+
+    def test_hardlink_and_concurrent_replacement_are_refused(self):
+        path = self.codex / "roles/lens.toml"
+        path.write_bytes(b"old\n")
+        path.chmod(0o600)
+        action = {"object": "subagents/LENS.md", "kind": "native-role", "path": path,
+                  "content": self.render("lens"), "public": [], "prior": b"old\n"}
+        self.assertEqual(INSTALL.state(action, self.tree), "update")
+        twin = self.codex / "roles/lens-twin.toml"
+        os.link(path, twin)
+        self.assertEqual(INSTALL.state(action, self.tree), "conflict")
+        twin.unlink()
+        path.write_bytes(b"concurrent\n")
+        real = INSTALL.native_role_identity
+        calls = []
+
+        def stale(action, tree):
+            calls.append(1)
+            if len(calls) == 1:
+                return [[0, 0, 0, 0], b"old\n"]
+            return real(action, tree)
+
+        with patch.object(INSTALL, "state", lambda a, t: "update"), \
+                patch.object(INSTALL, "native_role_identity", stale):
+            with self.assertRaises(INSTALL.InstallError) as caught:
+                INSTALL.apply([dict(action, state="update")], self.tree)
+        self.assertEqual(caught.exception.code, "native_role_changed")
+        self.assertEqual(path.read_bytes(), b"concurrent\n")
 
 
 if __name__ == "__main__":
