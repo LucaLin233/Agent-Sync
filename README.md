@@ -277,6 +277,14 @@ python3 -I -B tools/lh-deploy.py --repo REPO --object ID [--object …] --base F
 - 回退（升级失败或中断）：`CO reset --keep <旧版>`，再运行 `LI --apply --previous <新版>` 与 `LI --check`，清理新版独有的受管入口并恢复旧版的生成文件。这条适用于两个宿主版本都已登记宿主端（旧版 `tools/sync-targets.json` 里已有 `claude-code`、`codex`、`paseo` 端条目）的情形；旧代码看不到新版渲染布局时按上一条停在报告，改按下面首装撤回处置。
    - 首次安装的撤回：旧基线里还没有宿主端登记、也没有 `tools/link-install.py` 时，`--previous <旧版>` 表达不出任何退役项，安装器不会删除新版装上的文件，此时直接回退会留下新装与旧基线混合的状态。安全默认是保留新版安装器与已装入口，不撤回；确需撤回时，只按本次 `--apply` 报告 `created` 里 `state=create` 的项逐项核对归属：源链接按登记推导出的精确 target 核，生成文件按仍指向它的公开软链核（生成文件须同 UID、0600 且仍被对应公开软链指向，软链须指向本次生成文件）后删除这些项（先全部核完再删，生成文件在指向它的公开软链仍在时删除；源链接与生成文件分开核），`~/.luno/generated/`、`~/.luno/homes/*`、`~/.luno/memory/GLOBAL.md`、settings 与登录态一律保留；项数或归属对不上就停下交你处理，不删目录、不整目录删除；报告缺失、`created` 为空（例如刚成功的重跑）或无法区分是否本次新增时，只停不删，不拿计划项或前态已有的受管项充当本次新增。
 
+### Codex GLOBAL 来源（可选）
+
+默认的 `codex-main` 仍生成 `prompt/LUNO.md` 原文、一个 LF 和私人 GLOBAL 副本；其他端不变。只选 Codex 单端时，可显式加 `--codex-global-source paseo-append-system-prompt`：`AGENTS.md` 恰为 `prompt/LUNO.md` 原文，GLOBAL 改由 Paseo daemon 的 `daemon.appendSystemPrompt` 提供（Paseo 设置 → Host → Orchestration → System Prompt）。该选项只接受 `--ends codex`，默认三端会在写前阻断。安装器不读写这份私人配置；设置与生成文件须在同一受控维护窗口切换，先暂停新会话，切换或回滚后回读再恢复会话。
+
+首次接入时，安装器 blob 已变，旧的 `--preflight`/`--apply --previous` 跨 blob 尚未支持。现场已经改成 LUNO-only 且仍有旧 GLOBAL 副本时，用旧、新可信安装器对同一安装根和除来源选项外相同的入口参数只读 `--check`：旧安装器只把 `AGENTS.md` 列为 update，新安装器带 `--ends codex --codex-global-source paseo-append-system-prompt` 应全部 match；目标登记与 `prompt/LUNO.md` 均未变时，快进检出后只跑带选项的 `--check`，不运行 `--apply`。仍内嵌的现场保持原版升级路径。已迁移入口后续换版沿用同 blob 的 `--preflight`/`--apply --previous`（带同一来源选项），只重生成受管文件，不改安装器。
+
+回滚时显式运行 `--ends codex --apply --codex-global-source agents-md` 与 `--check`，要求私人 GLOBAL 副本仍在；同一窗口恢复 daemon 设置，再核对旧组合。
+
 ## 独立原生 Codex（0.170.0）
 
 此模式不迁移 paseo、会话或登录态，沿用原有秘密、审批和角色分工。主提示词源仍是 `prompt/LUNO.md`，LENS/FORGE 原文仍在受管检出 `subagents/`；保留原文不等于独立 Codex 已具备角色派发。MCP 非秘密配置可另按目标支持的现有接口预置；服务凭据独立授权，缺失不阻塞无依赖的提示词安装。本安装器不配置 MCP、不注入任何凭据，也不请求模型。
