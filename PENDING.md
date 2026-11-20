@@ -6,6 +6,10 @@
 
 - **待条件｜OnlyBoxes worker 宿主风险取舍**。原有的 host 网络和 Docker socket 两项没有按加固方案实施，MCP 登记退役并不关闭这两项；风险结论见 `skills/luno-ops/references/execution-environment.md`〔分支 execution-environment〕第 1 步；完整取证在 Git `6756b5f` 版同文件的 onlyboxes-baseline 分支〈宿主风险（未解除）〉，尚未现场复验。加固应使用会校验请求体的 Docker 代理；只按方法和路径做 ACL 挡不住 `POST /containers/create` 请求体里的逃逸参数。触发条件：用户决定保留现状或另行批准加固方案和授权，或者 worker-sys、执行路由、socket、网络、版本发生变化。责任人：主助理。
 
+- **待条件｜宿主端遗留 Claude Code 入口清理**。触发条件：部署主机决定退役 Claude Code 端并授权现场清理，或升级到已移除该运行端的版本。届时按精确路径逐项核对 `~/.claude/`（`CLAUDE.md`、`agents/*.md`、`skills/*`）、`~/.luno/generated/claude-code/`、`~/.luno/homes/{lens,forge}-claude/` 的归属后再处理，不整目录删除；安装器不再渲染或删除这些项，`--apply --previous` 遇安装器 blob 改变按 `installer_changed` 停止。责任人：主助理。
+
+- **待条件｜宿主端遗留 Claude Code 入口清理**。触发条件：部署主机决定退役 Claude Code 端并授权现场清理，或升级到已移除该运行端的版本。届时按精确路径逐项核对 `~/.claude/`（`CLAUDE.md`、`agents/*.md`、`skills/*`）、`~/.luno/generated/claude-code/`、`~/.luno/homes/{lens,forge}-claude/` 的归属后再处理，不整目录删除；安装器不再渲染或删除这些项，`--apply --previous` 遇安装器 blob 改变按 `installer_changed` 停止。责任人：主助理。
+
 ## 暂缓事项（PR #51）
 
 - **Surge 原生 MCP 替代桥接｜暂缓**：用户 Surge iOS 尚未续费；待续费且明确启动评估时，由后续会话负责人核对实例版本、订阅权益、实际 tools schema、认证权限、敏感输出及与自建桥的能力差异，再决定替代范围。本批不接入、不迁移、不退役桥接。承接：[PR #51](https://github.com/LucaLin233/Agent-Sync/pull/51)。

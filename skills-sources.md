@@ -141,7 +141,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ### 运行端适配
 
-`references/runtime-minis.md`、`references/runtime-lobehub.md`、`references/runtime-host.md`、`references/runtime-claude-code.md`、`references/runtime-codex.md`、`references/runtime-paseo.md` 为自编的本端槽位取值；宿主端三端的平台事实依据 Claude Code、Codex 官方文档与 paseo 公开文档（2026-11-18 核对，paseo v0.16.1），不转载上游正文。其中自 `luno-core`（execution、review）、`luno-ops`（入口、github、service-runtime）和 `luno-surge`（入口、http-api）迁入的本端句子，来源性质随原文件，不新增吸收件；完整 MIT 正文随包为 `LICENSE.matt-pocock.txt`、`LICENSE.openminis.txt`。
+`references/runtime-minis.md`、`references/runtime-lobehub.md`、`references/runtime-host.md`、`references/runtime-codex.md`、`references/runtime-paseo.md` 为自编的本端槽位取值；宿主端两端的平台事实依据 Codex 官方文档与 paseo 公开文档（2026-11-18 核对，paseo v0.16.1），不转载上游正文。其中自 `luno-core`（execution、review）、`luno-ops`（入口、github、service-runtime）和 `luno-surge`（入口、http-api）迁入的本端句子，来源性质随原文件，不新增吸收件；完整 MIT 正文随包为 `LICENSE.matt-pocock.txt`、`LICENSE.openminis.txt`。
 
 ### Minis
 

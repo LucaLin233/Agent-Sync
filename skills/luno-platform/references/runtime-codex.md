@@ -8,7 +8,7 @@
 
 Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，另保留已弃用的 `$CODEX_HOME/skills` 兼容根；设置 CODEX_HOME 不会把前者一起搬走。当前版本源码支持用户技能目录软链。原生安装须先选定并核实实际加载入口，不能只按安装器输出推定；其他版本或配置变化须重核。
 
-安装器默认保留既有 Compose 三端布局。只选 Codex 时用 `--ends codex`；`--home` 指定受管安装根，不能冒充 Codex 的 HOME。显式指定 `--codex-home` 时，仅在 Codex 单端模式下，把登记的 Codex 全局指令和用户技能入口重定位到该目录的 `AGENTS.md`、`skills/<技能名>`，采用上述 0.170.0 兼容根；该目录须位于安装根内。此模式不改 HOME、不建根外链接、不安装或迁移 paseo、Claude Code、角色家目录、会话、登录态、秘密、审批或沙箱配置。兼容根已弃用，不承诺未来版本；需要改 HOME 或采用其他根时另定明确方案，不自动改公共入口。
+安装器默认保留既有 Compose 三端布局。只选 Codex 时用 `--ends codex`；`--home` 指定受管安装根，不能冒充 Codex 的 HOME。显式指定 `--codex-home` 时，仅在 Codex 单端模式下，把登记的 Codex 全局指令和用户技能入口重定位到该目录的 `AGENTS.md`、`skills/<技能名>`，采用上述 0.170.0 兼容根；该目录须位于安装根内。此模式不改 HOME、不建根外链接、不安装或迁移 paseo、角色家目录、会话、登录态、秘密、审批或沙箱配置。兼容根已弃用，不承诺未来版本；需要改 HOME 或采用其他根时另定明确方案，不自动改公共入口。
 
 官方依据（2026-11-19 核对）：[全局指令发现](https://learn.chatgpt.com/docs/agent-configuration/agents-md)；[0.170.0 技能根源码](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/host_roots.rs)；[同版软链策略](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/loader/host.rs)。
 

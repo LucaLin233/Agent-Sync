@@ -14,7 +14,7 @@ import tomllib
 
 import yaml
 
-ENDS = ("claude-code", "codex", "paseo")
+ENDS = ("codex", "paseo")
 ROLE_DESCRIPTIONS = {
     "lens": "LUNO 体系的 LENS：审查、规划、验收及所有领域的制稿与改稿。仅在负责人按 luno-core 派发时使用。",
     "forge": "LUNO 体系的 FORGE：实施、修复、取证及必要的规划与自验。仅在负责人按 luno-core 派发时使用。",
@@ -128,11 +128,6 @@ def revision_reader(checkout, revision):
     return commit, lambda path: git_bytes(checkout, "show", commit + ":" + str(path.relative_to(checkout)))
 
 
-def import_line(path):
-    value = str(path)
-    return "@" + (json.dumps(value, ensure_ascii=False) if any(c.isspace() for c in value) else value)
-
-
 def text_bytes(path, read=Path.read_bytes):
     raw = read(path)
     try:
@@ -221,21 +216,12 @@ def render(obj, target, checkout, home, tree, read):
         text = "model = \"" + toml_string(model) + "\"\nmodel_reasoning_effort = \"" + toml_string(effort) \
                + "\"\ndeveloper_instructions = \"" + toml_string(instructions.decode("utf-8")) + "\"\n"
         return None, text.encode("utf-8")
-    if renderer == "claude-main":
-        content = (import_line(source) + "\n@~/.luno/memory/GLOBAL.md\n").encode("utf-8")
-        return home / ".luno/generated/claude-code/CLAUDE.md", content
     if renderer == "codex-main":
         memory = home / ".luno/memory/GLOBAL.md"
         info = tree.stat(memory)
         if info is None or not stat.S_ISREG(info.st_mode):
             raise InstallError("missing_global_copy", memory)
         return home / ".luno/generated/codex/AGENTS.md", text_bytes(source, read) + b"\n" + text_bytes(memory, tree.read)
-    if renderer == "claude-role":
-        role = source.stem.lower()
-        header = ("---\nname: " + role + "\ndescription: "
-                  + json.dumps(ROLE_DESCRIPTIONS[role], ensure_ascii=False)
-                  + "\nskills: [luno-core]\nomitClaudeMd: true\n---\n\n")
-        return home / (".luno/generated/claude-code/agents/" + role + ".md"), header.encode("utf-8") + text_bytes(source, read)
     raise InstallError("unknown_renderer", source)
 
 

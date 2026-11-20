@@ -1,6 +1,6 @@
 ---
 name: luno-platform
-description: 当前运行端（Minis、LobeHub、宿主端 Claude Code/Codex 及 paseo）的派发、文件编辑、临时目录、截断与执行环境等端机制；跨任务记忆读写、更正、事故复发与规则固化（共同规则、Minis/LobeHub 各端自持）；CCHP 控制面与官方 CLI；Minis/iSH 配置运行时；已部署 LobeHub 2.x CE 的 Agent/模型、权限渠道、Skill/MCP、知识库及实例运维。
+description: 当前运行端（Minis、LobeHub、宿主端 Codex 及 paseo）的派发、文件编辑、临时目录、截断与执行环境等端机制；跨任务记忆读写、更正、事故复发与规则固化（共同规则、Minis/LobeHub 各端自持）；CCHP 控制面与官方 CLI；Minis/iSH 配置运行时；已部署 LobeHub 2.x CE 的 Agent/模型、权限渠道、Skill/MCP、知识库及实例运维。
 ---
 # LUNO｜平台配置、运行时与本端记忆
 
@@ -12,9 +12,8 @@ description: 当前运行端（Minis、LobeHub、宿主端 Claude Code/Codex 及
 
 - Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`。
 - LobeHub 端（在 LobeHub 助理中运行）读 `references/runtime-lobehub.md`。
-- Claude Code 端（Bash 环境中指定变量 `CLAUDECODE` 为 `1`）读 `references/runtime-claude-code.md` 和 `references/runtime-host.md`。
 - Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`。
-- 在 Claude Code 或 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，另读 `references/runtime-paseo.md`。
+- 在 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，另读 `references/runtime-paseo.md`。
 
 无法确定当前端，或当前端没有登记资源时，只停依赖这些槽位的步骤并报告。当前端资源未列出某槽位时分两类处理。
 

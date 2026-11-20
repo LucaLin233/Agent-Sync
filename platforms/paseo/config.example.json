@@ -18,14 +18,6 @@
         "command": ["codex", "-c", "model_provider=\"cchp\""],
         "env": {"CODEX_HOME": "/home/paseo/.codex"}
       },
-      "lens-claude": {
-        "extends": "claude", "label": "LENS · Claude Code",
-        "env": {"CLAUDE_CONFIG_DIR": "/home/paseo/.luno/homes/lens-claude"}
-      },
-      "forge-claude": {
-        "extends": "claude", "label": "FORGE · Claude Code",
-        "env": {"CLAUDE_CONFIG_DIR": "/home/paseo/.luno/homes/forge-claude"}
-      },
       "codex": {
         "command": ["codex", "-c", "model_provider=\"cchp\""],
         "env": {"CODEX_HOME": "/home/paseo/.codex"}

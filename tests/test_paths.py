@@ -12,7 +12,6 @@ PATHS_RULES = (
     (('tools/link-install.py', 'tests/test-link-install.py', 'tools/sync-targets.json',
       'prompt/*', 'subagents/*', 'paseo.json', 'platforms/paseo/*',
       'skills/luno-platform/references/runtime-host.md',
-      'skills/luno-platform/references/runtime-claude-code.md',
       'skills/luno-platform/references/runtime-codex.md',
       'skills/luno-platform/references/runtime-paseo.md',
       'tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
