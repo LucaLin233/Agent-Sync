@@ -15,6 +15,7 @@ import tomllib
 import yaml
 
 ENDS = ("claude-code", "codex", "paseo")
+CODEX_GLOBAL_SOURCES = ("agents-md", "paseo-append-system-prompt")
 ROLE_DESCRIPTIONS = {
     "lens": "LUNO 体系的 LENS：审查、规划、验收及所有领域的制稿与改稿。仅在负责人按 luno-core 派发时使用。",
     "forge": "LUNO 体系的 FORGE：实施、修复、取证及必要的规划与自验。仅在负责人按 luno-core 派发时使用。",
@@ -206,7 +207,7 @@ def toml_string(value):
     return "".join(out)
 
 
-def render(obj, target, checkout, home, tree, read):
+def render(obj, target, checkout, home, tree, read, codex_global_source="agents-md"):
     renderer = target["renderer"]
     source = checkout / obj["source"]
     if renderer == NATIVE_ROLE_RENDERER:
@@ -225,6 +226,8 @@ def render(obj, target, checkout, home, tree, read):
         content = (import_line(source) + "\n@~/.luno/memory/GLOBAL.md\n").encode("utf-8")
         return home / ".luno/generated/claude-code/CLAUDE.md", content
     if renderer == "codex-main":
+        if codex_global_source == "paseo-append-system-prompt":
+            return home / ".luno/generated/codex/AGENTS.md", text_bytes(source, read)
         memory = home / ".luno/memory/GLOBAL.md"
         info = tree.stat(memory)
         if info is None or not stat.S_ISREG(info.st_mode):
@@ -307,7 +310,8 @@ def duplicate_skills(home, names, tree):
     return errors
 
 
-def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None, priors=None):
+def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None, priors=None,
+            codex_global_source="agents-md"):
     """baseline=True 只用于读取旧基线：整版没有宿主端键时才允许返回空动作。
 
     当前检出与预检目标都必须证明是完整登记的宿主版本；任一对象缺键或 present 非严格布尔即停止，
@@ -355,7 +359,7 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
                     # 只在 --ends codex --codex-home 的显式原生布局启用；默认 Compose 不产生该动作。
                     continue
                 try:
-                    artifact, content = render(obj, target, checkout, home, tree, read)
+                    artifact, content = render(obj, target, checkout, home, tree, read, codex_global_source)
                 except InstallError as exc:
                     errors.append({"code": exc.code, "path": exc.path, "object": obj["id"], "end": end})
                     continue
@@ -492,8 +496,10 @@ def native_role_registration(tree, codex_home, actions):
     return errors
 
 
-def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None, priors=None):
-    actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors)
+def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None, priors=None,
+         codex_global_source="agents-md"):
+    actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors,
+                              codex_global_source=codex_global_source)
     overrides = []
     if "codex" in ends:
         overrides.append((codex_home or home / ".codex") / "AGENTS.override.md")
@@ -818,6 +824,8 @@ def main(argv=None):
     parser.add_argument("--codex-home", type=Path,
                         help="仅 --ends codex：安装根内的 CODEX_HOME；技能采用 0.170.0 兼容根 skills")
     parser.add_argument("--previous", help="--apply 时清理此本地 Git 版本独有的受管入口；不删除目录或登录态")
+    parser.add_argument("--codex-global-source", choices=CODEX_GLOBAL_SOURCES, default="agents-md",
+                        help="codex-main 的 GLOBAL 来源：agents-md 内嵌（默认）或 paseo-append-system-prompt")
     parser.add_argument("--adoption-base", default="HEAD", help="只读准入的旧版 O；默认当前 HEAD")
     parser.add_argument("--adoption-blobs", help="只读准入绑定的旧、新安装器 blob：OLD,NEW（40 位十六进制）")
     modes = parser.add_mutually_exclusive_group()
@@ -837,6 +845,8 @@ def main(argv=None):
             raise InstallError("checkout_must_be_absolute", args.checkout)
         checkout, home = args.checkout.resolve(), args.home
         ends, codex_home = tuple(args.ends), args.codex_home
+        if args.codex_global_source != "agents-md" and ends != ("codex",):
+            raise InstallError("codex_global_source_requires_codex_only", home)
         if not home.is_absolute() or ".." in home.parts:
             raise InstallError("home_must_be_absolute", home)
         if codex_home is not None:
@@ -855,7 +865,9 @@ def main(argv=None):
         previous, previous_errors, priors = [], [], {}
         if args.previous:
             report["previousHead"], read = revision_reader(checkout, args.previous)
-            previous, previous_errors = desired(checkout, home, tree, read, baseline=True, ends=ends, codex_home=codex_home)
+            previous, previous_errors = desired(checkout, home, tree, read, baseline=True, ends=ends,
+                                                codex_home=codex_home,
+                                                codex_global_source=args.codex_global_source)
             priors = {str(a["path"]): a["content"] for a in previous if a["kind"] == "native-role"}
         if args.check_native_role_adoption:
             errors = []
@@ -870,7 +882,8 @@ def main(argv=None):
             report.update(previousHead=binding[0], targetHead=binding[1],
                           previousInstallerBlob=binding[2], targetInstallerBlob=binding[3])
         else:
-            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home, priors=priors)
+            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home, priors=priors,
+                                   codex_global_source=args.codex_global_source)
         errors.extend(previous_errors)
         if args.previous:
             errors.extend(compatibility_errors(checkout, report["previousHead"], read, previous, actions))
@@ -881,7 +894,8 @@ def main(argv=None):
             report["targetHead"], read = revision_reader(checkout, args.preflight)
             installed = actions
             candidate, candidate_errors = plan(checkout, home, tree, read, ends=ends,
-                                               codex_home=codex_home)
+                                               codex_home=codex_home,
+                                               codex_global_source=args.codex_global_source)
             # 预检只做预览：旧版登记看不到角色，按当前真实已核角色内容作候选的精确 prior；
             # 严格的旧版本字节比对仍由 --apply --previous 执行。
             for action in candidate:
@@ -923,7 +937,8 @@ def main(argv=None):
             report["created"] = [public_action(a) for a in apply(actions, tree)]
             for action in retired:
                 delete_retired(action, tree)
-            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home)
+            actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home,
+                                   codex_global_source=args.codex_global_source)
             report["actions"] = [public_action(a) for a in actions]
             report["errors"] = errors
             matched = not errors and all(a["state"] == "match" for a in actions)
