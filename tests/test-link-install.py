@@ -39,7 +39,6 @@ class InstallTest(unittest.TestCase):
         gitconfig = self.root / "gitconfig"
         gitconfig.write_bytes(b"")
         self.env = {"HOME": str(self.home), "PATH": os.environ["PATH"], "LC_ALL": "C.UTF-8",
-                    "CLAUDE_CONFIG_DIR": str(self.home / ".claude"),
                     "CODEX_HOME": str(self.home / ".codex"),
                     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(gitconfig)}
         for args in (("init", "-q", "-b", "main"), ("add", "."),
@@ -92,24 +91,16 @@ class InstallTest(unittest.TestCase):
             if obj["type"] != "skill":
                 continue
             name = obj["id"]
-            for destination in (f".claude/skills/{name}", f".agents/skills/{name}",
-                                f".luno/homes/lens-claude/skills/{name}",
-                                f".luno/homes/forge-claude/skills/{name}"):
+            for destination in (f".agents/skills/{name}",
+                                f".luno/homes/lens-codex/skills/{name}",
+                                f".luno/homes/forge-codex/skills/{name}",
+                                f".luno/homes/lens-gdr/skills/{name}",
+                                f".luno/homes/forge-gdr/skills/{name}"):
                 self.assertEqual(os.readlink(self.home / destination), str(self.checkout / obj["source"]).rsplit("/", 1)[0])
-        claude = self.home / ".claude/CLAUDE.md"
-        self.assertEqual(os.readlink(claude), str(self.home / ".luno/generated/claude-code/CLAUDE.md"))
-        self.assertEqual(claude.read_text(), '@"' + str(self.checkout / "prompt/LUNO.md") + '"\n@~/.luno/memory/GLOBAL.md\n')
         codex = self.home / ".codex/AGENTS.md"
         self.assertEqual(codex.read_bytes(), (self.checkout / "prompt/LUNO.md").read_bytes() + b"\n" + self.global_file.read_bytes())
         for role in ("lens", "forge"):
-            wrapped = (self.home / f".claude/agents/{role}.md").read_bytes()
-            header, body = wrapped.split(b"\n---\n\n", 1)
-            metadata = yaml.safe_load(header[4:])
-            self.assertEqual(metadata["name"], role)
-            self.assertEqual(metadata["skills"], ["luno-core"])
-            self.assertIs(metadata["omitClaudeMd"], True)
-            self.assertEqual(body, (self.checkout / f"subagents/{role.upper()}.md").read_bytes())
-            for provider, entry in (("claude", "CLAUDE.md"), ("codex", "AGENTS.md")):
+            for provider, entry in (("codex", "AGENTS.md"), ("gdr", "AGENTS.md")):
                 directory = self.home / f".luno/homes/{role}-{provider}"
                 self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
                 self.assertEqual(os.readlink(directory / entry), str(self.checkout / f"subagents/{role.upper()}.md"))
@@ -134,17 +125,16 @@ class InstallTest(unittest.TestCase):
         rc, report = self.call("--apply")
         self.assertEqual(rc, 2)
         self.assertIn("missing_global_copy", [e["code"] for e in report["errors"]])
-        self.assertTrue(any(a["path"].endswith(".claude/CLAUDE.md") for a in report["actions"]))
         self.assertEqual(self.snapshot(), before)
 
     def test_existing_public_file_and_wrong_link_are_conflicts(self):
-        claude = self.home / ".claude"
-        claude.mkdir()
-        (claude / "CLAUDE.md").write_bytes(b"my existing instructions")
+        codex = self.home / ".codex"
+        codex.mkdir()
+        (codex / "AGENTS.md").write_bytes(b"my existing instructions")
         target = self.root / "unmanaged"
         target.write_bytes(b"leave target unchanged")
-        (claude / "agents").mkdir()
-        (claude / "agents/lens.md").symlink_to(target)
+        (self.home / ".agents/skills").mkdir(parents=True)
+        (self.home / ".agents/skills/luno-core").symlink_to(target)
         before = self.snapshot()
         rc, report = self.call("--apply")
         self.assertEqual(rc, 2)
@@ -210,7 +200,7 @@ class InstallTest(unittest.TestCase):
                 rc, report = self.call("--apply")
                 self.assertEqual(rc, 2)
                 self.assertIn("unsafe_parent", [e["code"] for e in report["errors"]])
-                self.assertFalse((self.home / ".claude").exists())
+                self.assertFalse((self.home / ".agents").exists())
                 self.assertEqual(sorted(p.name for p in outside.iterdir()), ["GLOBAL.md", "SKILL.md"])
                 path.unlink()
                 if relative == ".luno/memory":
@@ -218,7 +208,7 @@ class InstallTest(unittest.TestCase):
                     self.global_file.write_bytes(b"global fixture")
 
     def test_parent_replacement_after_plan_cannot_redirect_writes(self):
-        parent = self.home / ".claude"
+        parent = self.home / ".codex"
         parent.mkdir()
         outside = self.root / "outside"
         outside.mkdir()
@@ -226,7 +216,7 @@ class InstallTest(unittest.TestCase):
         self.addCleanup(tree.close)
         actions, errors = INSTALL.plan(self.checkout, self.home, tree)
         self.assertEqual(errors, [])
-        parent.rename(self.home / "checked-claude")
+        parent.rename(self.home / "checked-codex")
         parent.symlink_to(outside, target_is_directory=True)
         with self.assertRaises(INSTALL.InstallError) as result:
             INSTALL.apply(actions, tree)
@@ -259,7 +249,7 @@ spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 def interrupt(action, tree):
-    if action["path"].name == "forge.md":
+    if action["path"].name == "AGENTS.md":
         name = "." + action["path"].name + module.STAGING_SUFFIX
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600,
                      dir_fd=tree.directory(action["path"].parent))
@@ -273,10 +263,10 @@ module.main(sys.argv[2:])
         proc = subprocess.run([sys.executable, "-B", str(script), str(TOOL), "--checkout", str(self.checkout),
                                "--apply", "--previous", old], env=self.env, capture_output=True, timeout=30)
         self.assertEqual(proc.returncode, 99, proc.stderr)
-        self.assertTrue((self.home / ".claude/agents/forge.md").is_symlink())
-        artifact = self.home / ".luno/generated/claude-code/agents/forge.md"
-        staging = artifact.with_name(".forge.md.link-install.tmp")
-        self.assertFalse(artifact.exists())
+        self.assertTrue((self.home / ".luno/homes/forge-codex/AGENTS.md").is_symlink())
+        artifact = self.home / ".luno/generated/codex/AGENTS.md"
+        staging = artifact.with_name(".AGENTS.md.link-install.tmp")
+        self.assertNotIn(b"NEW_VERSION", artifact.read_bytes())
         self.assertEqual(staging.read_bytes(), b"INTERRUPTED_PARTIAL_CONTENT")
         login = self.home / ".luno/homes/forge-codex/auth.json"
         login.write_bytes(b"SYNTH_LOGIN")
@@ -284,8 +274,7 @@ module.main(sys.argv[2:])
         self.git("checkout", "-q", old)
         rc, report = self.call("--apply", "--previous", new)
         self.assertEqual((rc, report["status"]), (0, "completed"), report["errors"])
-        self.assertFalse((self.home / ".claude/agents/forge.md").is_symlink())
-        self.assertFalse((self.home / ".luno/generated/claude-code/agents/forge.md").exists())
+        self.assertFalse((self.home / ".luno/homes/forge-gdr/AGENTS.md").is_symlink())
         # 归属不可证的暂存残留不清理，只报告：重跑与回退都不删它。
         self.assertIn(str(staging), report["residue"])
         self.assertEqual(staging.read_bytes(), b"INTERRUPTED_PARTIAL_CONTENT")
@@ -308,11 +297,11 @@ module.main(sys.argv[2:])
         old = self.git("rev-parse", "HEAD")
         registry_file = self.checkout / "tools/sync-targets.json"
         registry = json.loads(registry_file.read_text())
-        registry["objects"][0]["ends"]["claude-code"]["paths"].append("~/.claude/user.md")
+        registry["objects"][0]["ends"]["codex"]["paths"].append("~/.codex/user.md")
         registry_file.write_text(json.dumps(registry))
         new = self.commit()
         self.git("checkout", "-q", old)
-        (self.home / ".claude/user.md").write_bytes(b"UNMANAGED")
+        (self.home / ".codex/user.md").write_bytes(b"UNMANAGED")
         before = self.snapshot()
         self.assertEqual(self.call("--preflight", new)[0], 2)
         self.assertEqual(self.git("rev-parse", "HEAD"), old)
@@ -333,7 +322,7 @@ module.main(sys.argv[2:])
         outside = self.root / "outside"
         outside.mkdir()
         (outside / "keep").write_bytes(b"untouched")
-        (self.home / ".claude").symlink_to(outside)
+        (self.home / ".codex").symlink_to(outside)
         self.assertEqual(self.call("--apply")[0], 2)
         self.assertEqual(sorted(p.name for p in outside.iterdir()), ["keep"])
 
@@ -424,8 +413,8 @@ module.main(sys.argv[2:])
         registry_file = self.checkout / "tools/sync-targets.json"
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
-            if obj["id"] == "subagents/LENS.md":
-                obj["ends"]["claude-code"]["renderer"] = "codex-main"
+            if obj["id"] == "luno-ops":
+                obj["source"] = "skills/luno-authoring/SKILL.md"
         registry_file.write_text(json.dumps(registry))
         new = self.commit()
         self.git("checkout", "-q", old)
@@ -443,9 +432,9 @@ module.main(sys.argv[2:])
         # 历史遗留的链接与生成文件暂存项只报不删，也不跟随其内容。
         self.assertEqual(self.call("--apply")[0], 0)
         generated = self.home / ".luno/generated/codex/AGENTS.md"
-        link_dir = self.home / ".claude/agents"
+        link_dir = self.home / ".luno/homes/lens-codex"
         old_staging = generated.with_name(".AGENTS.md.link-install.tmp")
-        link_staging = link_dir / ".forge.md.link-install.tmp.0123456789abcdef"
+        link_staging = link_dir / ".AGENTS.md.link-install.tmp.0123456789abcdef"
         old_staging.write_bytes(b"OLD_GENERATED_RESIDUE")
         link_staging.symlink_to(self.home / ".codex/auth.json")
         before = self.snapshot()
@@ -463,13 +452,13 @@ module.main(sys.argv[2:])
         login = self.home / ".codex/auth.json"
         login.write_bytes(b"SYNTH_LOGIN")
         login.chmod(0o600)
-        public = self.home / ".claude/CLAUDE.md"
-        generated = self.home / ".luno/generated/claude-code/CLAUDE.md"
+        public = self.home / ".codex/AGENTS.md"
+        generated = self.home / ".luno/generated/codex/AGENTS.md"
         old = self.git("rev-parse", "HEAD")
         registry_file = self.checkout / "tools/sync-targets.json"
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
-            for end in ("claude-code", "codex", "paseo"):
+            for end in ("codex", "paseo"):
                 if end in obj["ends"]:
                     obj["ends"][end] = {"present": False}
         registry_file.write_text(json.dumps(registry))
@@ -496,7 +485,7 @@ module.main(sys.argv[2:])
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
             if obj["id"] == "subagents/LENS.md":
-                obj["ends"]["claude-code"] = {"present": False}
+                obj["ends"]["paseo"] = {"present": False}
         registry_file.write_text(json.dumps(registry))
         target = self.commit()
         registry = json.loads(registry_file.read_text())
@@ -518,7 +507,7 @@ module.main(sys.argv[2:])
         registry_file = self.checkout / "tools/sync-targets.json"
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
-            for end in ("claude-code", "codex", "paseo"):
+            for end in ("codex", "paseo"):
                 obj["ends"].pop(end, None)
         registry_file.write_text(json.dumps(registry))
         new = self.commit()
@@ -544,7 +533,7 @@ module.main(sys.argv[2:])
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
             if obj["id"] == "subagents/LENS.md":
-                for end in ("claude-code", "codex", "paseo"):
+                for end in ("codex", "paseo"):
                     if end in obj["ends"]:
                         obj["ends"].pop(end)
                         break
@@ -604,7 +593,7 @@ module.main(sys.argv[2:])
         registry_file = self.checkout / "tools/sync-targets.json"
         registry = json.loads(registry_file.read_text())
         for obj in registry["objects"]:
-            for end in ("claude-code", "codex", "paseo"):
+            for end in ("codex", "paseo"):
                 obj["ends"].pop(end, None)
         registry_file.write_text(json.dumps(registry))
         (self.checkout / "tools/link-install.py").unlink()  # 旧基线真实没有安装器
@@ -619,7 +608,7 @@ module.main(sys.argv[2:])
         self.assertEqual(self.call("--check")[0], 0)
 
     def test_successful_install_preserves_existing_login_and_settings_files(self):
-        paths = (".claude/.credentials.json", ".claude/settings.json", ".codex/auth.json", ".codex/config.toml")
+        paths = (".codex/auth.json", ".codex/config.toml")
         for name in paths:
             path = self.home / name
             path.parent.mkdir(exist_ok=True)
@@ -675,7 +664,7 @@ module.main(sys.argv[2:])
             if obj["type"] == "skill" and obj["ends"]["codex"]["present"]:
                 self.assertEqual(os.readlink(codex_home / "skills" / obj["id"]),
                                  str((self.checkout / obj["source"]).parent))
-        for relative in (".claude", ".agents", ".codex", ".luno/homes"):
+        for relative in (".agents", ".codex", ".luno/homes"):
             self.assertFalse((install_root / relative).exists())
         rc, report = self.call(*options, "--apply")
         self.assertEqual((rc, report["created"]), (0, []))
@@ -708,7 +697,6 @@ module.main(sys.argv[2:])
         (role / "AGENTS.override.md").write_bytes(b"unselected override")
         rc, report = self.call("--ends", "codex", "--apply")
         self.assertEqual(rc, 0, report["errors"])
-        self.assertFalse((self.home / ".claude").exists())
         self.assertEqual(sorted(p.name for p in role.iterdir()), ["AGENTS.override.md"])
         self.assertFalse((self.home / ".luno/homes/forge-codex").exists())
 
@@ -718,8 +706,7 @@ module.main(sys.argv[2:])
         self.assertIs(config["daemon"]["mcp"]["injectIntoAgents"], True)
         self.assertEqual(self.call("--apply")[0], 0)
         for role in ("lens", "forge"):
-            for provider, variable, entry in (("claude", "CLAUDE_CONFIG_DIR", "CLAUDE.md"),
-                                               ("codex", "CODEX_HOME", "AGENTS.md")):
+            for provider, variable, entry in (("codex", "CODEX_HOME", "AGENTS.md"),):
                 key = role + "-" + provider
                 fragment = config["agents"]["providers"][key]
                 self.assertEqual(fragment["extends"], provider)

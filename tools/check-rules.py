@@ -15,7 +15,7 @@ REQUIRED_VERBS = {'先加载','先完整加载','必须加载','必须完整加�
 RESOURCE_RE = re.compile(r'`((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+)`')
 CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
-HOST_ENDS = ('claude-code','codex','paseo')
+HOST_ENDS = ('codex','paseo')
 # 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
 NATIVE_ROLES = {'subagents/LENS.md': ('lens', 'gpt-6.2-sol', 'high'),
                'subagents/FORGE.md': ('forge', 'deepseek-flash', 'high')}
@@ -36,19 +36,15 @@ REQUIRED_READS = (
     ('skills/luno-platform/SKILL.md', '按当前端完整读取对应资源：'),
     ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
     ('skills/luno-platform/SKILL.md', 'LobeHub 端（在 LobeHub 助理中运行）读 `references/runtime-lobehub.md`'),
-    ('skills/luno-platform/SKILL.md', 'Claude Code 端（Bash 环境中指定变量 `CLAUDECODE` 为 `1`）'
-                                      '读 `references/runtime-claude-code.md` 和 `references/runtime-host.md`'),
     ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
-    ('skills/luno-platform/SKILL.md', '在 Claude Code 或 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
+    ('skills/luno-platform/SKILL.md', '在 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
                                       '另读 `references/runtime-paseo.md`'),
-    ('skills/luno-platform/references/runtime-claude-code.md',
-     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
     ('skills/luno-platform/references/runtime-codex.md',
      '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
     ('skills/luno-platform/references/runtime-host.md',
-     '并与 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 合用'),
+     '并与 `references/runtime-codex.md` 合用'),
     ('skills/luno-platform/references/runtime-paseo.md',
-     '其余槽位仍按 `references/runtime-claude-code.md` 或 `references/runtime-codex.md` 与 `references/runtime-host.md`'))
+     '其余槽位仍按 `references/runtime-codex.md` 与 `references/runtime-host.md`'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
@@ -287,8 +283,8 @@ class Guard:
         renderer = None
         if kind=='skill':
             want='link'
-        elif kind=='prompt' and end in ('claude-code','codex'):
-            want='generated';renderer='claude-main' if end=='claude-code' else 'codex-main'
+        elif kind=='prompt' and end=='codex':
+            want='generated';renderer='codex-main'
         elif name in NATIVE_ROLES and end=='codex':
             # 原生 Codex 角色：两角色、此 renderer、精确路径与模型参数，其余键名一律冲突。
             role, model, effort = NATIVE_ROLES[name]
@@ -296,9 +292,8 @@ class Guard:
             if (set(value)!=NATIVE_ROLE_KEYS or value.get('paths')!=['~/.codex/roles/'+role+'.toml']
                     or value.get('model')!=model or value.get('model_reasoning_effort')!=effort):
                 self.problem('宿主端原生角色登记冲突');return
-        elif name in ('subagents/LENS.md','subagents/FORGE.md') and end in ('claude-code','paseo'):
-            want='generated' if end=='claude-code' else 'link'
-            if end=='claude-code':renderer='claude-role'
+        elif name in ('subagents/LENS.md','subagents/FORGE.md') and end=='paseo':
+            want='link'
         else:
             self.problem('宿主端对象不支持');return
         if value.get('kind')!=want or (renderer is not None and value.get('renderer')!=renderer):
