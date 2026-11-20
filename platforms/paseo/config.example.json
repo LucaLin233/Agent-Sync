@@ -32,7 +32,7 @@
       },
       "lens-codex": {
         "extends": "codex", "label": "LENS · CCHP",
-        "command": ["codex", "-c", "model_provider=\"cchp\""],
+        "command": ["codex", "-c", "model_provider=\"cchp\"", "-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"],
         "env": {
           "CODEX_HOME": "/home/paseo/.luno/homes/lens-codex",
           "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/LENS.md",
@@ -41,7 +41,7 @@
       },
       "forge-codex": {
         "extends": "codex", "label": "FORGE · CCHP",
-        "command": ["codex", "-c", "model_provider=\"cchp\""],
+        "command": ["codex", "-c", "model_provider=\"cchp\"", "-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"],
         "env": {
           "CODEX_HOME": "/home/paseo/.luno/homes/forge-codex",
           "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/FORGE.md",
