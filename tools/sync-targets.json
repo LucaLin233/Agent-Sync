@@ -238,7 +238,9 @@
           "kind": "link",
           "paths": [
             "~/.luno/homes/lens-claude/skills/luno-core",
-            "~/.luno/homes/forge-claude/skills/luno-core"
+            "~/.luno/homes/forge-claude/skills/luno-core",
+            "~/.luno/homes/lens-codex/skills/luno-core",
+            "~/.luno/homes/forge-codex/skills/luno-core"
           ]
         }
       },
@@ -290,7 +292,9 @@
           "kind": "link",
           "paths": [
             "~/.luno/homes/lens-claude/skills/luno-ops",
-            "~/.luno/homes/forge-claude/skills/luno-ops"
+            "~/.luno/homes/forge-claude/skills/luno-ops",
+            "~/.luno/homes/lens-codex/skills/luno-ops",
+            "~/.luno/homes/forge-codex/skills/luno-ops"
           ]
         }
       },
@@ -341,7 +345,9 @@
           "kind": "link",
           "paths": [
             "~/.luno/homes/lens-claude/skills/luno-authoring",
-            "~/.luno/homes/forge-claude/skills/luno-authoring"
+            "~/.luno/homes/forge-claude/skills/luno-authoring",
+            "~/.luno/homes/lens-codex/skills/luno-authoring",
+            "~/.luno/homes/forge-codex/skills/luno-authoring"
           ]
         }
       },
@@ -411,7 +417,9 @@
           "kind": "link",
           "paths": [
             "~/.luno/homes/lens-claude/skills/luno-platform",
-            "~/.luno/homes/forge-claude/skills/luno-platform"
+            "~/.luno/homes/forge-claude/skills/luno-platform",
+            "~/.luno/homes/lens-codex/skills/luno-platform",
+            "~/.luno/homes/forge-codex/skills/luno-platform"
           ]
         }
       },
@@ -473,7 +481,9 @@
           "kind": "link",
           "paths": [
             "~/.luno/homes/lens-claude/skills/luno-surge",
-            "~/.luno/homes/forge-claude/skills/luno-surge"
+            "~/.luno/homes/forge-claude/skills/luno-surge",
+            "~/.luno/homes/lens-codex/skills/luno-surge",
+            "~/.luno/homes/forge-codex/skills/luno-surge"
           ]
         }
       },
