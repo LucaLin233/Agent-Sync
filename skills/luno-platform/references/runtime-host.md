@@ -38,8 +38,10 @@
 
 ## 记忆入口
 
-- GLOBAL 是 Minis 唯一真源的整份单向私人只读副本，AI 不修改。副本和本端日志的确切路径以当次明确配置为准；安装器的既有相对布局为 `<安装根>/.luno/memory/GLOBAL.md` 与 `MEMORY.md`。复制、冲突、提示词重新生成及恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。
-- 经验日志仅在本端及明确指定的共享范围内自持，不因同机存在另一个 CLI 就自动共写；写法、容量和整理按 `references/memory-common.md`〔分支 maintenance〕，纯检索按〔分支 memory-common〕。
+- GLOBAL 是 Minis 唯一真源的整份单向私人只读副本，AI 不修改。确切路径以明确配置为准，安装器沿用 `<安装根>/.luno/memory/GLOBAL.md`。复制、冲突、提示词重新生成及恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。
+- 宿主端经验日志使用明确配置的私有文件，既有布局为 `<安装根>/.luno/memory/MEMORY.md`。首次有符合收录条件的经验、获准写入且核实目标未占用时，排他创建，目录权限 700，文件权限 600。遇到记忆关闭、无写权或路径和归属不清时停止相关写入。维护和回读按 `references/memory-common.md`〔分支 maintenance〕；获准检索时按确切路径和关键词定位，回读相关条目及其条件。
+- 原生 LUNO 主会话与 Paseo 的 LUNO 主会话只有在明确获准、且核实使用同一个实际文件时共用日志。优先采用明确配置的私有路径。采用既有布局时，从两端实际共用的持久化安装根定位 `.luno/memory/MEMORY.md`。涉及容器时核对挂载映射，目录同名也须确认文件相同。运行用户、安装根或挂载变化后重核。`CODEX_HOME` 及角色配置目录用于定位各自的配置，不能据此推定共享日志的位置或访问范围。
+- 经验日志按需检索，不自动注入。安装器不创建该文件；主会话共用日志的约定不授予角色子会话访问权。
 - Claude Code 的 auto memory 和 Codex 的 memories 不作为 LUNO 记忆：不往里写，也不据此采用经验。
 
 ## Surge 控制目标
