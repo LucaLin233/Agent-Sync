@@ -6,9 +6,8 @@
 
 - **待条件｜OnlyBoxes worker 宿主风险取舍**。原有的 host 网络和 Docker socket 两项没有按加固方案实施，MCP 登记退役并不关闭这两项；风险结论见 `skills/luno-ops/references/execution-environment.md`〔分支 execution-environment〕第 1 步；完整取证在 Git `6756b5f` 版同文件的 onlyboxes-baseline 分支〈宿主风险（未解除）〉，尚未现场复验。加固应使用会校验请求体的 Docker 代理；只按方法和路径做 ACL 挡不住 `POST /containers/create` 请求体里的逃逸参数。触发条件：用户决定保留现状或另行批准加固方案和授权，或者 worker-sys、执行路由、socket、网络、版本发生变化。责任人：主助理。
 
-- **待条件｜宿主端遗留 Claude Code 入口清理**。触发条件：部署主机决定退役 Claude Code 端并授权现场清理，或升级到已移除该运行端的版本。届时按精确路径逐项核对 `~/.claude/`（`CLAUDE.md`、`agents/*.md`、`skills/*`）、`~/.luno/generated/claude-code/`、`~/.luno/homes/{lens,forge}-claude/` 的归属后再处理，不整目录删除；安装器不再渲染或删除这些项，`--apply --previous` 遇安装器 blob 改变按 `installer_changed` 停止。责任人：主助理。
+- **待条件｜核对宿主端遗留 Claude Code 入口**。后续另行获准现场清理，或规划从含 Claude Code 的旧版跨到退役版时，由主助理以已核现场前态对应的旧提交、登记和安装器逐项核定遗留入口归属。升级本身不授权删除；未获清理授权或归属不明则不删，不整目录删除，保留设置、登录态和私人记忆。跨版限制见 README〈升级与回退〉。
 
-- **待条件｜宿主端遗留 Claude Code 入口清理**。触发条件：部署主机决定退役 Claude Code 端并授权现场清理，或升级到已移除该运行端的版本。届时按精确路径逐项核对 `~/.claude/`（`CLAUDE.md`、`agents/*.md`、`skills/*`）、`~/.luno/generated/claude-code/`、`~/.luno/homes/{lens,forge}-claude/` 的归属后再处理，不整目录删除；安装器不再渲染或删除这些项，`--apply --previous` 遇安装器 blob 改变按 `installer_changed` 停止。责任人：主助理。
 
 ## 暂缓事项（PR #51）
 
