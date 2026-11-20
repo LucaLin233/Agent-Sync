@@ -8,7 +8,7 @@
 
 ## 资源与触发
 
-纯检索记忆时，完整读取本分支及本端检索入口，不加载仅写入格式和容量维护。写入、整理或更正记忆，保存经验或实施经验固化，以及对这些动作做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕；检索中命中这些情形，或发现日志达到约 100 KiB、注入截断时，也须补读 maintenance 及其命中的 correction 分支。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时，先读 maintenance，再读 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口；LobeHub 记忆操作、规划或审查另完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。宿主端（Claude Code、Codex）的记忆操作、规划或审查另完整读取 `references/runtime-host.md`〈记忆入口〉。
+纯检索记忆时，完整读取本分支及本端检索入口，不加载仅写入格式和容量维护。写入、整理或更正记忆，保存经验或实施经验固化，以及对这些动作做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕；检索中命中这些情形，或发现日志达到约 100 KiB、注入截断时，也须补读 maintenance 及其命中的 correction 分支。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时，先读 maintenance，再读 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口；LobeHub 记忆操作、规划或审查另完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。宿主端（Codex）的记忆操作、规划或审查另完整读取 `references/runtime-host.md`〈记忆入口〉。
 
 ## 检索与采用
 

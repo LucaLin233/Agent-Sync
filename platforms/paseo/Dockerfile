@@ -7,4 +7,4 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-yaml \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code @openai/codex
+    && npm install -g @openai/codex

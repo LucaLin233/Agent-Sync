@@ -41,14 +41,6 @@
           "id": "agt_0Q1gmmEVOqF1",
           "field": "systemRole"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "generated",
-          "paths": [
-            "~/.claude/CLAUDE.md"
-          ],
-          "renderer": "claude-main"
-        },
         "codex": {
           "present": true,
           "kind": "generated",
@@ -82,14 +74,6 @@
           "id": "agt_EyGvkuZ3InQj",
           "field": "systemRole"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "generated",
-          "paths": [
-            "~/.claude/agents/lens.md"
-          ],
-          "renderer": "claude-role"
-        },
         "codex": {
           "present": true,
           "kind": "generated",
@@ -104,7 +88,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/CLAUDE.md",
             "~/.luno/homes/lens-codex/AGENTS.md",
             "~/.luno/homes/lens-gdr/AGENTS.md"
           ]
@@ -131,14 +114,6 @@
           "id": "agt_JSQo9uyuxMU9",
           "field": "systemRole"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "generated",
-          "paths": [
-            "~/.claude/agents/forge.md"
-          ],
-          "renderer": "claude-role"
-        },
         "codex": {
           "present": true,
           "kind": "generated",
@@ -153,7 +128,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/forge-claude/CLAUDE.md",
             "~/.luno/homes/forge-codex/AGENTS.md",
             "~/.luno/homes/forge-gdr/AGENTS.md"
           ]
@@ -175,9 +149,6 @@
           "field": "subagents.general.instructions"
         },
         "lobehub": {
-          "present": false
-        },
-        "claude-code": {
           "present": false
         },
         "codex": {
@@ -221,13 +192,6 @@
           "id": "skl_uwJOacJnCwCZ",
           "fields": "content,name,description"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "link",
-          "paths": [
-            "~/.claude/skills/luno-core"
-          ]
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -239,8 +203,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/skills/luno-core",
-            "~/.luno/homes/forge-claude/skills/luno-core",
             "~/.luno/homes/lens-codex/skills/luno-core",
             "~/.luno/homes/forge-codex/skills/luno-core",
             "~/.luno/homes/lens-gdr/skills/luno-core",
@@ -277,13 +239,6 @@
           "id": "skl_GFH4VX36mLmY",
           "fields": "content,name,description"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "link",
-          "paths": [
-            "~/.claude/skills/luno-ops"
-          ]
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -295,8 +250,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/skills/luno-ops",
-            "~/.luno/homes/forge-claude/skills/luno-ops",
             "~/.luno/homes/lens-codex/skills/luno-ops",
             "~/.luno/homes/forge-codex/skills/luno-ops",
             "~/.luno/homes/lens-gdr/skills/luno-ops",
@@ -332,13 +285,6 @@
           "id": "skl_RBqxBjRlC67z",
           "fields": "content,name,description"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "link",
-          "paths": [
-            "~/.claude/skills/luno-authoring"
-          ]
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -350,8 +296,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/skills/luno-authoring",
-            "~/.luno/homes/forge-claude/skills/luno-authoring",
             "~/.luno/homes/lens-codex/skills/luno-authoring",
             "~/.luno/homes/forge-codex/skills/luno-authoring",
             "~/.luno/homes/lens-gdr/skills/luno-authoring",
@@ -387,7 +331,6 @@
         "skills/luno-platform/references/runtime-minis.md",
         "skills/luno-platform/references/runtime-lobehub.md",
         "skills/luno-platform/references/runtime-host.md",
-        "skills/luno-platform/references/runtime-claude-code.md",
         "skills/luno-platform/references/runtime-codex.md",
         "skills/luno-platform/references/runtime-paseo.md"
       ],
@@ -406,13 +349,6 @@
           "id": "skl_Yp9xWuhzdFMo",
           "fields": "content,name,description"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "link",
-          "paths": [
-            "~/.claude/skills/luno-platform"
-          ]
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -424,8 +360,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/skills/luno-platform",
-            "~/.luno/homes/forge-claude/skills/luno-platform",
             "~/.luno/homes/lens-codex/skills/luno-platform",
             "~/.luno/homes/forge-codex/skills/luno-platform",
             "~/.luno/homes/lens-gdr/skills/luno-platform",
@@ -472,13 +406,6 @@
           "id": "skl_JkqkEHmFY57U",
           "fields": "content,name,description"
         },
-        "claude-code": {
-          "present": true,
-          "kind": "link",
-          "paths": [
-            "~/.claude/skills/luno-surge"
-          ]
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -490,8 +417,6 @@
           "present": true,
           "kind": "link",
           "paths": [
-            "~/.luno/homes/lens-claude/skills/luno-surge",
-            "~/.luno/homes/forge-claude/skills/luno-surge",
             "~/.luno/homes/lens-codex/skills/luno-surge",
             "~/.luno/homes/forge-codex/skills/luno-surge",
             "~/.luno/homes/lens-gdr/skills/luno-surge",
