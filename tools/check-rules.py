@@ -17,7 +17,7 @@ CROSS_RESOURCE_RE = re.compile(r'luno-[a-z0-9-]+/references/[A-Za-z0-9_./-]+\Z')
 REGISTRY = 'tools/sync-targets.json'
 HOST_ENDS = ('claude-code','codex','paseo')
 # 「必须加载」的入口义务：正文只写动词，被改成条件加载时无法自证，故保留原有必需加载行，并登记 CCHP 本端层对官方技能的必需加载。
-NATIVE_ROLES = {'subagents/LENS.md': ('lens', 'gpt-6.2-astra', 'medium'),
+NATIVE_ROLES = {'subagents/LENS.md': ('lens', 'gpt-6.2-sol', 'high'),
                'subagents/FORGE.md': ('forge', 'deepseek-flash', 'high')}
 NATIVE_ROLE_KEYS = {'present', 'kind', 'paths', 'renderer', 'model', 'model_reasoning_effort'}
 
