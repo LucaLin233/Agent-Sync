@@ -11,7 +11,7 @@
 
 - **升级**：用 `docker compose` 管理。镜像启动时自动执行 schema 迁移，日志出现 `database migration pass` 才算生效；迁移排障见文档 `self-hosting/platform/docker-compose.mdx`〈Database Migration Issues〉，失败了不能用清库绕过。升级前备份数据库（`pg_dump`）、对象存储和 Redis；完整恢复备份按 `luno-core/references/execution.md`〔分支 safety〕〈秘密面〉③，`KEY_VAULTS_SECRET` 必须和加密数据配对。官方的重置手段（`down` 后删除挂载数据）会清空数据库，属于需要确认的操作。
 - **迁移核对**：升级前按实际要执行的迁移核对表规模、锁和停写窗口、索引、唯一键冲突和 schema 新增；补丁版本也可能有迁移，没有回填不等于没有锁。已知的 2.3.x 风险线索（2026-11-03/07 源码记录，生产开销未实测）：0196 普通建索引可能阻塞写入，0197 唯一键改为 (message_id, member_id)，0199 新增 topic_analyses。只有命中这些迁移时，才核对 0195 的列是否已存在，并按授权安排事务外的并发索引（CONCURRENTLY 不能放在迁移事务里）。重复键不得自动删除业务数据；版本不符就重读对应的迁移，不拿旧编号代表现状。
-- **网关**：网关变量与令牌、JWKS 公私钥的分工、`AGENT_GATEWAY_PROTOCOL` 与 `/v2/ws`、升级步骤和反代要求见文档 `self-hosting/platform/docker-compose.mdx`〈Agent Gateway〉〈Upgrading an Existing Deployment〉和 `self-hosting/environment-variables/basic.mdx`；`agent_gateway_mux_mobile` 是另一个开关，不要混淆。升级前核对 compose 里的网关服务和 `.env` 里的网关变量；网关重启会中断正在跑的任务，升级后分别回验设备连接、agent 执行位置和跟随。
+- **网关**：网关变量与令牌、JWKS 公私钥的分工、`AGENT_GATEWAY_PROTOCOL` 与 `/v2/ws`、升级步骤和反代要求见文档 `self-hosting/platform/docker-compose.mdx`〈Agent Gateway〉〈Upgrading an Existing Deployment〉和 `self-hosting/environment-variables/basic.mdx`；`agent_gateway_mux_mobile` 是另一个开关，不要混淆。升级前核对 compose 里的网关服务和 `.env` 里的网关变量；网关重启会中断正在跑的任务，升级后分别回验设备连接、agent 执行位置和跟随。使用 v1 WebSocket 时，另在任务结束前断开浏览器，结束后重连，核对保留的输出和最终状态；测试期间保持 Gateway 进程运行，避免重启清空回放缓存。
 - **Bot**：v2.3.0 起 Proactive Bot 默认开启，并移除了 `bot_wake` 灰度键（现版本未核）。升级时核对频道的自动参与范围和用量，不拿旧开关推断已关闭；关闭入口是频道设置 Wake policy → Proactive participation，改动仍须当次授权。
 
 ## 密钥、鉴权与查库
