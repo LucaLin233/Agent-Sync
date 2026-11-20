@@ -310,6 +310,8 @@ GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时�
 
 角色启动核验需要包含 [Paseo v0.16.2 角色核验补丁](platforms/paseo/codex-role-verification-v0.16.2.patch) 的 daemon。在 Paseo 源码副本核对基线为 `2ee30f4164af42ba209236ab3a31bf9532592fc3`，依次用 `git apply --check <补丁路径>`、`git apply <补丁路径>` 应用，按 Paseo 的发布流程构建并隔离验收。Compose 部署时通过既有 `PASEO_BASE_IMAGE` 构建参数选择已验收的镜像。npm 安装并由 systemd 托管时，先核实单元实际加载的 server 包，以独立安装前缀验证同版补丁包，确认原有启动入口和配置可以恢复，再切换单元使用的程序并核对新进程实际加载的包。
 
+该补丁修改了 Paseo 服务端源码和测试，上游版权及 Apache 2.0 全文随补丁分发。 [Paseo 上游许可](platforms/paseo/LICENSE.upstream.txt)
+
 对选用的 Codex worker，在 provider 的 `env` 同时配置 `PASEO_CODEX_ROLE_SOURCE`（受管检出里登记的角色原文绝对路径）和 `PASEO_CODEX_ROLE_MODEL_PROVIDER`（预期生效的 Codex 上游标识），然后按运行端规则核验状态。角色会话空闲后才可切换模型，Paseo 会重连并核对新模型。临时会话切换模型时需新建会话。未返回角色证据时停止正式派发。使用新契约前，完成独立审查及授权部署。
 
 Paseo 0.16.2 的动态 provider 子路径不宜假定为受支持接口；已见 `Unknown configuration path`，而 `set agents.providers` 会替换整表。把声明存入 Profile `notes` 的方案不扩展 provider schema；落地前须核安装版接受该 JSON 字符串，并通过已核支持的官方 Profile 读写入口补充和回读。安全与授权沿用总控，不因配置示例而扩大。

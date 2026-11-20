@@ -1,3 +1,9 @@
+Paseo v0.16.2, revision 2ee30f4164af42ba209236ab3a31bf9532592fc3.
+Copyright (c) 2025-present Mohamed Boudra.
+Agent-Sync modified the files listed below to verify Codex role sessions,
+refresh verification after model changes, and test the resulting behavior.
+The Apache License, Version 2.0 is included in LICENSE.upstream.txt.
+
 diff --git a/packages/server/src/server/agent/agent-projections.ts b/packages/server/src/server/agent/agent-projections.ts
 index 09d9461..f199ae4 100644
 --- a/packages/server/src/server/agent/agent-projections.ts

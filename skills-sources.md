@@ -214,6 +214,10 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 输出脱敏的历史保证边界和使用方契约见 `skills/luno-surge/references/SOURCE.md`〈luno-surge 输出脱敏的保证边界〉。
 
+## Paseo 服务端补丁
+
+`platforms/paseo/codex-role-verification-v0.16.2.patch` 基于 `getpaseo/paseo@2ee30f4164af42ba209236ab3a31bf9532592fc3`（v0.16.2），取材范围为 `packages/server/src/server/agent/` 下补丁列出的文件及其差分上下文。变更包括 Codex 角色会话核验、自定义 provider 的状态转发、模型切换回读和定向回归。2026-11-20 核实固定提交的服务端许可可取，随包附件与上游原文逐字节一致。 [上游许可原文](https://github.com/getpaseo/paseo/blob/2ee30f4164af42ba209236ab3a31bf9532592fc3/packages/server/LICENSE) · [随包许可](platforms/paseo/LICENSE.upstream.txt)
+
 ## 已移除与退役的来源
 
 - **luno-authoring 的 obra/superpowers**：删除 coding 的整个〈交付〉小节（原99 B 判据及标题），而非换同义词；该包通知、`LICENSE.obra-superpowers.txt` 及资源登记同批退役。公共交付义务仍由 core 的 execution 分支承载；core 的 obra 取材和通知不退役。
