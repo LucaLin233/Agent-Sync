@@ -25,7 +25,7 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 - **名称与优先级**：key 名称用 `厂家-服务商`，不带数字；优先级 = 用户确定的名次 × 10 + 厂家位（DeepSeek=1、OpenAI=2、Claude=3、Gemini=4，名次从 1 开始）。增减服务商导致名次变化时，在授权内整体重排。这不证明调度行为。
 - **倍率**：新建 provider 的 `cost_multiplier_ppm` 设为 1000000（1.0），不回改已有 provider；人工倍率只在 key 层调整。固定 key 手设倍率时保留现行 `upstream_probe.ratio.key_denylist` 防覆盖策略；其他方式及名单优先关系按当次契约核实，不推定唯一办法。
 - **会话复用**：按实时优先级，仅优先级十位为 1 的 key 设置本级开启；其余 key（含停用但未撤销的 key）移除本级覆盖、继承上级，并核实实际关闭；不把无本级覆盖当作已关闭。先核 provider × key 的组合，不假定下级 true 能抵消上级 false。
-- **测活**：provider 有启用 key 后先查既有任务，没有才建一条，已有就维护。每小时一次、enabled、不通知；周期由系统设置 `upstream_probe.interval_minutes` 决定，写 `global:*` 覆盖并需 `--confirm saveSystemConfig`；`admin set-cron-schedule` 对该任务返回 422 `30111`「由 owner page 决定」，不要走 cron 接口。保存后任务以 `@every 1h` 形式重算、有数十秒延迟，按回读判定。只含其下已启用且符合接口状态的 key。模型取 `getProviderKeyLivenessContexts` 派生默认值，不自行指定模型或 endpoint；契约或派生结果不给模型就停止该项。占位 key 替换真实秘密并启用后才加入；key 增减、启停或撤销后同步 targets，回读任务及调度。
+- **测活**：provider 有启用 key 后先查既有任务，没有才建一条，已有就维护。每小时一次、enabled、不通知；只含其下已启用且符合接口状态的 key。周期由系统设置 `upstream_probe.interval_minutes` 决定：先核 `global:*` 的生效值和来源，已经是 60 分钟就不写覆盖；只有当次授权明确包含全局配置变更时，才按当前 `saveSystemConfig` 契约写入并按其要求确认。不要用 `admin set-cron-schedule` 修改这个任务的周期（1.0.15+build.56 上实测返回 422 `30111`「由 owner page 决定」，2026-11-21，CLI 0.1.4）；保存后回读生效设置、任务及调度，回读未一致前不报完成。模型取 `getProviderKeyLivenessContexts` 派生默认值，不自行指定模型或 endpoint；契约或派生结果不给模型就停止该项。占位 key 替换真实秘密并启用后才加入；key 增减、启停或撤销后同步 targets，回读任务及调度。
 - **撤销删除的引用清理**：只移除本次 key 在 `upstream_probe.ratio.key_denylist` 的 ID，或本次 provider 在 ratio/balance 的 `provider_denylist` 中的 ID，不清理历史失效项。两类名单不混用。
 
 ## 用量与配额
@@ -45,10 +45,10 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 - 请求排障不能只筛 failed：还要覆盖网关拒绝。429 本身不能区分额度/策略、上游限流或鉴权，缺尝试链也不证明本地拒绝。
 - 占位 key 只用用户明确要求的可辨认非秘密串；创建后立即 disable 并回读，披露创建到停用间可能被调度。真实秘密替换完成前不启用、不测活、不验证链路。
 - 请求覆写只改自有规则，不把继承规则复制成本级或绕过上级锁。CLI 0.1.3 历史样本允许不存在 ID 通过 validate，当前未复测；验证成功不能证明 ID 存在或锁行为正确。历史修订恢复是写入新版本，不是回退指针，须另核授权。
-- 服务端 1.0.15+build.56（2026-11-21 核查）：`billing.price_basis` 默认 `redirect`，`routing.model_name_ignore_case_and_separators` 与 `detector.endpoint_autocorrect` 默认开启，`executor.timeout.idle_ms` 默认 10 分钟；没显式覆盖的实例升级后按这些默认运行，判读账单与路由前先核覆盖来源。价格表仍只有官方 v1 地址可用，v2 格式留给自备文档。
-- 客户端识别改由客户端定义与访问规则体系承担，旧的 `safety client-rules` 端点已移除（1.0.15 实测 404，CLI 0.1.3 调用即失败）；CLI 0.1.4 与服务端 1.0.15 对应，升级 CLI 不改变管理入口和授权。
-- 归档口径（1.0.15）：`archive.capture.include_attempt_bodies` 只作用于请求归档，请求记录的尝试卡片固定保存脱敏的上游错误响应（最多 16 KiB），没有任务的非流式 JSON 响应只保留 `archive.capture.max_body_bytes` 以内；拿归档做入站与出站对照时按此取数。
-- 判读请求记录时，时间窗、分页和返回结构都会影响结果；取不到条目先核这三项，不当作没有请求（2026-11-21 曾据错误字段路径误报零请求，实际 24 小时 5813 条）。
+- 服务端 1.0.15+build.56（2026-11-21 config page 回读）：`billing.price_basis` 默认 `redirect`，`routing.model_name_ignore_case_and_separators` 与 `detector.endpoint_autocorrect` 默认开启，`executor.timeout.idle_ms` 默认 10 分钟；这些是未覆盖时的默认值，判读账单与路由前先核当前生效值及其来源，不凭版本推断升级结果。也不能仅凭倍率配置或单次探测推断排序、计费或全部 key 的测活行为。
+- 客户端识别改由客户端定义与访问规则体系承担；1.0.15+build.56 上 CLI 0.1.3 调 `safety client-rules` 返回 404（2026-11-21 实测），CLI 0.1.4 与该服务端版本对应；这不足以判定旧 CLI 或其他版本组合下同样失效。
+- 归档口径按 1.0.15 发布说明（2026-11-20）：`archive.capture.include_attempt_bodies` 只作用于请求归档，请求记录的尝试卡片保存上游错误响应（脱敏，最多 16 KiB），没有任务的非流式 JSON 响应只保留 `archive.capture.max_body_bytes` 以内。做入站与出站对照前，先按当前契约分别核对请求归档与尝试记录、确认所需分段存在及是否截断，不把缺失或截断的正文当作完整报文。
+- 请求列表返回空结果时，先确认查询成功，再核对时间窗与时区、当前返回结构和分页是否完成；字段缺失或分页未完成时不报告零请求。
 - CCH 0.9.0 与 CCHP 1.0.13 的差异只作线索，不跨系统照搬策略。
 
 来源与许可：本端补充，保留历史精选改写的 MIT 通知，Copyright (c) 2026 the cchp contributors；完整许可随本包见 ../LICENSE.upstream.txt。官方技能的来源与固定版本见仓库 skills-sources.md〈cchp〉，本端不修改官方正文。
