@@ -4,7 +4,7 @@
 
 ## 派发通道
 
-- Paseo 主会话和独立 Codex CLI 需要角色派发时，按用户偏好默认使用已核验的 **Paseo agent 通道**。是否需要派发、角色归属和独立资格按 `luno-core/references/review.md`〔分支 delegation〕。只有用户明确指定才使用 Codex 原生 LENS/FORGE，按 `references/runtime-codex.md`〈派发通道〉核验。使用 Paseo 前按运行元数据核实会话归属、目标 daemon 和派发所需的父子关系。归属不明或无已核通道时，只停依赖该派发的步骤并报告缺口。独立 Claude Code 的原生派发按其运行端规则。被派发的子代理不得继续委派。
+- Paseo 主会话和独立 Codex CLI 的所有委派（含通用兜底）按用户偏好默认使用已核验的 **Paseo agent 通道**。是否需要派发、角色归属和独立资格按 `luno-core/references/review.md`〔分支 delegation〕。只有用户明确指定才使用 Codex 原生 LENS/FORGE，按 `references/runtime-codex.md`〈派发通道〉核验。使用 Paseo 前按运行元数据核实会话归属、目标 daemon 和派发所需的父子关系。归属不明或无已核通道时，只停依赖该派发的步骤并报告缺口。独立 Claude Code 的原生派发按其运行端规则。被派发的子代理不得继续委派。
 - **角色 provider**：以当前官方 provider 配置解析出的实际启动程序、家目录及指令来源确认角色，不维护 provider ID、显示名或上游名称白名单。角色家目录独立于主会话（Claude Code 用 `CLAUDE_CONFIG_DIR`，Codex 用 `CODEX_HOME`），其常驻提示词须为已登记的 `subagents/` 对应角色原文，不含 LUNO 常驻提示词和 GLOBAL；登记路径不要求与 provider ID 同名。配置样例见仓库 `platforms/paseo/config.example.json`，其中 ID、标签和初值是可编辑配置，不是派发规则。需登录的鉴权方式由用户分别登录；环境变量 `env_key` 方式沿用当次授权注入，不复制凭据；安装器不读取、不复制凭据或登录态，也不预置权限配置，沙箱和审批按 paseo 中该 provider 的模式与 provider 默认设置。
 - **同上游选择**：Codex 入口使用当前 Profile 的 `notes` 保存一份路由声明，格式为 JSON 字符串 `{"role":"LUNO","upstream":"<不透明上游标识>"}`；`role` 只取 `LUNO`、`LENS` 或 `FORGE`，`upstream` 由当前配置声明，不维护上游名单。声明只用于选择候选，不是身份或权限证明；采用前须核其与实际 provider 的启动参数、`CODEX_HOME`、有效 `model_provider` 连接声明及角色指令来源一致，共享 home 的默认值不代替启动覆盖值。每次派发先以主会话运行元数据中的实际 provider ID 找到当前唯一匹配的主 Profile，再读取其声明；只选择 `upstream` 相同、`role` 为所需角色的当前唯一 Profile。官方运行面明确给出选用的 Profile ID 时按该 ID 核对，不按显示名、前缀或列表顺序挑选。声明、引用或实际启动来源变化后须重核；缺失、多义、声明与真实身份冲突或无法核实关联时停止该次派发并报告，不跨上游或换模型 fallback。Claude Code 等其他 provider 沿用已核角色通道，不套用 Codex 上游声明语义。
 - **按当前 Profile 派发**：模型、思考强度、mode 与 provider 选项由主会话在**每次新派发时**从当前 Profile 读取，不在指令、脚本或记忆里缓存或写死。paseo 0.16.2 已核：编排工具 `list_profiles` 返回已配置的 Profile（`id`、`name`、`provider`、`model`、`modeId`、`thinkingOptionId`、`options`、`notes`），而 `create_agent` **没有** profile 参数：取该 Profile 的 `provider` 与 `model` 组成 `provider` 的 `<provider>/<model>`，把 `thinkingOptionId`、`modeId`、`options` 分别放进 `settings.thinkingOptionId`、`settings.modeId`、`settings.features`。Profile 未设置 `model` 时，按官方 provider 模型目录解析当前默认模型再拼，解析不出就停该项，不用空值或 `undefined` 拼路径。字段名与层级以工具当前 schema 为准，不按旧样例写死；安装版仍接受旧字段 `featureValues` 时，按 `{...featureValues, ...options}` 按键合并（同名项以 `options` 覆盖，旧字段独有键保留），不漏旧字段；后续版本以当时 schema 为准。
@@ -22,7 +22,7 @@
 
 ## 主会话接续
 
-新主会话在获准接续时，通过交接给出的 agent ID 或获准查看的 Paseo 工作区会话列表，按当前任务与工作区唯一定位原主会话及其服务器。按 `luno-core/references/handoff.md`〈恢复时〉，只在获准的消息范围内回读必要的用户指令、交接、审批原证和交付记录，核对任务版本及原授权是否仍适用。用 `get_agent_status` 和 `get_agent_activity` 核对原主会话及本任务相关 agent 的运行状态和 active turn，按上文〈审批〉核对待处理请求。用已授权的任务工作副本、Git、PR 或已改目标核实实际执行、已有交付和剩余步骤。只继续已核实且仍获授权的剩余工作，已有写入只核验，已有交付按需回传。
+新主会话在获准接续时，通过交接给出的 agent ID 或获准查看的 Paseo 工作区会话列表，按当前任务与工作区唯一定位原主会话及其服务器。按 `luno-core/references/handoff.md`〈恢复时〉，只在获准的消息范围内回读必要的用户指令、交接、审批原证和交付记录，核对任务版本及原授权是否仍适用。用 `get_agent_status` 和 `get_agent_activity` 核对原主会话及本任务相关 agent 的运行状态和 active turn，按上文〈审批〉核对待处理请求。用已授权的任务工作副本、Git、PR 或已改目标核实实际执行、已有交付和剩余步骤。只继续已核实且仍获授权的剩余工作。对已完成的写入，核验符合要求即可。遇部分写入，核清实际状态后只处理仍获授权的缺口，必要时按原恢复规则处置。已有交付按需回传。
 
 原会话无法唯一定位、必要原文缺失、相关 agent 在途或状态未知、实际执行或交付不明、原授权不清或审批待处理时，只停依赖步骤并报告缺口。待审批沿原请求处理，确需的新审批经实际审批入口办妥后再执行相关步骤。例如，原主会话收到 HTTP 503，确认无 active turn、无待审批且本任务无相关在途操作后，新主会话可根据当前工作区及原会话必要记录完成仍获授权的未答事项。
 
