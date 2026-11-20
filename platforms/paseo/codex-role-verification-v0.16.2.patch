@@ -1,0 +1,774 @@
+Paseo v0.16.2, revision 2ee30f4164af42ba209236ab3a31bf9532592fc3.
+Copyright (c) 2025-present Mohamed Boudra.
+Agent-Sync modified the files listed below to verify Codex role sessions,
+refresh verification after model changes, and test the resulting behavior.
+The Apache License, Version 2.0 is included in LICENSE.upstream.txt.
+
+diff --git a/packages/server/src/server/agent/agent-projections.ts b/packages/server/src/server/agent/agent-projections.ts
+index 09d9461..f199ae4 100644
+--- a/packages/server/src/server/agent/agent-projections.ts
++++ b/packages/server/src/server/agent/agent-projections.ts
+@@ -124,7 +124,7 @@ export function toAgentPayload(
+   agent: ManagedAgent,
+   options?: ProjectionOptions,
+ ): AgentSnapshotPayload {
+-  const runtimeInfo = sanitizeRuntimeInfo(agent.runtimeInfo);
++  const runtimeInfo = projectLiveRuntimeInfo(agent);
+   const thinkingOptionId = agent.config.thinkingOptionId ?? null;
+   const effectiveThinkingOptionId = resolveEffectiveThinkingOptionId({
+     runtimeInfo,
+@@ -195,6 +195,13 @@ export function toAgentPayload(
+   return payload;
+ }
+ 
++function projectLiveRuntimeInfo(agent: ManagedAgent): AgentRuntimeInfo | undefined {
++  const runtimeInfo = sanitizeRuntimeInfo(agent.runtimeInfo);
++  const liveMetadata = sanitizeMetadata(agent.session?.getLiveRuntimeMetadata?.());
++  if (runtimeInfo && liveMetadata) runtimeInfo.extra = { ...runtimeInfo.extra, ...liveMetadata };
++  return runtimeInfo;
++}
++
+ function buildStoredRuntimeInfo(record: StoredAgentRecord): AgentRuntimeInfo | undefined {
+   if (!record.runtimeInfo) return undefined;
+   const ri = record.runtimeInfo;
+diff --git a/packages/server/src/server/agent/agent-sdk-types.ts b/packages/server/src/server/agent/agent-sdk-types.ts
+index 0267876..ba37efb 100644
+--- a/packages/server/src/server/agent/agent-sdk-types.ts
++++ b/packages/server/src/server/agent/agent-sdk-types.ts
+@@ -710,6 +710,8 @@ export interface AgentSession {
+   subscribe(callback: (event: AgentStreamEvent) => void): () => void;
+   streamHistory(): AsyncGenerator<AgentStreamEvent>;
+   getRuntimeInfo(): Promise<AgentRuntimeInfo>;
++  /** Additional status metadata from the current live session. Never stored or cached. */
++  getLiveRuntimeMetadata?(): AgentMetadata | undefined;
+   getAvailableModes(): Promise<AgentMode[]>;
+   getCurrentMode(): Promise<string | null>;
+   setMode(modeId: string): Promise<void | AgentProviderNotice>;
+diff --git a/packages/server/src/server/agent/provider-registry.ts b/packages/server/src/server/agent/provider-registry.ts
+index 2449b9a..8c72502 100644
+--- a/packages/server/src/server/agent/provider-registry.ts
++++ b/packages/server/src/server/agent/provider-registry.ts
+@@ -465,6 +465,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
+       }
+     },
+     getRuntimeInfo: async () => mapRuntimeInfo(provider, await inner.getRuntimeInfo()),
++    getLiveRuntimeMetadata: inner.getLiveRuntimeMetadata?.bind(inner),
+     getAvailableModes: () => inner.getAvailableModes(),
+     getCurrentMode: () => inner.getCurrentMode(),
+     setMode: (modeId) => inner.setMode(modeId),
+diff --git a/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts b/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
+index 36b5291..a0f1452 100644
+--- a/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
++++ b/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
+@@ -100,7 +100,8 @@ import {
+ import { createTestLogger } from "../../../test-utils/test-logger.js";
+ import { asInternals as castInternals, createStub } from "../../test-utils/class-mocks.js";
+ import { AgentManager } from "../agent-manager.js";
+-import { buildProviderRegistry } from "../provider-registry.js";
++import { toAgentPayload, toStoredAgentRecord } from "../agent-projections.js";
++import { buildProviderRegistry, wrapSessionProvider } from "../provider-registry.js";
+ 
+ interface CollaborationModeRecord {
+   name: string;
+@@ -178,7 +179,7 @@ function createSession(
+ }
+ 
+ function createProviderWithFakeAppServer(
+-  appServer: FakeCodexAppServer,
++  appServer: FakeCodexAppServer | (() => FakeCodexAppServer),
+   options?: {
+     runtimeSettings?: ConstructorParameters<typeof CodexAppServerAgentClient>[1];
+     customProvider?: { id: string; label: string; extends: string };
+@@ -186,7 +187,9 @@ function createProviderWithFakeAppServer(
+ ): CodexAppServerAgentClient {
+   const provider = new CodexAppServerAgentClient(createTestLogger(), options?.runtimeSettings, {
+     customProvider: options?.customProvider,
+-    appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
++    appServerProcess: createFakeCodexAppServerProcess(
++      () => (typeof appServer === "function" ? appServer() : appServer).child,
++    ),
+   });
+   const internals = castInternals<{
+     goalsEnabledPromise: Promise<boolean> | null;
+@@ -1545,6 +1548,235 @@ describe("Codex app-server provider", () => {
+     }
+   });
+ 
++  test.each([
++    { scenario: "matching role", error: null },
++    {
++      scenario: "missing instruction sources",
++      error: "expected role instructions were not loaded",
++    },
++    { scenario: "role override", error: "a role instruction override may be present" },
++    { scenario: "different role text", error: "role instructions did not match" },
++    {
++      scenario: "different model provider",
++      error: "effective thread, model or provider is unverified",
++    },
++    {
++      scenario: "different resolved model",
++      error: "effective thread, model or provider is unverified",
++    },
++    { scenario: "disconnected before send", error: "current thread has no startup evidence" },
++    { scenario: "changed thread before send", error: "current thread has no startup evidence" },
++    { scenario: "stale resume", error: "expected role instructions were not loaded" },
++  ])("checks Codex role evidence before sending a turn: $scenario", async ({ scenario, error }) => {
++    const root = await mkdtemp(path.join(tmpdir(), "codex-role-evidence-"));
++    const codexHome = path.join(root, "role-home");
++    const sourceFile = path.join(root, "FORGE.md");
++    const entry = path.join(codexHome, "AGENTS.md");
++    mkdirSync(codexHome);
++    writeFileSync(sourceFile, "Role instructions\n");
++    writeFileSync(
++      entry,
++      scenario === "different role text" ? "Other instructions\n" : "Role instructions\n",
++    );
++    if (scenario === "role override") {
++      writeFileSync(path.join(codexHome, "AGENTS.override.md"), "Override\n");
++    }
++    const appServer = createFakeCodexAppServer({
++      "thread/loaded/list": () => ({ data: scenario === "stale resume" ? [] : ["thread-1"] }),
++      "thread/start": () => ({
++        thread: { id: "thread-1" },
++        model: scenario === "different resolved model" ? "other-model" : "resolved-model",
++        modelProvider: scenario === "different model provider" ? "other" : "test-provider",
++        ...(scenario === "missing instruction sources" ? {} : { instructionSources: [entry] }),
++      }),
++      "thread/resume": () => ({
++        thread: { id: "saved-thread" },
++        model: "resolved-model",
++        modelProvider: "test-provider",
++        instructionSources: [],
++      }),
++    });
++    const provider = createProviderWithFakeAppServer(appServer, {
++      runtimeSettings: {
++        env: {
++          CODEX_HOME: codexHome,
++          PASEO_CODEX_ROLE_SOURCE: sourceFile,
++          PASEO_CODEX_ROLE_MODEL_PROVIDER: "test-provider",
++        },
++      },
++    });
++    const config = createConfig({ model: "resolved-model" });
++    let session: AgentSession | undefined;
++    try {
++      if (scenario === "stale resume") {
++        await expect(
++          provider.resumeSession({ provider: "codex", sessionId: "saved-thread" }, config),
++        ).rejects.toThrow(error!);
++      } else {
++        session = await provider.createSession(config);
++        if (scenario === "disconnected before send" || scenario === "changed thread before send") {
++          const internals = castInternals<{
++            waitForInterruptedTurnCleanup(): Promise<void>;
++            handleThreadStartedNotification(event: {
++              kind: "thread_started";
++              threadId: string;
++            }): void;
++          }>(session);
++          vi.spyOn(internals, "waitForInterruptedTurnCleanup").mockImplementationOnce(async () => {
++            if (scenario === "disconnected before send") {
++              appServer.child.emit("exit", 1, null);
++              await new Promise<void>((resolve) => setImmediate(resolve));
++            } else {
++              internals.handleThreadStartedNotification({
++                kind: "thread_started",
++                threadId: "other-thread",
++              });
++            }
++          });
++        }
++        if (error) {
++          await expect(session.startTurn("first task")).rejects.toThrow(error);
++        } else {
++          await session.getRuntimeInfo();
++          expect(session.getLiveRuntimeMetadata?.()?.codexRoleVerification).toEqual({
++            roleMatches: true,
++            overrideExists: false,
++            upstreamMatches: true,
++            resolvedModel: "resolved-model",
++          });
++          expect(session.usageSession?.()?.env).not.toHaveProperty("PASEO_CODEX_ROLE_SOURCE");
++          expect(session.usageSession?.()?.env).not.toHaveProperty(
++            "PASEO_CODEX_ROLE_MODEL_PROVIDER",
++          );
++          await session.startTurn("first task");
++        }
++      }
++      expect(appServer.requests().filter(({ method }) => method === "turn/start")).toHaveLength(
++        error ? 0 : 1,
++      );
++      appServer.assertNoErrors();
++    } finally {
++      await session?.close();
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
++
++  test("publishes only live role evidence for a custom Codex provider", async () => {
++    const root = await mkdtemp(path.join(tmpdir(), "codex-role-status-"));
++    const entry = path.join(root, "AGENTS.md");
++    const sourceFile = path.join(root, "LENS.md");
++    writeFileSync(entry, "Role instructions\n");
++    writeFileSync(sourceFile, "Role instructions\n");
++    const threadEvidence = (model: string) => ({
++      thread: { id: "thread-1" },
++      model,
++      modelProvider: "test-provider",
++      instructionSources: [entry],
++    });
++    let hasBackgroundTerminal = false;
++    const appServer = createFakeCodexAppServer({
++      "thread/start": () => threadEvidence("model-a"),
++      "thread/loaded/list": () => ({ data: ["thread-1"] }),
++      "thread/resume": () => threadEvidence("model-a"),
++      "thread/backgroundTerminals/list": () => ({
++        data: hasBackgroundTerminal ? [{}] : [],
++        nextCursor: null,
++      }),
++    });
++    let threadLoaded = false;
++    const replacement = createFakeCodexAppServer({
++      "thread/loaded/list": () => ({ data: threadLoaded ? ["thread-1"] : [] }),
++      "thread/resume": (params) => {
++        expect(params).toMatchObject({ threadId: "thread-1", model: "model-b" });
++        threadLoaded = true;
++        return threadEvidence("model-b");
++      },
++    });
++    let started = false;
++    const provider = createProviderWithFakeAppServer(
++      () => {
++        if (started) return replacement;
++        started = true;
++        return appServer;
++      },
++      {
++        runtimeSettings: {
++          env: {
++            CODEX_HOME: root,
++            PASEO_CODEX_ROLE_SOURCE: sourceFile,
++            PASEO_CODEX_ROLE_MODEL_PROVIDER: "test-provider",
++          },
++        },
++      },
++    );
++    const providerId = "lens-codex";
++    const client: AgentClient = {
++      provider: providerId,
++      capabilities: provider.capabilities,
++      isAvailable: async () => true,
++      fetchCatalog: async () => ({ models: [], modes: [] }),
++      createSession: async (...args) =>
++        wrapSessionProvider(providerId, await provider.createSession(...args)),
++      resumeSession: async (...args) =>
++        wrapSessionProvider(providerId, await provider.resumeSession(...args)),
++    };
++    const manager = new AgentManager({
++      clients: { [providerId]: client },
++      logger: createTestLogger(),
++    });
++    let id: string | undefined;
++    try {
++      const agent = await manager.createAgent(
++        createConfig({ provider: providerId, cwd: root, model: "model-a" }),
++        undefined,
++        {},
++      );
++      id = agent.id;
++      const snapshot = () => toAgentPayload(manager.getAgent(agent.id)!);
++      expect(snapshot().provider).toBe(providerId);
++      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
++        resolvedModel: "model-a",
++      });
++
++      hasBackgroundTerminal = true;
++      await expect(manager.setAgentModel(agent.id, "model-b")).rejects.toThrow(
++        "Wait until the Codex role session is idle",
++      );
++      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
++        resolvedModel: "model-a",
++      });
++      hasBackgroundTerminal = false;
++      await manager.setAgentModel(agent.id, "model-b");
++      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
++        resolvedModel: "model-b",
++      });
++
++      await agent.session!.startTurn("verified task");
++      expect(appServer.requests().filter(({ method }) => method === "turn/start")).toHaveLength(0);
++      expect(
++        replacement.requests().filter(({ method }) => method === "thread/resume"),
++      ).toHaveLength(1);
++      expect(replacement.requests().filter(({ method }) => method === "turn/start")).toEqual([
++        expect.objectContaining({
++          params: expect.objectContaining({ model: "model-b", threadId: "thread-1" }),
++        }),
++      ]);
++      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
++        resolvedModel: "model-b",
++      });
++      expect(
++        toStoredAgentRecord(manager.getAgent(agent.id)!).runtimeInfo?.extra?.codexRoleVerification,
++      ).toBeUndefined();
++      await agent.session!.close();
++      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toBeUndefined();
++      appServer.assertNoErrors();
++      replacement.assertNoErrors();
++    } finally {
++      if (id) await manager.closeAgent(id);
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
++
+   test("preapproves only granted tools on the injected Codex MCP server", async () => {
+     const session = createSession({
+       modeId: undefined,
+diff --git a/packages/server/src/server/agent/providers/codex-app-server-agent.ts b/packages/server/src/server/agent/providers/codex-app-server-agent.ts
+index efee107..fa8bc15 100644
+--- a/packages/server/src/server/agent/providers/codex-app-server-agent.ts
++++ b/packages/server/src/server/agent/providers/codex-app-server-agent.ts
+@@ -10,6 +10,7 @@ import {
+   type AgentCreateSessionOptions,
+   type AgentOptionControl,
+   type AgentLaunchContext,
++  type AgentMetadata,
+   type AgentResumeSessionOptions,
+   type AgentMode,
+   type AgentModelDefinition,
+@@ -317,6 +318,11 @@ interface CodexAppServerProcessPort {
+   spawn(input: CodexAppServerProcessSpawnInput): ChildProcess;
+ }
+ 
++interface CodexRoleBinding {
++  sourceFile: string;
++  modelProvider: string;
++}
++
+ interface CodexAppServerAgentDeps {
+   appServerProcess?: CodexAppServerProcessPort;
+   environment?: Record<string, string>;
+@@ -329,6 +335,7 @@ interface CodexAppServerAgentDeps {
+   customCodexConfig?: CodexCustomProviderConfig | null;
+   // The CODEX_HOME the session's app-server runs with; prompts and skills are read from it.
+   codexHome?: string;
++  roleBinding?: CodexRoleBinding;
+   _createCodexClient?: (
+     child: ChildProcessWithoutNullStreams,
+     logger: Logger,
+@@ -3479,10 +3486,13 @@ export function buildCodexAppServerEnv(
+   runtimeSettings?: ProviderRuntimeSettings,
+   launchEnv?: Record<string, string>,
+ ) {
+-  return createProviderEnv({
++  const env = createProviderEnv({
+     runtimeSettings,
+     overlays: [launchEnv],
+   });
++  delete env.PASEO_CODEX_ROLE_SOURCE;
++  delete env.PASEO_CODEX_ROLE_MODEL_PROVIDER;
++  return env;
+ }
+ 
+ function codexStartupStateDirKey(environment: NodeJS.ProcessEnv): string {
+@@ -3630,6 +3640,12 @@ export class CodexAppServerAgentSession implements AgentSession {
+   private activeForegroundTurnId: string | null = null;
+   private activeClientMessageId: string | null = null;
+   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
++  private roleVerificationRevision = 0;
++  private verifiedRole: {
++    client: CodexAppServerClient;
++    threadId: string;
++    resolvedModel: string;
++  } | null = null;
+   /** The tier the options ask for; `serviceTier` is what the current model can honor. */
+   private requestedServiceTier: string | null = null;
+   private speedModels: CodexModel[] = [];
+@@ -3808,6 +3824,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+   }
+ 
+   private async establishConnection(): Promise<void> {
++    this.resetRoleVerification();
+     if (this.initialResumePurpose === "history") {
+       this.stagedHistory = await this.readArchivedHistory();
+       this.connectionState = "history-ready";
+@@ -3909,6 +3926,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+ 
+   private async queueUnexpectedTermination(error: Error): Promise<void> {
+     this.connectionState = "disconnected";
++    this.resetRoleVerification();
+     this.background.stop();
+     // Finish notifications already received from this process before ending
+     // their turn, so queued retry notices cannot reopen a failed retry row.
+@@ -3918,6 +3936,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+ 
+   private handleUnexpectedTermination(error: Error): void {
+     this.connectionState = "disconnected";
++    this.resetRoleVerification();
+     this.background.stop();
+     const hasActiveRootTurn = this.activeForegroundTurnId !== null || this.currentTurnId !== null;
+     this.clearPendingPermissions({ preservePlanApprovals: !hasActiveRootTurn });
+@@ -4300,9 +4319,16 @@ export class CodexAppServerAgentSession implements AgentSession {
+   }
+ 
+   private async ensureThreadLoaded(): Promise<void> {
+-    if (!this.client || !this.currentThreadId) return;
++    const client = this.client;
++    const threadId = this.currentThreadId;
++    if (!client || !threadId) return;
++    let roleRevision = this.roleVerificationRevision;
+     // Paseo reads history only when it replays it; the resume response needs no turns.
+-    const params: Record<string, unknown> = { threadId: this.currentThreadId, excludeTurns: true };
++    const params: Record<string, unknown> = { threadId, excludeTurns: true };
++    const roleModel = this.deps.roleBinding
++      ? (this.config.model ?? (await this.resolveModelAndThinking()).model)
++      : undefined;
++    if (roleModel) params.model = roleModel;
+     if (this.deps.customCodexConfig) {
+       // Resume otherwise prefers the provider stored on the thread, including
+       // the unnamespaced key emitted by earlier Paseo versions.
+@@ -4320,25 +4346,31 @@ export class CodexAppServerAgentSession implements AgentSession {
+       params.config = codexConfig;
+     }
+     try {
+-      const loaded = toObjectRecord(await this.client.request("thread/loaded/list", {}));
++      const loaded = toObjectRecord(await client.request("thread/loaded/list", {}));
+       const ids = Array.isArray(loaded?.data) ? loaded.data : [];
+-      if (ids.includes(this.currentThreadId)) {
++      if (
++        ids.includes(threadId) &&
++        (!this.deps.roleBinding ||
++          this.verifiedRoleFor(client, threadId)?.resolvedModel === roleModel)
++      ) {
+         return;
+       }
+-      const response = await this.client.request("thread/resume", params);
++      roleRevision = this.beginRoleResume(client, threadId, roleRevision);
++      const response = await client.request("thread/resume", params);
++      await this.verifyRoleBinding(response, { client, threadId, roleModel, roleRevision });
+       this.rememberResolvedSandboxPolicy(response);
+     } catch (error) {
+-      const threadId = this.currentThreadId;
+       const message = error instanceof Error ? error.message : String(error);
+       if (isArchivedCodexThreadResumeError(error, threadId)) {
+         try {
+-          await this.client.request("thread/unarchive", { threadId });
++          await client.request("thread/unarchive", { threadId });
+         } catch (unarchiveError) {
+           if (!isCodexAlreadyUnarchivedError(unarchiveError, threadId)) {
+             throw unarchiveError;
+           }
+         }
+-        const response = await this.client.request("thread/resume", params);
++        const response = await client.request("thread/resume", params);
++        await this.verifyRoleBinding(response, { client, threadId, roleModel, roleRevision });
+         this.rememberResolvedSandboxPolicy(response);
+         this.logger.info({ threadId }, "Unarchived Codex thread to restore active Paseo agent");
+         return;
+@@ -4441,8 +4473,10 @@ export class CodexAppServerAgentSession implements AgentSession {
+     };
+     const { approvalPolicy, sandboxPolicyType } = this.applyTurnWorkflowPolicy(params, preset);
+ 
+-    if (this.config.model) {
+-      params.model = this.config.model;
++    const model =
++      this.config.model ?? this.verifiedRoleFor(this.client, this.currentThreadId)?.resolvedModel;
++    if (model) {
++      params.model = model;
+     }
+     const thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
+     if (thinkingOptionId) {
+@@ -4616,7 +4650,8 @@ export class CodexAppServerAgentSession implements AgentSession {
+     try {
+       await this.pendingNotifications;
+       await this.connect();
+-      if (!this.client) {
++      const client = this.client;
++      if (!client) {
+         throw new Error("Codex client not initialized");
+       }
+ 
+@@ -4632,6 +4667,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+         await this.ensureThread();
+       }
+ 
++      const threadId = this.currentThreadId;
+       const turnStart = await this.buildTurnStartParams(effectivePrompt, options);
+       const turnId = this.createTurnId();
+       this.activeForegroundTurnId = turnId;
+@@ -4663,7 +4699,8 @@ export class CodexAppServerAgentSession implements AgentSession {
+       if (pendingStart.cancelRequested) {
+         throw new Error("Codex turn start was interrupted before reaching Codex");
+       }
+-      await this.client.request("turn/start", turnStart.params, TURN_START_TIMEOUT_MS);
++      this.requireVerifiedRole(client, threadId, turnStart.params);
++      await client.request("turn/start", turnStart.params, TURN_START_TIMEOUT_MS);
+       return { turnId };
+     } catch (error) {
+       this.pendingForegroundTurnIdentification?.resolve(null);
+@@ -4708,6 +4745,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+       return { status: "unavailable" };
+     }
+     try {
++      this.requireVerifiedRole(client, threadId);
+       const response = await client.request(
+         "turn/steer",
+         {
+@@ -4852,6 +4890,20 @@ export class CodexAppServerAgentSession implements AgentSession {
+     return { ...info };
+   }
+ 
++  getLiveRuntimeMetadata(): AgentMetadata | undefined {
++    if (this.connectionState !== "connected") return undefined;
++    const role = this.verifiedRoleFor(this.client, this.currentThreadId);
++    if (!role || (this.config.model && this.config.model !== role.resolvedModel)) return undefined;
++    return {
++      codexRoleVerification: {
++        roleMatches: true,
++        overrideExists: false,
++        upstreamMatches: true,
++        resolvedModel: role.resolvedModel,
++      },
++    };
++  }
++
+   async getAvailableModes(): Promise<AgentMode[]> {
+     if (this.autoReviewEnabled) {
+       return CODEX_MODES;
+@@ -4875,7 +4927,30 @@ export class CodexAppServerAgentSession implements AgentSession {
+   }
+ 
+   async setModel(modelId: string | null): Promise<void> {
+-    this.config.model = modelId ?? undefined;
++    const previousModel = this.config.model;
++    const nextModel = modelId ?? undefined;
++    const reloadRoleThread =
++      this.deps.roleBinding && this.currentThreadId && previousModel !== nextModel;
++    if (reloadRoleThread && this.ephemeral) {
++      throw new Error("Start a new ephemeral Codex role session to change its model");
++    }
++    if (reloadRoleThread && this.client) {
++      if (!(await this.canStopRuntime())) {
++        throw new Error("Wait until the Codex role session is idle before changing its model");
++      }
++      // Codex keeps the old model when resuming an already loaded thread.
++      await this.disposeClient();
++    }
++    this.config.model = nextModel;
++    if (reloadRoleThread) {
++      try {
++        await this.connect();
++      } catch (error) {
++        this.config.model = previousModel;
++        this.refreshResolvedCollaborationMode();
++        throw error;
++      }
++    }
+     this.refreshResolvedCollaborationMode();
+     this.cachedRuntimeInfo = null;
+     this.dropUnavailableServiceTier();
+@@ -5259,6 +5334,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+       userMessageTurns: this.codexUserMessageTurns(),
+       threadRollbackAvailable: this.threadRollbackAvailable,
+       setThreadId: async (threadId) => {
++        if (this.currentThreadId !== threadId) this.resetRoleVerification();
+         this.currentThreadId = threadId;
+         // Codex writes a forked thread's rollout when it forks it, even before any turn.
+         this.savedThreadId = threadId;
+@@ -5540,6 +5616,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+     const client = this.client;
+     this.connectionState = "disconnected";
+     this.currentTurnId = null;
++    this.resetRoleVerification();
+     if (client) {
+       await client.dispose();
+     }
+@@ -5767,13 +5844,15 @@ export class CodexAppServerAgentSession implements AgentSession {
+   }
+ 
+   private async ensureThread(): Promise<void> {
+-    if (!this.client) return;
++    const client = this.client;
++    if (!client) return;
+     if (this.currentThreadId) return;
++    const roleRevision = this.roleVerificationRevision;
+ 
+     const model = await this.applyDefaultModelAndThinking();
+ 
+     const { params, approvalPolicy, sandbox } = this.buildThreadStartRequest(model);
+-    const rawResponse = await this.client.request("thread/start", params);
++    const rawResponse = await client.request("thread/start", params);
+     this.rememberResolvedSandboxPolicy(rawResponse);
+     const response = toObjectRecord(rawResponse);
+     const threadRecord = toObjectRecord(response?.thread);
+@@ -5781,6 +5860,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+     if (!threadId) {
+       throw new Error("Codex app-server did not return thread id");
+     }
++    await this.verifyRoleBinding(response, { client, threadId, roleModel: model, roleRevision });
+     const responseApprovalsReviewer =
+       typeof response?.approvalsReviewer === "string" ? response.approvalsReviewer : undefined;
+     if (
+@@ -5796,6 +5876,125 @@ export class CodexAppServerAgentSession implements AgentSession {
+     this.currentThreadId = threadId;
+   }
+ 
++  private beginRoleResume(
++    client: CodexAppServerClient,
++    threadId: string,
++    revision: number,
++  ): number {
++    if (!this.deps.roleBinding) return revision;
++    if (
++      this.client !== client ||
++      this.currentThreadId !== threadId ||
++      this.roleVerificationRevision !== revision
++    ) {
++      throw new Error("Codex role verification failed: thread or connection changed before resume");
++    }
++    this.resetRoleVerification();
++    return this.roleVerificationRevision;
++  }
++
++  private async verifyRoleBinding(
++    rawResponse: unknown,
++    evidence: {
++      client: CodexAppServerClient;
++      threadId: string;
++      roleModel: string | undefined;
++      roleRevision: number;
++    },
++  ): Promise<void> {
++    const binding = this.deps.roleBinding;
++    if (!binding) return;
++
++    const { client, threadId, roleModel, roleRevision } = evidence;
++    const response = toObjectRecord(rawResponse);
++    const resolvedModel = nonEmptyString(response?.model);
++    if (
++      toObjectRecord(response?.thread)?.id !== threadId ||
++      response?.modelProvider !== binding.modelProvider ||
++      !resolvedModel ||
++      resolvedModel !== roleModel
++    ) {
++      throw new Error(
++        "Codex role verification failed: effective thread, model or provider is unverified",
++      );
++    }
++
++    const entry = path.resolve(this.codexHome, "AGENTS.md");
++    const override = path.resolve(this.codexHome, "AGENTS.override.md");
++    const sources = response?.instructionSources;
++    const includesSource = (file: string) =>
++      Array.isArray(sources) &&
++      sources.some(
++        (source) =>
++          typeof source === "string" &&
++          path.isAbsolute(source) &&
++          path.relative(file, source) === "",
++      );
++    if (!includesSource(entry) || includesSource(override)) {
++      throw new Error("Codex role verification failed: expected role instructions were not loaded");
++    }
++
++    const hasOverride = await fs.lstat(override).then(
++      () => true,
++      (error: unknown) => (error as NodeJS.ErrnoException).code !== "ENOENT",
++    );
++    if (hasOverride) {
++      throw new Error("Codex role verification failed: a role instruction override may be present");
++    }
++    const roleMatches = await Promise.all([
++      fs.readFile(entry),
++      fs.readFile(binding.sourceFile),
++    ]).then(
++      ([active, expected]) => active.equals(expected),
++      () => false,
++    );
++    if (!roleMatches) {
++      throw new Error("Codex role verification failed: role instructions did not match");
++    }
++    if (
++      this.client !== client ||
++      this.roleVerificationRevision !== roleRevision ||
++      (this.currentThreadId !== null && this.currentThreadId !== threadId)
++    ) {
++      throw new Error(
++        "Codex role verification failed: thread or connection changed during verification",
++      );
++    }
++    this.verifiedRole = { client, threadId, resolvedModel };
++  }
++
++  private resetRoleVerification(): void {
++    if (!this.deps.roleBinding) return;
++    this.roleVerificationRevision++;
++    this.verifiedRole = null;
++    this.cachedRuntimeInfo = null;
++  }
++
++  private verifiedRoleFor(client: CodexAppServerClient | null, threadId: string | null) {
++    const role = this.verifiedRole;
++    return role && this.client === client && role.client === client && role.threadId === threadId
++      ? role
++      : null;
++  }
++
++  private requireVerifiedRole(
++    client: CodexAppServerClient,
++    threadId: string | null,
++    turnParams?: Record<string, unknown>,
++  ): void {
++    if (!this.deps.roleBinding) return;
++    const role = this.verifiedRoleFor(client, threadId);
++    if (
++      !role ||
++      this.connectionState !== "connected" ||
++      this.currentThreadId !== threadId ||
++      (this.config.model && this.config.model !== role.resolvedModel) ||
++      (turnParams && (turnParams.threadId !== threadId || turnParams.model !== role.resolvedModel))
++    ) {
++      throw new Error("Codex role verification failed: current thread has no startup evidence");
++    }
++  }
++
+   private buildThreadStartRequest(model: string): {
+     params: Record<string, unknown>;
+     approvalPolicy?: string;
+@@ -6620,6 +6819,13 @@ export class CodexAppServerAgentSession implements AgentSession {
+   private handleThreadStartedNotification(
+     parsed: Extract<ParsedCodexNotification, { kind: "thread_started" }>,
+   ): void {
++    if (
++      this.currentThreadId !== null &&
++      this.currentThreadId !== parsed.threadId &&
++      this.verifiedRole?.threadId !== parsed.threadId
++    ) {
++      this.resetRoleVerification();
++    }
+     this.currentThreadId = parsed.threadId;
+     this.background.changed(this.currentThreadId);
+     this.emitEvent({
+@@ -7765,9 +7971,20 @@ export class CodexAppServerAgentClient implements AgentClient {
+   ) {}
+ 
+   private sessionDeps(launchEnv: Record<string, string> | undefined): CodexAppServerAgentDeps {
++    const sourceFile = this.runtimeSettings?.env?.PASEO_CODEX_ROLE_SOURCE;
++    const modelProvider = this.runtimeSettings?.env?.PASEO_CODEX_ROLE_MODEL_PROVIDER;
++    if (sourceFile !== undefined || modelProvider !== undefined) {
++      if (!sourceFile || !path.isAbsolute(sourceFile) || !modelProvider?.trim()) {
++        throw new Error(
++          "Codex role verification requires an absolute role source and an expected model provider",
++        );
++      }
++    }
+     return {
+       ...this.deps,
+       codexHome: resolveCodexHomeDir(buildCodexAppServerEnv(this.runtimeSettings, launchEnv)),
++      roleBinding:
++        sourceFile && modelProvider ? { sourceFile, modelProvider } : this.deps.roleBinding,
+       customCodexConfig: this.customProviderConfig(),
+     };
+   }

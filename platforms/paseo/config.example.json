@@ -33,12 +33,20 @@
       "lens-codex": {
         "extends": "codex", "label": "LENS · CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/paseo/.luno/homes/lens-codex"}
+        "env": {
+          "CODEX_HOME": "/home/paseo/.luno/homes/lens-codex",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/LENS.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp"
+        }
       },
       "forge-codex": {
         "extends": "codex", "label": "FORGE · CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/paseo/.luno/homes/forge-codex"}
+        "env": {
+          "CODEX_HOME": "/home/paseo/.luno/homes/forge-codex",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/FORGE.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp"
+        }
       },
       "luno-gdr": {
         "extends": "codex", "label": "LUNO · GDR",
@@ -48,12 +56,20 @@
       "lens-gdr": {
         "extends": "codex", "label": "LENS · GDR",
         "command": ["codex", "-c", "model_provider=\"gdr\""],
-        "env": {"CODEX_HOME": "/home/paseo/.luno/homes/lens-gdr"}
+        "env": {
+          "CODEX_HOME": "/home/paseo/.luno/homes/lens-gdr",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/LENS.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr"
+        }
       },
       "forge-gdr": {
         "extends": "codex", "label": "FORGE · GDR",
         "command": ["codex", "-c", "model_provider=\"gdr\""],
-        "env": {"CODEX_HOME": "/home/paseo/.luno/homes/forge-gdr"}
+        "env": {
+          "CODEX_HOME": "/home/paseo/.luno/homes/forge-gdr",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/paseo/.luno/agent-sync/subagents/FORGE.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr"
+        }
       }
     }
   }
