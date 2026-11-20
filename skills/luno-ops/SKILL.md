@@ -12,11 +12,16 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 
 路径相对技能根，按总控的加载规则读取；跨项取并集，中途新增的先补读。
 
-- GitHub 仓库内容变更、git 提交或推送、PR/issue/release/Actions、GitHub 凭据的选用或轮换核查：`references/github.md`。改规则仓库 `LucaLin233/Agent-Sync`（公开；各端工作副本位置按 `luno-platform`〈运行端〉当前端〈工作副本〉）之前，另读 `luno-core/references/sync.md`〔分支 sync〕：它有自己的并发和门禁纪律，通用 git 流程会绕过它。
-- 服务的部署、配置、运行和排障（systemd/PM2/Docker/Compose、端口与暴露面、Nginx、DNS、TLS）：`references/service-runtime.md`〔分支 service-runtime〕。
-- 远端工作目录和文件落位、交付件、改配置或生产文件、备份、快照、恢复和清理：`references/service-runtime.md`〔分支 remote-files-backup〕。
-- SSH 连接和非交互命令定位：`references/service-runtime.md`〔分支 ssh〕。
-- 执行环境选址、脚本运行或测试、派发选址，选定沙箱后的调用与回传，以及本机测速：按 `luno-platform`〈运行端〉当前端〈执行环境〉读取它指定的本技能资源（`references/execution-environment.md`、`references/cfst.md`）及触发条件。
+脚本功能的编写、修复或重构另加载 `luno-authoring`，完整读取入口及命中的代码分支。Shell、lint、脚本运行、测试和执行环境按本技能的命中规则处理。
+
+- **GitHub / CI**
+  - GitHub 仓库内容变更、git 提交或推送、PR/issue/release/Actions（含 GitHub CI 状态查询）、GitHub 凭据的选用或轮换核查：`references/github.md`。改规则仓库 `LucaLin233/Agent-Sync`（公开；各端工作副本位置按 `luno-platform`〈运行端〉当前端〈工作副本〉）之前，另读 `luno-core/references/sync.md`〔分支 sync〕：它有自己的并发和门禁纪律，通用 git 流程会绕过它。
+- **服务与远端**
+  - 服务的部署、配置、运行和排障（systemd/PM2/Docker/Compose、端口与暴露面、Nginx、DNS、TLS）：`references/service-runtime.md`〔分支 service-runtime〕。
+  - 远端工作目录和文件落位、交付件、改配置或生产文件、备份、快照、恢复和清理：`references/service-runtime.md`〔分支 remote-files-backup〕。
+  - SSH 连接和非交互命令定位：`references/service-runtime.md`〔分支 ssh〕。
+- **执行环境**
+  - 执行环境选址、脚本运行或测试、派发选址，选定沙箱后的调用与回传，以及本机测速：按 `luno-platform`〈运行端〉当前端〈执行环境〉读取它指定的本技能资源（`references/execution-environment.md`、`references/cfst.md`）及触发条件。
 
 ## 方法
 
