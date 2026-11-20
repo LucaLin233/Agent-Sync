@@ -300,7 +300,7 @@ GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时�
 
 ## Paseo 多上游 Codex 入口
 
-`platforms/paseo/config.example.json` 保留两个既有 Claude Code 示例，另给出两个上游各三个 Codex 入口。实例只采用获准条目，不能将示例整表覆盖现有配置。六个 Codex 标签按助手命名；保留旧 `codex`、`lens-codex`、`forge-codex` ID 以维持现有引用，改名只改 label/Profile name。示例中模型与思考值是用户可编辑初值，不表示该上游已验证支持。
+`platforms/paseo/config.example.json` 保留两个既有 Claude Code 示例与内置 Codex 原通道，另给出两个上游各三个自定义 Codex 入口。实例只采用获准条目，不能将示例整表覆盖现有配置。六个自定义标签按助手命名；LUNO · CCHP 使用独立 `luno-cchp`（`extends: codex`），原 `luno-cchp` Profile 只将 provider 引用改到该新入口。内置 `codex` 不承载 LUNO 标签或 Profile 身份，示例仅撤其 label 覆盖，保留 command/env；生产恢复原名称也不得删除或重置原启动、鉴权及其他配置。旧 `lens-codex`、`forge-codex` 与 `lens`、`forge` Profile 引用保留。`luno-cchp` 在示例中列所有 custom 条目之首；界面也应排在全部自定义入口最前、LENS · CCHP 之前，但须按安装版支持的官方排序机制实施并回读，不能把 JSON 键顺序当成 UI 排序证明。两个 Claude 示例不因此在实例新增。示例中模型与思考值是用户可编辑初值，不表示该上游已验证支持。
 
 两个 LUNO 入口共用原有主 home，以启动参数选择各自 `model_provider`，不复制私人 GLOBAL。四个 Codex worker 使用互相独立的角色 home，`AGENTS.md` 只链接对应 `subagents/` 原文；新 home 的角色与技能链接以 `tools/sync-targets.json` 为准。每个 home 的普通 Codex 配置只声明其需要的模型上游及已授权非秘密配置，秘密仍由当次授权变量注入；示例不包含这些实例配置，不是单文件即装即用包。新增角色不修改终端 Codex 的原生角色注册、模型或思考值。
 

@@ -3,7 +3,7 @@
   "daemon": {
     "mcp": {"enabled": true, "injectIntoAgents": true},
     "agentProfiles": [
-      {"id": "luno-cchp", "name": "LUNO · CCHP", "provider": "codex", "model": "gpt-6.2-sol", "thinkingOptionId": "high", "notes": "{\"role\":\"LUNO\",\"upstream\":\"cchp\"}"},
+      {"id": "luno-cchp", "name": "LUNO · CCHP", "provider": "luno-cchp", "model": "gpt-6.2-sol", "thinkingOptionId": "high", "notes": "{\"role\":\"LUNO\",\"upstream\":\"cchp\"}"},
       {"id": "lens", "name": "LENS · CCHP", "provider": "lens-codex", "model": "gpt-6.2-astra", "thinkingOptionId": "medium", "notes": "{\"role\":\"LENS\",\"upstream\":\"cchp\"}"},
       {"id": "forge", "name": "FORGE · CCHP", "provider": "forge-codex", "model": "deepseek-flash", "thinkingOptionId": "high", "notes": "{\"role\":\"FORGE\",\"upstream\":\"cchp\"}"},
       {"id": "luno-gdr", "name": "LUNO · GDR", "provider": "luno-gdr", "model": "gpt-6.2-sol", "thinkingOptionId": "high", "notes": "{\"role\":\"LUNO\",\"upstream\":\"gdr\"}"},
@@ -13,6 +13,11 @@
   },
   "agents": {
     "providers": {
+      "luno-cchp": {
+        "extends": "codex", "label": "LUNO · CCHP",
+        "command": ["codex", "-c", "model_provider=\"cchp\""],
+        "env": {"CODEX_HOME": "/home/paseo/.codex"}
+      },
       "lens-claude": {
         "extends": "claude", "label": "LENS · Claude Code",
         "env": {"CLAUDE_CONFIG_DIR": "/home/paseo/.luno/homes/lens-claude"}
@@ -22,7 +27,6 @@
         "env": {"CLAUDE_CONFIG_DIR": "/home/paseo/.luno/homes/forge-claude"}
       },
       "codex": {
-        "label": "LUNO · CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
         "env": {"CODEX_HOME": "/home/paseo/.codex"}
       },
