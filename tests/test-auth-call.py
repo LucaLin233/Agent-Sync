@@ -1,5 +1,5 @@
 """Fixed authenticated reads: offline, synthetic only; opt-in case, not full."""
-import base64, hashlib, importlib.util, io, json, pathlib
+import importlib.util, io, json, pathlib
 import ssl, socket, subprocess, sys, unittest
 from unittest import mock
 P = pathlib.Path(__file__).resolve().parents[1] / 'tools/auth-call.py'
@@ -8,10 +8,7 @@ A = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(A)
 TOKEN = 'SYNTHETIC-only-marker'
 PR = dict(number=7, state='OPEN', merged=False, headRefOid='a' * 40, baseRefOid='b' * 40, isDraft=False, reviewDecision=None, mergeable='MERGEABLE', changedFiles=1)
-ENV = {'GH_TOKEN': TOKEN, 'LOBEHUB_SERVER': 'https://hub.test', 'LOBEHUB_CLI_API_KEY': TOKEN}
-
-def resource(b=b'abc', encoding='utf8'):
-    return dict(content=b.decode() if encoding == 'utf8' else base64.b64encode(b).decode(), encoding=encoding, fileHash=hashlib.sha256(b).hexdigest(), fileType='text/plain', path='a.md', size=len(b))
+ENV = {'GH_TOKEN': TOKEN}
 
 class Response:
     status = 200
@@ -43,8 +40,8 @@ class Opener:
 def wire(obj):
     return json.dumps(obj).encode()
 
-def rd(obj):
-    return wire({'result': {'data': {'json': obj}}})
+def payload(value=None):
+    return wire({'data': {'repository': {'pullRequest': PR if value is None else value}}})
 
 class Tests(unittest.TestCase):
 
@@ -53,88 +50,71 @@ class Tests(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def call(self, obj=None, raw=None, token=TOKEN):
-        op = Opener(raw if raw is not None else rd(resource() if obj is None else obj))
-        g = dict(ENV, LOBEHUB_CLI_API_KEY=token).get
-        return (A.skill_resource('skill', 'a.md', getter=g, opener=op), op)
+    def call(self, raw=None, token=TOKEN):
+        op = Opener(raw if raw is not None else payload())
+        g = dict(ENV, GH_TOKEN=token).get
+        return (A.pr_meta('owner/repo', 7, getter=g, opener=op), op)
 
     def reject(self, code, **kw):
         with self.assertRaises(A.ToolError) as c:
             self.call(**kw)
         self.assertEqual(str(c.exception), code)
 
-    def test_resources(self):
-        for b in (b'', b'abc', b'line\n'):
-            for enc in ('utf8', 'base64'):
-                obj = resource(b, enc)
-                out, op = self.call(obj)
-                self.assertEqual(out['resource'], obj)
-                self.assertEqual(op.calls[0].get_method(), 'GET')
-                req = op.calls[0]
-                self.assertEqual(req.get_header('X-api-key'), TOKEN)
-                target = A.urllib.parse.urlsplit(req.full_url)
-                self.assertEqual((target.scheme, target.netloc, target.path),
-                                 ('https', 'hub.test', '/trpc/lambda/agentSkills.readResource'))
-                query = A.urllib.parse.parse_qs(target.query, strict_parsing=True)
-                self.assertEqual(set(query), {"input"})
-                self.assertEqual(len(query["input"]), 1)
-                self.assertEqual(json.loads(query["input"][0]),
-                                 {"json": {"id": "skill", "path": "a.md"}})
-                self.assertNotIn(TOKEN, op.calls[0].full_url)
-
     def test_pr_query_and_credentials(self):
-        op = Opener(wire({'data': {'repository': {'pullRequest': PR}}}))
+        op = Opener(payload())
         names = []
 
         def get(n):
             names.append(n)
             return ENV[n]
         out = A.pr_meta('owner/repo', 7, getter=get, opener=op)
-        self.assertEqual(out['pullRequest'], PR)
+        self.assertEqual(out, {'action': 'pr-meta', 'repo': 'owner/repo', 'pullRequest': PR})
         self.assertEqual(names, ['GH_TOKEN'])
         req = op.calls[0]
         self.assertEqual(req.get_header("Authorization"), "bearer " + TOKEN)
         self.assertEqual(req.full_url, A.GRAPHQL_URL)
         self.assertEqual(req.get_method(), 'POST')
         self.assertEqual(json.loads(req.data)['variables'], dict(owner='owner', name='repo', number=7))
-
-    def test_fields_and_integrity(self):
-        for changes, code in [({'extra': 1}, 'bad_fields'), ({'size': True}, 'bad_fields'), ({'size': 4}, 'bad_integrity'), ({'fileHash': '0' * 64}, 'bad_integrity'), ({'path': 'other'}, 'bad_fields'), ({'encoding': 'raw'}, 'bad_fields'), ({'encoding': 'base64', 'content': '!'}, 'bad_fields')]:
-            with self.subTest(changes=changes):
-                self.reject(code, obj=dict(resource(), **changes))
+        self.assertEqual(set(json.loads(req.data)), {'query', 'variables'})
 
     def test_reflection(self):
-        for token in (TOKEN, 'quote"marker', 'back\\marker'):
-            for enc in ('utf8', 'base64'):
-                self.reject('reflected_credential', obj=resource(token.encode(), enc), token=token)
-            self.reject('reflected_credential', obj=dict(resource(), fileType=token), token=token)
+        # 包装字段（repo）回显凭据
         with self.assertRaisesRegex(A.ToolError, '^reflected_credential$'):
-            A.pr_meta('marker/repo', 7, getter=lambda n: 'marker', opener=Opener(wire({'data': {'repository': {'pullRequest': PR}}})))
+            A.pr_meta('marker/repo', 7, getter=lambda n: 'marker', opener=Opener(payload()))
+        # 嵌套字段（state）回显带引号或反斜杠的凭据
+        for token in (TOKEN, 'quote"marker', 'back\\marker'):
+            with self.assertRaisesRegex(A.ToolError, '^reflected_credential$'):
+                A.pr_meta('owner/repo', 7, getter=lambda n, token=token: token,
+                          opener=Opener(payload(dict(PR, state=token))))
+
+    def test_fields(self):
+        for changes in ({'extra': 1}, {'number': 8}, {'changedFiles': True}, {'merged': 'no'},
+                        {'headRefOid': 'a' * 39}, {'state': 1}, {'reviewDecision': 1}):
+            with self.subTest(changes=changes):
+                self.reject('bad_fields', raw=payload(dict(PR, **changes)))
 
     def test_shapes_and_bounds(self):
-        for raw, code in [(b'{', 'bad_json'), (b'{"result":0,"result":1}', 'bad_json'), (wire({'result': {'data': {'json': resource()}, 'extra': 1}}), 'bad_shape'), (b' ' * (A.MAX_BODY + 1), 'response_too_large')]:
+        for raw, code in [(b'{', 'bad_json'), (b'{"data":0,"data":1}', 'bad_json'),
+                          (wire({'data': {'repository': {'pullRequest': PR}}, 'extra': 1}), 'graphql_error'),
+                          (wire({'data': {'repository': {}}, 'extra': 1}), 'graphql_error'),
+                          (wire({'data': {'repository': {}}}), 'bad_shape'),
+                          (b' ' * (A.MAX_BODY + 1), 'response_too_large')]:
             with self.subTest(code=code):
                 self.reject(code, raw=raw)
-        raw = rd(resource())
+        raw = payload()
         self.call(raw=raw + b' ' * (A.MAX_BODY - len(raw)))
 
-    def test_targets_before_credentials(self):
+    def test_bad_targets_before_credentials(self):
 
         def no(n):
             raise AssertionError('credential read')
-        for sid, path in (('../bad', 'a.md'), ('ok', '../a'), ('ok', 'a//b'), ('ok', 'a b')):
-            with self.assertRaises(A.ToolError):
-                A.skill_resource(sid, path, getter=no)
-        for repo, num in (('bad', 7), ('o/r', True), ('o/r', 0)):
+        for repo, num in (('bad', 7), ('o/r', True), ('o/r', 0), ('a/b/c', 7)):
             with self.assertRaises(A.ToolError):
                 A.pr_meta(repo, num, getter=no)
 
     def test_missing_and_bad_credentials(self):
-        for token in ('a\r\nb', 'space key', 'badé'):
-            self.reject('bad_credential:LOBEHUB_CLI_API_KEY', token=token)
-        for server in ('http://h', 'https://u:p@h', 'https://h/api', 'https://h/?q=1'):
-            with self.assertRaisesRegex(A.ToolError, '^bad_server$'):
-                A.skill_resource('s', 'a.md', getter=dict(ENV, LOBEHUB_SERVER=server).get)
+        for token in ('a\r\nb', 'space key', 'bad\u00e9'):
+            self.reject('bad_credential:GH_TOKEN', token=token)
         with self.assertRaisesRegex(A.ToolError, '^missing_variable:GH_TOKEN$'):
             A.pr_meta('o/r', 7, getter=lambda n: None)
 
@@ -160,11 +140,6 @@ class Tests(unittest.TestCase):
         self.assertEqual(ctx.verify_mode, ssl.CERT_REQUIRED)
         self.assertIsNone(ctx.keylog_filename)
         self.assertIsNone(A._NoRedirect().redirect_request(None, None, 302, '', {}, 'https://evil'))
-
-    def test_pr_response_number(self):
-        op = Opener(wire({'data': {'repository': {'pullRequest': dict(PR, number=8)}}}))
-        with self.assertRaisesRegex(A.ToolError, '^bad_fields$'):
-            A.pr_meta('o/r', 7, getter=ENV.get, opener=op)
 
     def test_real_cli(self):
         env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': '/nonexistent', 'PYTHONNOUSERSITE': '1'}

@@ -35,7 +35,6 @@ REQUIRED_LOADS = (('prompt/LUNO.md', 'luno-core'),
 REQUIRED_READS = (
     ('skills/luno-platform/SKILL.md', '按当前端完整读取对应资源：'),
     ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
-    ('skills/luno-platform/SKILL.md', 'LobeHub 端（在 LobeHub 助理中运行）读 `references/runtime-lobehub.md`'),
     ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
     ('skills/luno-platform/SKILL.md', '在 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
                                       '另读 `references/runtime-paseo.md`'),
@@ -63,7 +62,7 @@ PLATFORM_WORD_ALLOWED = (
     'skills/luno-surge/references/official-sources.md',
 )
 # __OBLIGATIONS__
-OBLIGATIONS = (('skills/luno-platform/references/cchp.md', '## 管理入口'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-platform/references/lobehub.md', '## LobeHub入口'), ('skills/luno-platform/references/lobehub.md', '## 范围'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-core/references/review.md', '## 任务归属'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
+OBLIGATIONS = (('skills/luno-platform/references/cchp.md', '## 管理入口'), ('skills/luno-platform/SKILL.md', '## Minis执行能力'), ('skills/luno-core/references/review.md', '## 审查'), ('skills/luno-authoring/SKILL.md', '## 分支'), ('skills/luno-platform/references/minis.md', '## 资源与触发'), ('skills/luno-platform/references/minis.md', '## 上下文行为'), ('skills/luno-ops/SKILL.md', '## 资源与触发'), ('skills/luno-core/references/sync.md', '## 资源与触发'), ('skills/luno-core/SKILL.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 执行闭环'), ('skills/luno-core/references/execution.md', '## 授权与安全'), ('skills/luno-core/SKILL.md', '## 路由'), ('skills/luno-core/SKILL.md', '## 子代理角色与派发'), ('skills/luno-core/references/review.md', '## 任务归属'), ('skills/luno-platform/references/memory-common.md', '## 资源与触发'))
 
 class Guard:
     def __init__(self, root):
@@ -238,7 +237,7 @@ class Guard:
                 m=re.search(r'^name:\s*[\'\"]?([a-z0-9-]+)[\'\"]?\s*$',fm[1],re.M) if len(fm)==3 and fm[0]=='' else None
                 if m is None or m[1]!=name or Path(src).parent.name!=name:
                     self.problem('身份与技能源不一致')
-            for end in ('repo','minis','lobehub')+HOST_ENDS:
+            for end in ('repo','minis')+HOST_ENDS:
                 v=ends.get(end)
                 if not isinstance(v,dict) or not isinstance(v.get('present'),bool):
                     self.problem('身份端结构');continue
@@ -264,20 +263,6 @@ class Guard:
                         key=(end,endpoint)
                         if key in owners and owners[key]!=name: self.problem('Minis 身份多占')
                         owners[key]=name
-                if end=='lobehub':
-                    if v.get('kind')!=('skill' if kind=='skill' else 'agent'):
-                        self.problem('平台身份种类冲突')
-                    if kind=='skill':
-                        if not isinstance(v.get('fields'),str) or set(v['fields'].split(','))!={'content','name','description'}:
-                            self.problem('技能字段形态')
-                    elif v.get('field')!='systemRole':self.problem('Agent 字段形态')
-                    sid=v.get('id');prefix='skl_' if kind=='skill' else 'agt_'
-                    if not isinstance(sid,str) or not re.fullmatch(prefix+r'[A-Za-z0-9]+',sid):
-                        self.problem('平台身份形态');continue
-                    key=(end,sid)
-                    if key in owners and owners[key]!=name: self.problem('平台身份多占')
-                    owners[key]=name
-
     def host_identity(self, end, kind, name, value, owners):
         """宿主端使用完整文件的软链或生成文件；不复用平台字段型身份。"""
         renderer = None

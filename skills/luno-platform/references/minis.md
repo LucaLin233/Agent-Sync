@@ -6,7 +6,7 @@
 
 ## 范围
 
-Minis App 及其内置的 iSH 环境（Alpine/aarch64）：技能、子代理、模型与分组、SOUL、环境变量与挂载、`/var/minis/` 目录与备份，以及上下文卸载与压缩、会话结果截断、本机展示和调度等运行时行为。LobeHub 实例见 `luno-platform/references/lobehub.md`〔分支 lobehub〕。
+Minis App 及其内置的 iSH 环境（Alpine/aarch64）：技能、子代理、模型与分组、SOUL、环境变量与挂载、`/var/minis/` 目录与备份，以及上下文卸载与压缩、会话结果截断、本机展示和调度等运行时行为。
 
 ## 手册优先
 
@@ -60,7 +60,7 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 
 ## 记忆与生效真源
 
-- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`，日志仍各端自持。需每轮注入的偏好和约定可放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户明示修改；用户已指定 `/var/minis/memory/GLOBAL.md` 为整份单向同步至 LobeHub 私人载体和宿主端 `~/.luno/memory/GLOBAL.md` 的唯一真源，不分区、不反向回写或双向合并。目标独有修改或冲突停下交用户核对；私人载体与完整读取细则见 `references/lobehub-knowledge.md`〔分支 knowledge〕。秘密不得进入 GLOBAL；端专属事实标适用范围、日期和例外，偏好不等于已安装事实或操作授权。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。记忆边界见 `references/memory-common.md`〔分支 memory-common〕；Minis 注入窗口和容量仍按本端资源，不推定 LobeHub 自动加载同名文件。
+- `memory_write` 写入 `/var/minis/memory/YYYY-MM-DD.md`，日志仍各端自持。需每轮注入的偏好和约定可放 `GLOBAL.md`：它默认只读、由用户维护，AI 只按用户明示修改；用户已指定 `/var/minis/memory/GLOBAL.md` 为整份单向同步至宿主端 `~/.luno/memory/GLOBAL.md` 的唯一真源，不分区、不反向回写或双向合并。目标独有修改或冲突停下交用户核对；宿主端复制细则见 `luno-core/references/sync.md`〔分支 sync-host〕。秘密不得进入 GLOBAL；端专属事实标适用范围、日期和例外，偏好不等于已安装事实或操作授权。实际正文、副本和私有定位不进入公开仓库、候选仓库、稿件示例、日志或提交。记忆边界见 `references/memory-common.md`〔分支 memory-common〕；Minis 注入窗口和容量仍按本端资源。
 - **Minis 端规则的生效值**：技能正文 `/var/minis/skills/<name>/SKILL.md`，常驻提示词 `soul.body`（文件视图 `SOUL.md`）；发布源是已合并的 main。候选只在隔离的仓库副本里编辑，写生效端之前必须按 `luno-core/references/sync.md`〔分支 sync〕 的同步流程执行。
 
 ## 技能登记
@@ -80,7 +80,6 @@ Minis 自身的目录、挂载、CLI、`minis-config` 字段、报错、deeplink
 - **容器与部署**：Docker/Compose、镜像与多架构、Nginx、服务上线与迁移。
 - **仓库与工具链**：仓库 CI、测试、脚本实测、Node.js 和 onlyboxes 等运行环境。
 - **网络与隧道**：Cloudflare Tunnel/cloudflared、测速、链路诊断。
-- **LobeHub**：LobeHub 2.x 实例的部署、Agent 与模型、连接器、知识库。
 - **创作与素材**：文案、故事、音译、图标、矢量图等非技术产出。
 <!-- END minis-configuration -->
 

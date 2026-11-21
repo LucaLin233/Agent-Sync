@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
-"""Authenticated read-only calls: two fixed actions; see repository README.
+"""Authenticated read-only call: one fixed action; see repository README.
 
   pr-meta         GitHub GraphQL PR metadata (fixed query, typed variables)
-  skill-resource  LobeHub agentSkills.readResource (one path, fixed fields)
 
 No shell, arbitrary URL/query, proxy, redirect, TLS downgrade or key logging.
 """
 import argparse
-import base64
-import hashlib
 import json
 import os
 import re
 import ssl
 import sys
 import urllib.error
-import urllib.parse
 import urllib.request
 
 GRAPHQL_URL = "https://api.github.com/graphql"
-RESOURCE_SUFFIX = "/trpc/lambda/agentSkills.readResource"
 USER_AGENT = "agent-sync-auth-call/1"
 
 PR_QUERY = (
@@ -32,12 +27,8 @@ PR_FIELDS = (
     "number", "state", "merged", "headRefOid", "baseRefOid",
     "isDraft", "reviewDecision", "mergeable", "changedFiles",
 )
-RESOURCE_FIELDS = ("content", "encoding", "fileHash", "fileType", "path", "size")
 
 NAME_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
-SKILL_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
-REL_PATH_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/-]{0,255}\Z")
-HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 MAX_BODY = 2_000_000
 TIMEOUT = 20
@@ -139,15 +130,6 @@ def _no_reflection(obj, token):
             pending.extend(item)
 
 
-def _server(value):
-    parts = urllib.parse.urlsplit(value)
-    if (parts.scheme != "https" or not parts.hostname or parts.username
-            or parts.password or parts.query or parts.fragment
-            or parts.path not in ("", "/")):
-        raise ToolError("bad_server")
-    return value.rstrip("/")
-
-
 def pr_meta(repo, number, getter=None, opener=None):
     getter = _env_getter if getter is None else getter
     if not isinstance(repo, str) or repo.count("/") != 1:
@@ -199,79 +181,15 @@ def pr_meta(repo, number, getter=None, opener=None):
     return out
 
 
-def resource_bytes(data, expected_path=None):
-    """六字段资源校验并解码；不读取环境，不发请求。"""
-    if not isinstance(data, dict) or set(data) != set(RESOURCE_FIELDS):
-        raise ToolError("bad_fields")
-    if (not isinstance(data["path"], str)
-            or (expected_path is not None and data["path"] != expected_path)
-            or data["encoding"] not in ("utf8", "base64")
-            or not isinstance(data["content"], str)
-            or not isinstance(data["fileType"], str)
-            or isinstance(data["size"], bool) or not isinstance(data["size"], int)
-            or data["size"] < 0
-            or not isinstance(data["fileHash"], str) or not HEX64_RE.match(data["fileHash"])):
-        raise ToolError("bad_fields")
-    try:
-        blob = data["content"].encode("utf-8") if data["encoding"] == "utf8" \
-            else base64.b64decode(data["content"], validate=True)
-    except ValueError:
-        raise ToolError("bad_fields") from None
-    if len(blob) != data["size"] or hashlib.sha256(blob).hexdigest() != data["fileHash"]:
-        raise ToolError("bad_integrity")
-    return blob
-
-
-def skill_resource(skill_id, path, getter=None, opener=None):
-    getter = _env_getter if getter is None else getter
-    if not isinstance(skill_id, str) or not SKILL_ID_RE.match(skill_id):
-        raise ToolError("bad_skill_id")
-    if not isinstance(path, str) or not REL_PATH_RE.match(path) \
-            or ".." in path or "//" in path or path.endswith("/"):
-        raise ToolError("bad_path")
-    server = _server(_need(getter, "LOBEHUB_SERVER"))
-    token = _need(getter, "LOBEHUB_CLI_API_KEY")
-    payload = json.dumps({"json": {"id": skill_id, "path": path}}, separators=(",", ":"))
-    url = server + RESOURCE_SUFFIX + "?" + urllib.parse.urlencode({"input": payload})
-    doc = _fetch_json(opener or make_opener(), urllib.request.Request(
-        url,
-        method="GET",
-        headers={
-            "X-API-Key": token,
-            "Accept": "application/json",
-            "User-Agent": USER_AGENT,
-        },
-    ))
-    if not isinstance(doc, dict) or set(doc) != {"result"}:
-        raise ToolError("bad_shape")
-    try:
-        result = doc["result"]
-        if set(result) != {"data"} or set(result["data"]) != {"json"}:
-            raise ToolError("bad_shape")
-        data = result["data"]["json"]
-    except (KeyError, TypeError):
-        raise ToolError("bad_shape") from None
-    blob = resource_bytes(data, path)
-    if token.encode("utf-8") in blob:  # covers base64 content the leaf check cannot
-        raise ToolError("reflected_credential")
-    out = {"action": "skill-resource", "resource": data}
-    _no_reflection(out, token)  # final output object, not just the payload
-    return out
-
-
 def main(argv=None):
     parser = _Parser(prog="auth-call", add_help=True)
     sub = parser.add_subparsers(dest="action", required=True)
     pr = sub.add_parser("pr-meta")
     pr.add_argument("--repo", required=True)
     pr.add_argument("--number", required=True, type=int)
-    res = sub.add_parser("skill-resource")
-    res.add_argument("--id", required=True)
-    res.add_argument("--path", required=True)
     try:
         args = parser.parse_args(argv)
-        out = (pr_meta(args.repo, args.number) if args.action == "pr-meta"
-               else skill_resource(args.id, args.path))
+        out = pr_meta(args.repo, args.number)
     except ToolError as exc:
         code = str(exc)
     except Exception:

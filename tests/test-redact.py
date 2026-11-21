@@ -31,23 +31,20 @@ LONG_BLOB = M * 9 + '0123456789abcdef'                 # 40+ 字符不透明串
 JWT = 'eyJ' + M + 'abc.' + M + 'def.' + M + 'gh'
 SK_KEY = 'sk-' + M + '0123456789abcdef'
 
-OPS, HUB, MINIS = ROOT / 'skills/luno-ops', ROOT / 'skills/luno-platform', ROOT / 'skills/luno-platform'
+OPS, MINIS = ROOT / 'skills/luno-ops', ROOT / 'skills/luno-platform'
 TEMPLATE_FILES = {
-    'platform-entry': HUB / 'SKILL.md',
+    'platform-entry': MINIS / 'SKILL.md',
     'ops-entry': OPS / 'SKILL.md',
     'ops-runtime': OPS / 'references/service-runtime.md',
-    'hub-instance': HUB / 'references/lobehub-instance.md',
-    'hub-entry': HUB / 'references/lobehub.md',
     'minis-config': MINIS / 'references/minis.md',
     'sync-workflow': ROOT / 'skills/luno-core/references/sync.md',
 }
 TEMPLATE_BRANCHES = {
     OPS / 'references/service-runtime.md': 'service-runtime',
-    HUB / 'references/lobehub.md': 'lobehub',
     MINIS / 'references/minis.md': 'minis-configuration',
     ROOT / 'skills/luno-core/references/sync.md': 'sync-workflow',
 }
-OPS_RUNTIME, HUB_INSTANCE, HUB_ENTRY = (TEMPLATE_FILES[k] for k in ('ops-runtime', 'hub-instance', 'hub-entry'))
+OPS_RUNTIME = TEMPLATE_FILES['ops-runtime']
 FORBIDDEN = (
     ('env', re.compile(r'(?<![\w./-])env(?![\w-])')),
     ('printenv', re.compile(r'printenv')),
@@ -121,19 +118,15 @@ PLACEHOLDER = re.compile(r'^<[^>]+>$')
 DECL_CUES = {
     'env': ('声明的指定键',),
     'config': ('声明的指定键', '声明的字段路径'),
-    'db': ('人已确认的列白名单', '列名与类型元数据'),
-    'platform': ('按字段',),
     'compose': ('配置持有方已有的投影接口',),
 }
 # 只有这些声明语可贡献具体字段名；其余只声明占位符（往白名单小句塞具体列名仍判越范围）
 CONCRETE_CUES = dict(DECL_CUES, db=('列名与类型元数据',))
-DECL_CUE_HOME = {'ops-runtime': ('env', 'config'), 'hub-instance': ('db',), 'hub-entry': ('platform',)}
+DECL_CUE_HOME = {'ops-runtime': ('env', 'config')}
 CLS_PATTERNS = (
     ('compose', re.compile(r'^docker\s+compose\s+config\b')),
     ('env', re.compile(r'^docker\s+exec\b')),
     ('config', re.compile(r'^(?:awk\s+-F=|jq\b)')),
-    ('db', re.compile(r'^select\s', re.I)),
-    ('platform', re.compile(r'^(?:lh|minis-config)\s')),
 )
 
 
@@ -290,37 +283,6 @@ class ReadSideContractTest(unittest.TestCase):
         self.assert_rejected('config', "jq '.' <文件>", declared, '全量读取')
         self.assert_rejected('config', "jq '{port: .server.port, admin_key: .server.admin_key}' <文件>",
                              declared, '字段超出声明面')
-
-    def test_db_read_scope(self):
-        declared = declared_fields('db', snippets(read(HUB_INSTANCE)))
-        self.assertTrue(declared)
-        sql = self.snippet(HUB_INSTANCE, 'SELECT <列1>')
-        for token, value in (('<列1>', 'id'), ('<列2>', 'name'), ('<表>', 'providers'),
-                             ('<条件>', '1=1'), ('<n>', '10')):
-            sql = sql.replace(token, value)
-        db = sqlite3.connect(':memory:')
-        self.addCleanup(db.close)
-        db.execute('CREATE TABLE providers (id INTEGER, name TEXT, api_key TEXT)')
-        db.execute("INSERT INTO providers VALUES (1, 'kcne', ?)", (M + '-1',))
-        cursor = db.execute(sql)
-        self.assertEqual({'id', 'name'}, {d[0] for d in cursor.description})
-        self.assertNotIn(M, str(cursor.fetchall()))
-        self.assert_rejected('db', 'SELECT api_key FROM providers LIMIT 1', declared, '字段超出声明面')
-
-    def test_platform_read_scope(self):
-        declared = declared_fields('platform', snippets(read(HUB_ENTRY)))
-        cmd = self.snippet(HUB_ENTRY, '--json content,name,description')
-        self.assertEqual(declared, parse_fields('platform', cmd))
-        record = {'id': 'skl_1', 'content': '…', 'name': 'n', 'description': 'd',
-                  'raw': {'credentials': M + '-1'}, 'extra': M + '-2'}
-        out = json.dumps({k: record[k] for k in parse_fields('platform', cmd)})
-        self.assertEqual(declared, set(json.loads(out)))
-        self.assertNotIn(M, out)
-        self.assert_rejected('platform', 'lh skill view skl_1 --json content,name,description,raw',
-                             declared, '字段超出声明面')
-        self.assert_rejected('platform', 'minis-config get models --filter kcne', declared,
-                             '只缩小记录集，未做字段投影')
-        self.assert_rejected('platform', 'lh skill view skl_1 --json', declared, '全量读取')
 
 
 if __name__ == '__main__':
