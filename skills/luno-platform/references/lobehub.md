@@ -36,7 +36,7 @@
 
 ## 平台层
 
-- **读技能**：按字段只读回读技能正文和元数据，本地非秘密投影示例为 `lh skill view <id> --json content,name,description`；这三个字段是此读取的白名单，不授权读取其他字段。资源和细则见 `references/lobehub.md`〔分支 lobehub-skills〕。
+- **读技能**：按字段只读回读技能正文和元数据，白名单只有 `content`、`name`、`description` 三个字段，不授权读取其他字段；资源和细则见 `references/lobehub.md`〔分支 lobehub-skills〕。用命令按字段读取前，先核对当前实际读取链路把字段裁剪在哪一端：帮助或显示出的字段不足以证明源头投影，`lh skill view <id> --json content,name,description` 也只是可参考的写法；若当前链路只筛客户端输出，这段输出就不能充当源头投影。只授指定字段且无法确认返回前已裁剪时，改用已获准的源头窄读取（如限定列的只读查询）；没有合适的源头路径就停止这次读取。
 - **权限与渠道**：按当前版本、部署形态和对象作用域核对权限，不把通用 Workspace 角色表直接套到 CE，也不凭角色名推定 Skill 或连接器的编辑权；渠道的全局 Allowed Users 优先于 DM/Group 策略。
 - **功能缺失**：用户说某功能「没反应」，先看角色和 `FEATURE_FLAGS`（语法见 `self-hosting/advanced/feature-flags.mdx`），再怀疑实例层。
 

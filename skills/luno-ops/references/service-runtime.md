@@ -57,7 +57,7 @@
 <!-- BEGIN ssh -->
 # SSH 连接与非交互探测
 
-- **命令定位**：非交互 SSH 的 `PATH` 常缺 `/usr/local/bin` 和 mise 路径，所以 `command -v` 没命中不能说明没安装。用 `bash -lc '…'` 或直接读候选路径（如 `/root/.local/share/mise/installs/node/*/bin/lh`）；登录 shell 仍没命中时还要补核路径。fish 主机上的远端命令要显式用 `sh -c` 或 `bash -lc` 包裹，不在命令位置用 `$( )`。
+- **命令定位**：非交互 SSH 的 `PATH` 常缺 `/usr/local/bin` 和 mise 路径；服务器本机的非登录 Shell（脚本、`sh -c`、最小环境调用）也不保证加载登录配置，所以 `command -v` 没命中不能说明没安装。当前 PATH 不命中时，按该主机已有的 shell、运行时或已知安装路径按需复查：能确认登录 shell 可用时用它，如 `bash -lc '…'`，或直接查该主机已知安装路径下的候选文件，如 mise 的 `/root/.local/share/mise/installs/node/*/bin/<命令>`。若登录 Shell 仍未命中，且已有证据指向该主机的运行时或安装路径，继续核查该运行时或候选路径。按当前主机实际证据复查后仍未找到，报「当前环境未找到」，不据此推断目标机没有安装。fish 主机上的远端命令要显式用 `sh -c` 或 `bash -lc` 包裹，不在命令位置用 `$( )`。
 - **批量与串行**：同一主机、同一授权范围和阶段的只读步骤尽量合并成一次连接执行，分别捕获各步的退出码和 stderr；同一主机的写操作串行。
 - **连接参数**：非交互连接显式设置 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`；主机密钥未知或变更就停下，按可信来源核对指纹，不用 `no` 或 `accept-new` 绕过。自动化连接用 `-F none` 隔离本机的 SSH 配置（用前确认客户端支持），所需的主机和跳板参数在授权内显式给出；身份显式指定本次获准的私钥，并设 `IdentitiesOnly=yes`、`IdentityAgent=none`，不回退到默认私钥或 agent。
 - **超时与结果**：`ConnectTimeout` 只限制建连握手，`ServerAlive*` 不能当命令截止时间；总时限按任务另设，并给清理留余量。退出码 255 或本地超时不能证明远端没执行，要结合 stderr 和实际状态判断。
