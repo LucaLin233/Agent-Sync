@@ -486,15 +486,11 @@ def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None,
          codex_global_source="agents-md"):
     actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors,
                               codex_global_source=codex_global_source)
-    overrides = []
-    if "codex" in ends:
-        overrides.append((codex_home or home / ".codex") / "AGENTS.override.md")
-    if "paseo" in ends:
-        overrides.extend(home / (".luno/homes/" + role + "-codex/AGENTS.override.md")
-                         for role in ("lens", "forge"))
-    for path in overrides:
-        if tree.stat(path) is not None:
-            errors.append({"code": "agents_override_shadowing", "path": str(path)})
+    for action in actions:
+        if action["kind"] == "link" and action["path"].name == "AGENTS.md":
+            override = action["path"].with_name("AGENTS.override.md")
+            if tree.stat(override) is not None:
+                errors.append({"code": "agents_override_shadowing", "path": str(override)})
     for action in actions:
         action["state"] = state(action, tree)
         if action["state"] == "conflict":
