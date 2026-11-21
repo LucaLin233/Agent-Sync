@@ -42,10 +42,13 @@ HELP = """CCHP 会话复用工具：核对 provider key 的 session.reuse_enable
 
 环境变量：CCHP_GATEWAY_URL、CCHP_TOKEN
 
-推荐调用：
-  env -i PATH=/usr/local/bin:/usr/bin:/bin HOME="$HOME" CCHP_GATEWAY_URL="$CCHP_GATEWAY_URL" CCHP_TOKEN="$CCHP_TOKEN" python3 tools/cchp-session-reuse.py [模式]
+调用方式：
+  在仓库根目录按仓库相对路径运行：python3 tools/cchp-session-reuse.py [模式]
+  上列两项环境变量由受信父进程按名注入，并以显式白名单环境启动（只给 PATH、HOME
+  和这两项，不复制整份环境）；本工具只按名读取，不要把值写进命令行——任何形式的
+  命令参数都会进入 argv 和进程列表。
 
-约定：优先级十位为 1（priority//10 == 1）的 key 本级开启 session.reuse_enabled，
+约定：优先级十位为 1（priority//10 == 1，即 10–19）的 key 本级开启 session.reuse_enabled，
 其余移除本级覆盖、继承组织（关闭）；写入走 saveSystemConfig，须用户明确授权。"""
 
 
