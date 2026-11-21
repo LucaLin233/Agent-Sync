@@ -616,6 +616,10 @@ def _check_skill(entry, ctx):
             extras = sorted(set(files) - set(rels)) + sorted(set(dirs) - expected_dirs)
             for rel in extras:
                 rep.issue("package_set", rid, rel if _safe_rel(rel) else None)
+            for rel in sorted(rels):
+                if files.get(rel) != "file":
+                    code = "file_type" if rel in files or rel in dirs else "file_missing"
+                    rep.issue(code, rid, rel if _safe_rel(rel) else None)
         for rel, repo_path in rels.items():
             expect = ctx["blobs"].get(repo_path)
             mode = ctx["modes"].get(repo_path)
