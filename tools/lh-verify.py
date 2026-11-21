@@ -337,8 +337,6 @@ def _record(call, auth):
             or doc["action"] != "skill-resource":
         raise Reject("bad_shape")
     data = doc["resource"]
-    if not isinstance(data, dict) or set(data) != set(auth.RESOURCE_FIELDS):
-        raise Reject("bad_fields")
     try:
         blob = auth.resource_bytes(data)
     except auth.ToolError as exc:
@@ -364,8 +362,9 @@ def _compare(entry, registry, blobs, auth):
     try:
         skill_md = blobs[source]
         content = body.body_bytes(skill_md)
-        name = body.fm_get(skill_md, "name")
-        description = body.fm_get(skill_md, "description")
+        fields = body.fm_fields(skill_md)
+        name = fields.get("name", body.MISSING)
+        description = fields.get("description", body.MISSING)
     except body.ContractError:
         record["errors"].append("content_contract_error")
         return record
@@ -402,14 +401,8 @@ def _compare(entry, registry, blobs, auth):
         record["differences"].append("identifier")
 
     record["checked"].append("content")
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        record["errors"].append("content_contract_error")
-        record["checked"].remove("content")
-    else:
-        if proj["content"] != text:
-            record["differences"].append("content")
+    if proj["content"] != content.decode("utf-8"):
+        record["differences"].append("content")
 
     # 只为登记∩现场路径收记录；交集外的记录一律拒绝，其正文不读不比。
     required = expected & site
@@ -425,15 +418,14 @@ def _compare(entry, registry, blobs, auth):
         elif path not in required:
             record["errors"].append("extra_call")
         else:
-            calls.setdefault(path, []).append(call)
+            calls[path] = call  # _validate_call 已拒绝重复的 (id, path)
     for path in sorted(required):
         field = "resource:" + path
-        hits = calls.get(path, [])
-        if not hits:
+        if path not in calls:
             record["missingEvidence"].append(field)
             continue
         try:
-            state, payload = _record(hits[0], auth)
+            state, payload = _record(calls[path], auth)
         except Reject as exc:
             record["errors"].append(exc.code)
             continue

@@ -555,7 +555,7 @@ def delete_retired(action, tree):
     tree.unlink(path)
 
 
-def write_generated(action, tree):
+def write_generated(action, tree, identity=None):
     path = action["path"]
     parent = tree.directory(path.parent)
     temporary = staging_path(action)
@@ -566,6 +566,11 @@ def write_generated(action, tree):
             handle.write(action["content"])
             handle.flush()
             os.fsync(handle.fileno())
+        if identity is not None:
+            # 原生角色在改名之前从同一父 fd 重新核对身份。
+            info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            if [info.st_dev, info.st_ino, info.st_mode, info.st_uid] != identity or info.st_nlink != 1:
+                raise InstallError("native_role_changed", path)
         if action["state"] == "create":
             os.link(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
         else:
@@ -631,26 +636,6 @@ def native_role_identity(action, tree):
     return [[info.st_dev, info.st_ino, info.st_mode, info.st_uid], tree.read(path)]
 
 
-def write_native_role(action, tree, identity):
-    """原子写角色文件；改名之前再从同一父 fd 核身份，落后于并发写者即拒写。"""
-    path = action["path"]
-    parent = tree.directory(path.parent)
-    temporary = staging_path(action)
-    fd = os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
-    created = os.fstat(fd)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(action["content"])
-            handle.flush()
-            os.fsync(handle.fileno())
-        info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-        if [info.st_dev, info.st_ino, info.st_mode, info.st_uid] != identity or info.st_nlink != 1:
-            raise InstallError("native_role_changed", path)
-        os.replace(temporary.name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
-    finally:
-        discard_staging(temporary, parent, created)
-
-
 def apply(actions, tree):
     """按计划写入，返回本次实际执行过的项（state=create/update）；未执行的项不列入。"""
     done, current_states, verified = [], {}, {}
@@ -682,7 +667,7 @@ def apply(actions, tree):
             if native_role_identity(action, tree) != [identity, previous_bytes] or \
                     previous_bytes not in (action.get("prior"), action["content"]):
                 raise InstallError("native_role_changed", action["path"])
-            write_native_role(action, tree, identity)
+            write_generated(action, tree, identity)
         else:
             write_generated(action, tree)
         done.append(action)

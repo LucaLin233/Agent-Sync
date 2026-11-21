@@ -17,7 +17,7 @@ SCRIPT_DIR=Path(__file__).resolve().parent
 SOURCE=SCRIPT_DIR.parent/'skills'/'luno-surge'
 DEFAULT=Path("/var/minis/shared/release") / f"surge-skill-{datetime.now():%Y%m%d}.zip"
 OUTPUT=Path(sys.argv[1]).expanduser() if len(sys.argv)>1 else DEFAULT
-EXCLUDED_PARTS={"__pycache__",".git",".DS_Store","logs","log","secrets","secret","private",".ssh"}
+EXCLUDED_PARTS={"__pycache__",".git",".ds_store","logs","log","secrets","secret","private",".ssh"}
 EXCLUDED_SUFFIXES={".pyc",".pyo",".session",".sqlite",".db",".log",".key",".pem",".conf"}
 EXCLUDED_NAMES={"password","credentials",".env","secrets.env","secrets","id_rsa","id_ed25519","known_hosts",".netrc",".git-credentials"}
 FORBIDDEN_RESOURCES={"references/upstream-SKILL.md", "references/upstream-command-reference.md", "assets/logo.png"}
@@ -41,9 +41,9 @@ def included(path:Path,root:Path|None=None)->bool:
     """排除项按大小写归一比较。"""
     rel=path.relative_to(SOURCE if root is None else root)
     parts={p.lower() for p in rel.parts}
-    return not (parts&{p.lower() for p in EXCLUDED_PARTS}
-                or path.suffix.lower() in {s.lower() for s in EXCLUDED_SUFFIXES}
-                or path.name.lower() in {n.lower() for n in EXCLUDED_NAMES})
+    return not (parts&EXCLUDED_PARTS
+                or path.suffix.lower() in EXCLUDED_SUFFIXES
+                or path.name.lower() in EXCLUDED_NAMES)
 
 def digest(data:bytes)->str: return hashlib.sha256(data).hexdigest()
 
@@ -138,8 +138,6 @@ def publish(blob,output):
             os.fsync(handle.fileno())
         if tmp.read_bytes()!=blob:
             raise ReleaseError("Read-back mismatch before publishing")
-        if os.path.lexists(output):
-            raise ReleaseError(f"Output already exists: {output}")
         os.chmod(tmp,0o644)
         # 排他发布：link 在目标已存在时原子失败（不覆盖），比 replace 的“检查后覆盖”少一个竞争窗口。
         try:

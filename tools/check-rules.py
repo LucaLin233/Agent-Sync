@@ -70,13 +70,9 @@ class Guard:
         self.root = root.resolve()
         self.hard = []; self.incomplete = []; self.soft = []
 
-    def distribution(self):
+    def distribution(self, objects):
         """No source-fetch exceptions remain; normal resources must be present."""
-        try:
-            doc = json.loads((self.root / 'tools/sync-targets.json').read_text(encoding='utf-8'))
-        except (OSError, ValueError, TypeError):
-            return  # identities() reports an unreadable registry as incomplete.
-        for obj in doc.get('objects', []) if isinstance(doc, dict) and isinstance(doc.get('objects'), list) else []:
+        for obj in objects:
             if isinstance(obj, dict) and 'officialPackageResources' in obj:
                 self.problem('官方取件登记已退休')
         for rel in RETIRED_RESOURCES:
@@ -150,22 +146,18 @@ class Guard:
             for match in PLATFORM_WORD_RE.finditer(content):
                 self.problem('平台词超出适配层：%s:%d: %s' % (rel,line,match[0]))
 
-    def resources(self):
+    def resources(self, objects):
         """技能包资源清单的唯一真源：登记即部署与分发面，故从登记现读。"""
-        raw=self.read(REGISTRY)
-        try: doc=json.loads(raw) if raw is not None else None
-        except (ValueError,TypeError): doc=None
         out={}
-        if isinstance(doc,dict) and isinstance(doc.get('objects'),list):
-            for o in doc['objects']:
-                if not isinstance(o,dict) or o.get('type')!='skill': continue
-                src=o.get('source');res=o.get('resources')
-                if not isinstance(src,str) or not isinstance(res,list):
-                    self.problem('包资源登记结构'); continue
-                pkg=Path(src).parent
-                if any(not isinstance(r,str) or not r.startswith(pkg.as_posix()+'/') for r in res):
-                    self.problem('包资源不属于本包')
-                out[pkg.name]={r for r in res if isinstance(r,str)}
+        for o in objects:
+            if not isinstance(o,dict) or o.get('type')!='skill': continue
+            src=o.get('source');res=o.get('resources')
+            if not isinstance(src,str) or not isinstance(res,list):
+                self.problem('包资源登记结构'); continue
+            pkg=Path(src).parent
+            if any(not isinstance(r,str) or not r.startswith(pkg.as_posix()+'/') for r in res):
+                self.problem('包资源不属于本包')
+            out[pkg.name]={r for r in res if isinstance(r,str)}
         if not out: self.problem('资源登记不可用',incomplete=True); return None
         for entry in (self.root/'skills').glob('*/SKILL.md'):
             if entry.parent.name not in out: self.problem('技能源未登记')
@@ -214,14 +206,11 @@ class Guard:
                 p=self.path(r)
                 if p is not None and not p.is_file(): self.problem('登记的包资源缺失')
 
-    def identities(self):
-        raw=self.read('tools/sync-targets.json')
-        try: doc=json.loads(raw) if raw is not None else None
-        except (ValueError,TypeError): doc=None
-        if not isinstance(doc,dict) or not isinstance(doc.get('objects'),list) or not doc['objects']:
+    def identities(self, objects):
+        if not objects:
             self.problem('身份登记不可用',incomplete=True);return
         seen=set(); owners={}; sources=set()
-        for o in doc['objects']:
+        for o in objects:
             if not isinstance(o,dict): self.problem('身份登记结构');continue
             name=o.get('id');src=o.get('source');kind=o.get('type');ends=o.get('ends')
             if not isinstance(name,str) or not name or name in seen:
@@ -334,9 +323,17 @@ class Guard:
             if not any(x.strip() for x in lines[i:j]): self.problem('义务块为空')
 
     def run(self):
-        self.distribution()
-        bodies=self.sources();reg=self.resources();self.edges(bodies,reg)
-        self.identities();self.branches(bodies);self.obligations(bodies)
+        try:
+            doc = json.loads(self.read(REGISTRY))
+        except (ValueError, TypeError):
+            objects = []
+        else:
+            objects = doc.get('objects') if isinstance(doc, dict) else None
+            if not isinstance(objects, list):
+                objects = []
+            self.distribution(objects)
+        bodies=self.sources();reg=self.resources(objects);self.edges(bodies,reg)
+        self.identities(objects);self.branches(bodies);self.obligations(bodies)
         for k in self.hard: print('[结构错误] '+k)
         for k in self.incomplete: print('[检查不完整] '+k)
         for k in self.soft: print('[提示] '+k)

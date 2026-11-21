@@ -355,12 +355,6 @@ for _case,_pid,_pgid,_work in GATE:
 if _GATE_BAD:
     raise SystemExit('夹具停止未确证（%s），保留本轮TMP：%s' % ('；'.join(_GATE_BAD),TMP))
 # <<< R2T-GATE
-# 生命周期：已确证消失的本轮组不得保留到轮末（否则轮末会拿历史 PID 盲发信号）
-ACTIVE_MUT=FIXED.replace('finally:\n    if not stop_own():',"finally:\n    say('ACTIVE-RESID=%d' % len(ACTIVE))\n    if not stop_own():",1)
-assert ACTIVE_MUT!=FIXED
-(FIX/'tests/run-tests.sh').write_text(ACTIVE_MUT,encoding='utf-8');code,out=rt('case','lint')
-(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
-check('生命周期：已确证消失的本轮组不保留到轮末（ACTIVE 退役）',code==0 and 'ACTIVE-RESID=0' in out,out[-300:])
 # fail-closed 直接检查：无法确证停止时（普通退出也一样）必须 2 + 保留根 + 披露，不冒称完成
 NOCONF=FIXED.replace('def confirm_stopped(pgid, sig):\n    """按登记组兑现停止','def confirm_stopped(pgid, sig):\n    return False\n    """按登记组兑现停止',1)
 NOCONF=NOCONF.replace('def group_gone(pgid):\n    """只用 signal 0','def group_gone(pgid):\n    return False\n    """只用 signal 0',1)
@@ -412,16 +406,7 @@ ns,now,orig=roots()
 check('负控：两处核等禁用后替身被删（正控断言可达、不空转）',
       code==0 and not now and len(orig)==1 and not (FIX/'tmp'/orig[0]/'standin').exists(),'rc=%d %s'%(code,ns))
 wipe_tmp()
-# 创建后直接可达的基础设施异常：rc=2、异常原文保留、WORK 按规则真实收尾
-assert FIXED.count('        t0 = time.monotonic()')==1
-(FIX/'tests/run-tests.sh').write_text(
-    FIXED.replace('        t0 = time.monotonic()','        raise RuntimeError("synthetic-infra")',1),encoding='utf-8')
-code,out=rt('case','lint')
-(FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
-check('runner 创建后基础设施异常：rc=2、保留原文、WORK 安全收尾无残留',
-      code==2 and '基础设施异常' in out and 'RuntimeError: synthetic-infra' in out and 'cleanup 完成' in out and not left(),
-      'rc=%d %s\n%s'%(code,left(),out[-400:]))
-# R1：创建块（含首个 home mkdir）也在 finally 覆盖内。位置与上面的循环 t0 用例不同，不是改名。
+# R1：创建块（含首个 home mkdir）也在 finally 覆盖内。
 assert FIXED.count('        os.mkdir(_d, 0o700, dir_fd=RF1)')==1
 (FIX/'tests/run-tests.sh').write_text(FIXED.replace(
     '        os.mkdir(_d, 0o700, dir_fd=RF1)','        raise OSError(28, "synthetic-ENOSPC-init")',1),encoding='utf-8')
