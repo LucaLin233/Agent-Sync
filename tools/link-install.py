@@ -486,15 +486,11 @@ def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None,
          codex_global_source="agents-md"):
     actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors,
                               codex_global_source=codex_global_source)
-    overrides = []
-    if "codex" in ends:
-        overrides.append((codex_home or home / ".codex") / "AGENTS.override.md")
-    if "paseo" in ends:
-        overrides.extend(home / (".luno/homes/" + role + "-codex/AGENTS.override.md")
-                         for role in ("lens", "forge"))
-    for path in overrides:
-        if tree.stat(path) is not None:
-            errors.append({"code": "agents_override_shadowing", "path": str(path)})
+    for action in actions:
+        if action["kind"] == "link" and action["path"].name == "AGENTS.md":
+            override = action["path"].with_name("AGENTS.override.md")
+            if tree.stat(override) is not None:
+                errors.append({"code": "agents_override_shadowing", "path": str(override)})
     for action in actions:
         action["state"] = state(action, tree)
         if action["state"] == "conflict":
@@ -811,7 +807,7 @@ def main(argv=None):
                         help="仅 --ends codex：安装根内的 CODEX_HOME；技能采用 0.170.0 兼容根 skills")
     parser.add_argument("--previous", help="--apply 时清理此本地 Git 版本独有的受管入口；不删除目录或登录态")
     parser.add_argument("--codex-global-source", choices=CODEX_GLOBAL_SOURCES, default="agents-md",
-                        help="codex-main 的 GLOBAL 来源：agents-md 内嵌（默认）或 paseo-append-system-prompt")
+                        help="选中 Codex 时的 GLOBAL 来源：agents-md 内嵌（默认）或 paseo-append-system-prompt")
     parser.add_argument("--adoption-base", default="HEAD", help="只读准入的旧版 O；默认当前 HEAD")
     parser.add_argument("--adoption-blobs", help="只读准入绑定的旧、新安装器 blob：OLD,NEW（40 位十六进制）")
     modes = parser.add_mutually_exclusive_group()
@@ -831,8 +827,8 @@ def main(argv=None):
             raise InstallError("checkout_must_be_absolute", args.checkout)
         checkout, home = args.checkout.resolve(), args.home
         ends, codex_home = tuple(args.ends), args.codex_home
-        if args.codex_global_source != "agents-md" and ends != ("codex",):
-            raise InstallError("codex_global_source_requires_codex_only", home)
+        if args.codex_global_source != "agents-md" and "codex" not in ends:
+            raise InstallError("codex_global_source_requires_codex", home)
         if not home.is_absolute() or ".." in home.parts:
             raise InstallError("home_must_be_absolute", home)
         if codex_home is not None:

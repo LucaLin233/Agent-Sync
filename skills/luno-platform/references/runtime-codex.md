@@ -2,7 +2,7 @@
 
 本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
-本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式 opt-in `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 只等于 `prompt/LUNO.md` 原文，GLOBAL 由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；安装器不读写该配置，设置与生成文件须在同一受控窗口切换并回读。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
+本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。选中 Codex 并指定 `--codex-global-source paseo-append-system-prompt` 时，主会话的 `AGENTS.md` 只等于 `prompt/LUNO.md` 原文，GLOBAL 由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供。设置与生成文件的切换及回读按 `luno-core/references/sync.md`〔分支 sync-host〕。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
 
 ## 原生安装与技能发现
 
@@ -32,7 +32,7 @@ Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，
 
 主 LUNO 提示词可先按上述规则生成、离线回读；LENS、FORGE 原文随已合并受管检出的 `subagents/` 保留为可读资源，不因此启用角色或取得派发资格。没有可核的角色通道时，需要相应角色的任务仍按总控停止并报告，不用自述、会话内改名或通用子代理冒充。不得把已有提示词文件报告成角色调用成功。
 
-含 GLOBAL 的生成物用于所选 Codex 主会话的常驻入口。Paseo 角色家目录与 Codex 原生角色文件沿用各自登记的角色指令，不拼入 GLOBAL。原生子代理从父会话继承的指令按〈派发通道〉核对。
+含 GLOBAL 的生成物用于采用内嵌来源的 Codex 主会话。Paseo 角色家目录与 Codex 原生角色文件只保存各自登记的角色指令。Paseo 的 GLOBAL 注入见 `references/runtime-paseo.md`〈派发通道〉，原生子代理从父会话继承的指令按本资源〈派发通道〉核对。
 
 实际加载只在获准的真实 Codex 主会话新建场景中核验。原生 CLI 按实际运行用户和 `CODEX_HOME` 核入口，Paseo 按主会话实际 provider 的启动入口和家目录核入口。结合该新会话的实际 Codex 版本与工作目录，按上述官方指令发现规则核对用户级和适用的项目级指令链、`AGENTS.override.md`、指令优先级与截断。用该会话的启动或实际加载证据确认已离线回读的生成内容完整纳入有效指令。影响预期内容的遮蔽或截断据实报告。只看到文件判等或来源路径，或因其他原因无法确认有效加载范围时，报「实际加载未验证」。结论限于该新会话，旧线程是否重读单凭文件更新无法判定。只报核验状态，不展示私人正文。
 
