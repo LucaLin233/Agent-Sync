@@ -161,23 +161,23 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ### CCHP 本端层
 
-`references/cchp.md` 只保留本端认证/输出边界、组织写入约定、恢复及链路核验、带版本的实例经验；官方已覆盖的 CLI 说明、业务示例、输出、错误和分页不再维护中文副本。原 `cchp-source.md`、`cchp-workflow-org.md`、`cchp-workflow-providers.md`、`cchp-coverage-rules.md` 退役，历史取材证据可从 β 前 main 提交 `217ff083cf536cf9f946ffc9a233bc748dffc44b` 恢复。本端层保留历史精选改写的 MIT 版权通知及 `LICENSE.upstream.txt`，不因精简删除必要许可。本端层必需加载官方 cchp，不覆盖官方正文，官方凭据回退不适用于本端。
+`references/cchp.md` 保留公开查阅与实例操作的隔离、本端认证与输出边界、组织写入约定、恢复及链路核验、带版本的现场经验。产品功能和版本变化查官网文档及发布说明；本机命令、参数和内置契约查 CLI 帮助、版本及 schema，不维护中文副本。本端层必须完整读取官方入口，但不采用其凭据回退，也不以公开资料代替实例取证。原 `cchp-source.md`、`cchp-workflow-org.md`、`cchp-workflow-providers.md`、`cchp-coverage-rules.md` 已退役，历史取材见 β 前 main 提交 `217ff083cf536cf9f946ffc9a233bc748dffc44b`。本端层保留历史精选改写的 MIT 通知及 `LICENSE.upstream.txt`。
 
 ## cchp
 
-- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，固定采用提交 `d9da5760a8d2f6ce689c01b98b6c96540513045d`；2026-11-12 匿名 clone 核对默认分支 main HEAD 仍为该提交，未发生基线推进。
-- **取材范围**：上游 `skills/cchp/` 的全部 6 个文件，原字节落到本仓库 `skills/luno-platform/references/cchp-upstream/`，仅将入口文件名 SKILL.md 改为 ENTRY.md；不翻译、不合并、不改正文/frontmatter。额外把上游根 `LICENSE` 原字节加入 `skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt`，不复制 CLI 二进制、spec、docs、构建/安装脚本或其他目录。
-- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`；完整版权与 MIT 条款随包分发，根 LICENSE 不替代它。
-- **两端来源**：Minis 按审定仓库版本逐文件更新 `/var/minis/skills/luno-platform/`，并核 App 登记及新会话元数据；LobeHub 用 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform` 安装，正文按 body_contract 核验，安装裁掉的尾 LF 须补回。独立 cchp 的退役须按登记、仓库历史前态恢复口径和逐端回读要求核验；运行端 ID 和状态只在实际安装回读后更新，不在制稿阶段虚填。
-- **追新**：只从官方 GitHub 默认分支核 HEAD、逐文件末次提交、正文及 LICENSE diff；经授权采纳与审查后更新 vendored 字节和本登记，不自动跟版。安装 main URL 不能锁 SHA，部署前后核分支 HEAD 与已审提交，并逐文件回读，分支推进或内容不符就停止相关对象。
-- **原始文件 SHA-256**（2026-11-12，固定提交）：
+- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，采用正式发布 [`v0.2.0`](https://github.com/CCH-HQ/cchp-cli/releases/tag/v0.2.0)，标签解引用到提交 `71d8191ce40815a7639aecc27e95e7e5e95dedc0`。2026-11-21 公开核对：默认分支 HEAD `c529a988c2bca72fccca8fc27607fbccb101ec60` 含未发布的 `cchp update`，不采纳；`workflows.md` 在默认分支的末次提交同为 `71d8191ce40815a7639aecc27e95e7e5e95dedc0`。
+- **取材范围**：上游 `skills/cchp/` 全部 6 个文件原样收入 `skills/luno-platform/references/cchp-upstream/`，仅将 `SKILL.md` 改名为 `ENTRY.md`；不翻译、不合并、不改正文、frontmatter 或相对引用。上游根 `LICENSE` 原样收入该包的 `LICENSE.upstream.txt`；不复制二进制、spec、docs、构建或安装脚本。此版仅 `ENTRY.md` 与 `references/workflows.md` 字节变化，其余 4 个资源和 LICENSE 不变。
+- **许可**：MIT，`Copyright (c) 2026 the cchp contributors`；完整版权与 MIT 条款随包分发，仓库根 LICENSE 不替代它。
+- **落端核对**：按登记及同步规则核现场身份、历史前态与逐端回读。Minis 逐文件核验，并核适用的 App 登记和新会话元数据；LobeHub 安装源为 `https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform`，正文按 body_contract 核验，安装裁掉的尾 LF 须补回。该 URL 不能锁 SHA，部署前后核 HEAD 与已审提交并逐文件回读；分支推进或内容不符就停止相关对象。ID 和部署状态只按实际回读记录。
+- **追新**：用官方 GitHub 默认分支 HEAD、目标文件末次提交、内容哈希及正文与 LICENSE 原字节差分发现变化。采纳时固定获准正式发行标签解引用的提交，审定后更新字节和登记，不自动跟 main；不从已退役的独立 cchp 入口更新。
+- **原始文件 SHA-256**（2026-11-21，固定发行提交）：
   - `skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt`：`481c79a8e1493001832cfb2e417e2a698f7f0b0d3b3351a10fa0750e53046cb2`
-  - `skills/luno-platform/references/cchp-upstream/ENTRY.md`：`b5be23e8377bb71a275245c025047fbf9ab4e3435793e8641f3005d67a7149b6`
+  - `skills/luno-platform/references/cchp-upstream/ENTRY.md`：`8ac1321108a1aa5944922414c2bb02a318c9364c58b545cf29410c8932b1bee0`
   - `skills/luno-platform/references/cchp-upstream/references/auth.md`：`0db41d2c9142d8b63e30a0933d257233634e4bd5c0ddcf94356fdfea514af053`
   - `skills/luno-platform/references/cchp-upstream/references/errors.md`：`8cca46803de493de7ac75f24be098d7a5e236900a786474529627da68c9a60dc`
   - `skills/luno-platform/references/cchp-upstream/references/output-contract.md`：`10bf216fa42ff8ed87aa137898039c72328af10b20279e5f90ea1d0fb0c8d296`
   - `skills/luno-platform/references/cchp-upstream/references/pagination.md`：`a49814cd2246eeb69c8f85df2e4b3c37b2a39b7ca833d08892bdc80687760229`
-  - `skills/luno-platform/references/cchp-upstream/references/workflows.md`：`30a15014d3dfdd53f40bc8380f2c101d2cddb53ef0ae925c9d3b86a2cf942e4c`
+  - `skills/luno-platform/references/cchp-upstream/references/workflows.md`：`6d8b60137febe77566704505fe9b4e205d7e696477288036018173525bed8976`
 
 ## luno-authoring
 
@@ -241,6 +241,6 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## 本次两项独立入口合并
 
-固定主基线 86b6f088835c8a25f2c4843bc032f4bca301f76b。独立 cchp、luno-memory 退役，能力进入 luno-platform；不卸载 CLI，不迁移各端记忆数据。CCHP 原上游 skills/cchp 六文件及根 MIT 按原字节承接到 skills/luno-platform/references/cchp-upstream/（SKILL.md 仅改文件名为 ENTRY.md）；原 frontmatter、相对引用、固定上游和上列内容哈希保持不变。上文旧独立安装路径及链接是迁移前历史，不是新部署入口；新安装只用 skills/luno-platform 子目录，旧身份见本次 PR 的真实前态记录。
+固定主基线 86b6f088835c8a25f2c4843bc032f4bca301f76b。独立 cchp、luno-memory 退役，能力进入 luno-platform；不卸载 CLI，不迁移各端记忆数据。CCHP 原上游 skills/cchp 六文件及根 MIT 按原字节承接到 skills/luno-platform/references/cchp-upstream/（SKILL.md 仅改文件名为 ENTRY.md）；迁移时未改 frontmatter、相对引用、当时的固定提交或内容哈希；旧登记见 git 历史，现行版本见〈cchp〉。上文旧独立安装路径及链接是迁移前历史，不是新部署入口；新安装只用 skills/luno-platform 子目录，旧身份见本次 PR 的真实前态记录。
 
-memory-common.md 承接跨端共同义务；minis-memory.md 承接 Minis 文件入口、容量/注入与下次写入复核；LobeHub 平台记忆仍保留在既有 lobehub-knowledge.md 的 lobehub-memory 分支，知识库剩余内容在 knowledge 分支逐字保留，仅补分支定界和必要引用。共同义务未移入 Minis 或 LobeHub 专属分支。原 luno-memory 的 Matt Pocock MIT 全文移到平台根并继续随包分发。更新 CCHP 时人工核 GitHub 默认分支 HEAD、逐文件末次提交、原始字节 diff 与 LICENSE，不自动覆盖本端限制；不再从独立 cchp 安装入口直接更新。
+memory-common.md 承接跨端共同义务；minis-memory.md 承接 Minis 文件入口、容量/注入与下次写入复核；LobeHub 平台记忆仍保留在既有 lobehub-knowledge.md 的 lobehub-memory 分支，知识库剩余内容在 knowledge 分支逐字保留，仅补分支定界和必要引用。共同义务未移入 Minis 或 LobeHub 专属分支。原 luno-memory 的 Matt Pocock MIT 全文移到平台根并继续随包分发。CCHP 后续更新按〈cchp〉的追新与落端核对要求执行。

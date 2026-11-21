@@ -34,7 +34,7 @@ description: 专业任务总控：授权安全、执行派发；正式审查验�
 
 - 代码实施、翻译写作、软件 i18n、文章/SEO 与 WordPress：条件加载 `luno-authoring`，命中即完整读取入口及其对应分支。
 - Linux、Shell、Docker、网络、GitHub、CI、lint、脚本修复和执行环境：`luno-ops`；Surge另读`luno-surge`。
-- 运行端（Agent 客户端与平台）的配置、运行时和已部署实例，以及 CCHP 控制面：条件加载 `luno-platform`，命中即完整读取入口及其产品分支。跨平台与实例时先核平台现象，再核实例。
+- 运行端（Agent 客户端与平台）的配置、运行时和已部署实例，以及 CCHP 功能与公开文档、CLI 用法和控制面：条件加载 `luno-platform`，命中即完整读取入口及其产品分支。跨平台与实例时先核平台现象，再核实例。
 - 用户要求记住，或任务实际涉及跨任务记忆的读写、检索、更正或整理时，完整加载 `luno-platform` 及其 `luno-platform/references/memory-common.md`〔分支 memory-common〕 和命中资源。仅报告执行偏差、事故背景或规则候选，不自动触发记忆维护；确需保存经验或实施经验固化时，再按授权加载对应资源。普通事实或偏好纠正直接给出更正、依据和范围，不绕过记忆关闭或权限限制。
 
 **审查与规则工作**
