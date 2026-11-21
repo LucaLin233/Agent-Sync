@@ -157,7 +157,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **自有接口说明补充**（2026-11-17 源码核对）：`@lobehub/cli@0.0.95`，依据 npm gitHead 固定的 [`apps/cli/src/commands/goal/objective.ts`](https://github.com/lobehub/lobehub/blob/1a49740448ebdc0c947dfe7715a3fcd459a372fa/apps/cli/src/commands/goal/objective.ts) 第 229–265、346–399 行，自编 `goal evaluate` 的执行、环境、输出与回写边界说明；未行为实测，不新增吸收件。
 
-**自有接口说明补充**（2026-11-21 源码核对）：`@lobehub/cli@0.0.157` 的 npm gitHead 为 [`lobehub/lobehub@579099b1849c09091c3db4b17a60fbb891bb8014`](https://github.com/lobehub/lobehub/tree/579099b1849c09091c3db4b17a60fbb891bb8014/apps/cli/src/commands)。取证路径：`apps/cli/src/commands/topic/lifecycle.ts`、`apps/cli/src/commands/work.ts`、`apps/cli/src/commands/artboardComments.ts`、`apps/cli/src/commands/artboardOps.ts`、`apps/cli/src/commands/skill.ts`；对应正文为 `topic`、`work`、`artboard` 与 `skill install` 的副作用说明，自编，未行为实测，不新增吸收件。版本号只作本次静态核对的历史证据出处，不表示最低支持或固定版本。
+**自有接口说明补充**（2026-11-21 源码核对）：`@lobehub/cli@0.0.157` 的 npm gitHead 为 [`lobehub/lobehub@579099b1849c09091c3db4b17a60fbb891bb8014`](https://github.com/lobehub/lobehub/tree/579099b1849c09091c3db4b17a60fbb891bb8014/apps/cli/src/commands)。取证路径：`apps/cli/src/commands/topic/lifecycle.ts`、`apps/cli/src/commands/work.ts`、`apps/cli/src/commands/artboardComments.ts`、`apps/cli/src/commands/artboardOps.ts`、`apps/cli/src/commands/skill.ts`、`packages/database/src/models/work/agentWork.ts`（L270–317、L420–439）、`apps/server/src/services/artboard/index.ts`（L264–282）；对应正文为 `topic`、`work`、`artboard` 与 `skill install` 的副作用说明，自编，未行为实测，不新增吸收件。版本号只作本次静态核对的历史证据出处，不表示最低支持或固定版本。
 
 ### CCHP 本端层
 
