@@ -26,7 +26,7 @@ description: 当前运行端（Minis、LobeHub、宿主端 Codex 及 paseo）的
 
 - Minis 配置或运行时任务，完整读 `references/minis.md`〔分支 minis〕。
 - 已部署 LobeHub 2.x CE 的平台或实例任务，完整读 `references/lobehub.md`〔分支 lobehub〕。
-- CCHP 控制面完整读 `references/cchp.md`。本端入口的必读指针指向同层 `cchp-upstream/` 的官方原文。
+- CCHP 功能、公开文档、CLI 用法或控制面任务，完整读 `references/cchp.md`。仅查公开资料不走管理面。
 
 跨产品取并集。
 
