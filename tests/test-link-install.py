@@ -13,8 +13,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools/link-install.py"
 SPEC = importlib.util.spec_from_file_location("link_install", TOOL)
@@ -27,7 +25,7 @@ class InstallTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="link-install-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
-        self.home = self.root / "home/paseo"
+        self.home = self.root / "home/example"
         self.home.mkdir(parents=True)
         self.checkout = self.root / "checkout with space"
         self.checkout.mkdir()
@@ -311,17 +309,6 @@ module.main(sys.argv[2:])
         self.assertEqual(self.call("--preflight", new)[0], 2)
         self.assertEqual(self.git("rev-parse", "HEAD"), old)
         self.assertEqual(self.snapshot(), before)
-
-    def test_compose_build_context_excludes_env_credentials_and_workspace(self):
-        compose = yaml.safe_load((ROOT / "platforms/paseo/compose.example.yaml").read_text())
-        self.assertEqual(set(compose["services"]), {"paseo"})
-        service = compose["services"]["paseo"]
-        self.assertEqual(service["build"], {"context": "./build", "dockerfile": "Dockerfile"})
-        self.assertEqual(service["env_file"], ["./paseo.env"])
-        self.assertEqual(service["ports"], ["127.0.0.1:6767:6767"])
-        self.assertEqual(service["volumes"], ["./paseo-home:/home/paseo", "./workspace:/workspace"])
-        self.assertFalse(service.get("privileged", False))
-        self.assertNotEqual(service.get("network_mode"), "host")
 
     def test_parent_symlink_cannot_redirect_installer_writes(self):
         outside = self.root / "outside"
@@ -775,15 +762,63 @@ module.main(sys.argv[2:])
         self.assertNotIn("listen", config["daemon"])
         self.assertIs(config["daemon"]["mcp"]["injectIntoAgents"], True)
         self.assertEqual(self.call("--apply")[0], 0)
-        for role in ("lens", "forge"):
-            for provider, variable, entry in (("codex", "CODEX_HOME", "AGENTS.md"),):
-                key = role + "-" + provider
-                fragment = config["agents"]["providers"][key]
-                self.assertEqual(fragment["extends"], provider)
-                relative = fragment["env"][variable].removeprefix("/home/paseo/")
-                self.assertEqual(relative, ".luno/homes/" + key)
-                self.assertEqual((self.home / relative / entry).read_bytes(),
-                                 (self.checkout / f"subagents/{role.upper()}.md").read_bytes())
+        registration = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        registered = {obj["id"]: obj["ends"]["paseo"]["paths"] for obj in registration["objects"]
+                      if obj["type"] == "subagent" and obj["ends"]["paseo"].get("present")}
+        providers = config["agents"]["providers"]
+        # 四个 worker 由示例自身声明：role 取自角色源文件名，上游取自预期生效的 model_provider。
+        workers = {key: fragment for key, fragment in providers.items()
+                   if "PASEO_CODEX_ROLE_SOURCE" in fragment.get("env", {})}
+        self.assertEqual(len(workers), 4, sorted(workers))
+        seen = set()
+        for key, fragment in workers.items():
+            env = fragment["env"]
+            role = Path(env["PASEO_CODEX_ROLE_SOURCE"]).stem
+            upstream = env["PASEO_CODEX_ROLE_MODEL_PROVIDER"]
+            self.assertEqual(fragment["extends"], "codex")
+            self.assertIn('model_provider="%s"' % upstream, fragment["command"])
+            if upstream == "cchp":
+                self.assertIn("agents.enabled=false", fragment["command"])
+                self.assertIn("features.multi_agent_v2=false", fragment["command"])
+            self.assertEqual(env["CODEX_HOME"], "/home/example/.luno/homes/" + key)
+            self.assertEqual(env["PASEO_CODEX_ROLE_SOURCE"],
+                             "/home/example/.luno/agent-sync/subagents/" + role + ".md")
+            self.assertTrue((self.checkout / "subagents" / (role + ".md")).is_file())
+            self.assertIn("~/.luno/homes/" + key + "/AGENTS.md", registered["subagents/" + role + ".md"])
+            self.assertEqual((self.home / ".luno/homes" / key / "AGENTS.md").read_bytes(),
+                             (self.checkout / "subagents" / (role + ".md")).read_bytes())
+            seen.add((role, upstream))
+        self.assertEqual(seen, {("LENS", "cchp"), ("FORGE", "cchp"), ("LENS", "gdr"), ("FORGE", "gdr")})
+        profiles = {entry["provider"]: entry for entry in config["daemon"]["agentProfiles"]}
+        for key in workers:
+            role = Path(workers[key]["env"]["PASEO_CODEX_ROLE_SOURCE"]).stem
+            self.assertEqual(json.loads(profiles[key]["notes"])["role"], role)
+
+    def test_paseo_select_runs_real_command_on_worktree_diff(self):
+        tests = self.checkout / "tests"
+        tests.mkdir()
+        runner = (ROOT / "tests/run-tests.sh").read_text()
+        start = runner.index("CASES='\n")
+        end = runner.index("\n'\n", start) + 3
+        rows = "check-rules.py|smoke|echo smoke:ran|1\ntest-link-install.py|host|echo host:ran|0\n"
+        (tests / "run-tests.sh").write_text(runner[:start] + "CASES='\n" + rows + "'\n" + runner[end:])
+        shutil.copyfile(ROOT / "tests/test_paths.py", tests / "test_paths.py")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        command = json.loads((ROOT / "paseo.json").read_text())["scripts"]["select"]["command"]
+
+        def ran():
+            proc = subprocess.run(["bash", "-c", command], cwd=self.checkout, env=self.env,
+                                  capture_output=True, text=True, check=False, timeout=60)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            return {name for name, marker in (("smoke", "smoke:ran"), ("host", "host:ran"))
+                    if marker in proc.stdout}
+
+        self.assertEqual(ran(), {"smoke"})
+        link = self.checkout / "tools/link-install.py"
+        link.write_text(link.read_text() + "\n# worktree edit\n")
+        self.assertEqual(ran(), {"smoke", "host"})
+        self.git("add", "tools/link-install.py")
+        self.assertEqual(ran(), {"smoke", "host"})
 
 
 class NativeRoleTest(unittest.TestCase):
@@ -793,7 +828,7 @@ class NativeRoleTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="native-role-test-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
-        self.home = self.root / "home/paseo"
+        self.home = self.root / "home/example"
         self.codex = self.home / ".codex"
         (self.codex / "roles").mkdir(parents=True)
         memory = self.home / ".luno/memory"
