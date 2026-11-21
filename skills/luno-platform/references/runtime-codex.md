@@ -2,13 +2,13 @@
 
 本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；Paseo 派发与接续按 `luno-platform`〈运行端〉读对应分支。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
-本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式 opt-in `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 只等于 `prompt/LUNO.md` 原文，GLOBAL 由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；安装器不读写该配置，设置与生成文件须在同一受控窗口切换并回读。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
+本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式 opt-in `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 只等于 `prompt/LUNO.md` 原文，GLOBAL 由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；安装器不读写该配置，设置与生成文件须在同一受控窗口切换并回读。该来源是 daemon 范围，覆盖同一 daemon 启动的所有 agent（LUNO、LENS、FORGE 及其他），不做 provider 级过滤；授权、切换、回读及全部接收端的新会话验收按 `luno-core/references/sync.md`〔分支 sync-host〕。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；原生 CLI 不经该 daemon，不直接获得它。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
 
 ## 原生安装与技能发现
 
 Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，另保留已弃用的 `$CODEX_HOME/skills` 兼容根；设置 CODEX_HOME 不会把前者一起搬走。当前版本源码支持用户技能目录软链。原生安装须先选定并核实实际加载入口，不能只按安装器输出推定；其他版本或配置变化须重核。
 
-安装器默认处理 Compose 的 `codex` 和 `paseo` 两端。只选 Codex 时用 `--ends codex`；`--home` 指定受管安装根，不能冒充 Codex 的 HOME。显式指定 `--codex-home` 时，仅在 Codex 单端模式下，把登记的 Codex 全局指令和用户技能入口重定位到该目录的 `AGENTS.md`、`skills/<技能名>`，采用上述 0.170.0 兼容根；该目录须位于安装根内。此模式不改 HOME、不建根外链接、不安装或迁移 paseo、角色家目录、会话、登录态、秘密、审批或沙箱配置。兼容根已弃用，不承诺未来版本；需要改 HOME 或采用其他根时另定明确方案，不自动改公共入口。
+安装器默认处理 `codex` 和 `paseo` 两端。只选 Codex 时用 `--ends codex`；`--home` 指定受管安装根，不能冒充 Codex 的 HOME。显式指定 `--codex-home` 时，仅在 Codex 单端模式下，把登记的 Codex 全局指令和用户技能入口重定位到该目录的 `AGENTS.md`、`skills/<技能名>`，采用上述 0.170.0 兼容根；该目录须位于安装根内。此模式不改 HOME、不建根外链接、不安装或迁移 paseo、角色家目录、会话、登录态、秘密、审批或沙箱配置。兼容根已弃用，不承诺未来版本；需要改 HOME 或采用其他根时另定明确方案，不自动改公共入口。
 
 官方依据（2026-11-19 核对）：[全局指令发现](https://learn.chatgpt.com/docs/agent-configuration/agents-md)；[0.170.0 技能根源码](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/host_roots.rs)；[同版软链策略](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/ext/skills/src/loader/host.rs)。
 

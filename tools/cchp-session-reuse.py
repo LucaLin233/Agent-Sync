@@ -15,6 +15,10 @@
 判定三类：一致；需写（本级覆盖与期望不符，本工具可改）；需人工（本级已符合但生效值
 不符，例如上级开启或锁定，本工具写入无效）。有需人工项时退出码 1。
 
+失败只输出固定诊断类别和整数退出码，不转发子进程 stderr 或服务 error.message 原文。
+读调用遇到非零退出码一律失败，即使 JSON 的 ok=true；写调用遇到非零、坏 JSON 或失败包
+时先回读实际状态，达到期望才继续，否则以退出码 3 停止。dry-run 的非零同样是失败。
+
 列表只取一页（--limit 100）：partial/preparing 为 true 或仍有 nextCursor 时报错退出，
 不在不完整列表上读写；已撤销（revoked_at 非空或 status=revoked）的 key 跳过并计数。
 
@@ -26,6 +30,8 @@ import json
 import os
 import subprocess
 import sys
+import contextlib
+import io
 
 KEY = "session.reuse_enabled"
 GROUP_TENS = 1
@@ -52,15 +58,18 @@ HELP = """CCHP 会话复用工具：核对 provider key 的 session.reuse_enable
 其余移除本级覆盖、继承组织（关闭）；写入走 saveSystemConfig，须用户明确授权。"""
 
 
-def die(msg, code=2):
-    print("错误：" + msg, file=sys.stderr)
+def diag(category, code, detail=""):
+    message = "错误[%s] 退出码=%d" % (category, code)
+    if detail:
+        message += " " + detail
+    print(message, file=sys.stderr)
     sys.exit(code)
 
 
 def make_env():
     missing = [n for n in ("CCHP_GATEWAY_URL", "CCHP_TOKEN") if not os.environ.get(n)]
     if missing:
-        die("缺少环境变量 " + "、".join(missing))
+        diag("missing_env", 2, "缺少=" + ",".join(missing))
     return {
         "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/root"),
@@ -70,25 +79,35 @@ def make_env():
     }
 
 
-def cchp(args, body=None):
-    """调用 cchp，返回 (结果对象或 None, 退出码, stderr 首行)；非 JSON 时对象为 None。"""
-    p = subprocess.run(["cchp"] + args, input=body, capture_output=True, text=True, env=ENV)
-    first = (p.stderr.strip().splitlines() or [""])[0]
+def cchp(args, body=None, run=subprocess.run):
+    """调用 cchp，只返回 (结果对象或 None, 退出码)；不读取或转发 stderr。"""
     try:
-        return json.loads(p.stdout), p.returncode, first
+        p = run(["cchp"] + args, input=body, capture_output=True, text=True, env=ENV)
+    except OSError:
+        diag("command_error", 3)
+    try:
+        return json.loads(p.stdout), p.returncode
     except ValueError:
-        return None, p.returncode, first
+        return None, p.returncode
 
 
-def api(args, body=None):
+def result_error(obj, rc):
+    """把一次调用归入固定类别；先看退出码，非零时即使 ok=true 也失败。"""
+    if not isinstance(rc, int) or rc != 0:
+        return "command_failed"
+    if obj is None:
+        return "output_not_json"
+    if not isinstance(obj, dict) or obj.get("ok") is not True:
+        return "api_failed"
+    return None
+
+
+def api(args, body=None, run=subprocess.run):
     """只读调用：任何失败都终止。"""
-    o, rc, first = cchp(args, body)
-    if o is None:
-        die("cchp 输出不是 JSON（退出码 %s）：%s" % (rc, first), 3)
-    if not o.get("ok"):
-        err = o.get("error") or {}
-        die("接口失败 %s：%s %s（request_id=%s）" % (
-            args[1], err.get("kind"), err.get("message"), o.get("request_id")), 3)
+    o, rc = cchp(args, body, run)
+    category = result_error(o, rc)
+    if category:
+        diag(category, 3, "action=%s cli_rc=%d" % (args[1], rc))
     return o
 
 
@@ -105,13 +124,18 @@ def skip_revoked(keys):
 
 def list_keys():
     """只取一页；不完整或未就绪的列表不用于读写。"""
-    d = api(["api", "listProviderKeyPage", "--limit", "100", "--json"])["data"]
+    d = api(["api", "listProviderKeyPage", "--limit", "100", "--json"]).get("data")
+    if not isinstance(d, dict):
+        diag("bad_shape", 3, "action=listProviderKeyPage cli_rc=0")
     unready = [n for n in ("partial", "preparing") if d.get(n)]
     if unready:
-        die("列表未就绪（%s=true），不在不完整列表上读写。" % "、".join(unready), 3)
+        diag("list_unready", 3, "flags=%s cli_rc=0" % ",".join(unready))
     if d.get("nextCursor"):
-        die("key 超过一页，工具未支持翻页。", 3)
-    keys, skipped = skip_revoked(d["keys"])
+        diag("list_incomplete", 3, "cli_rc=0")
+    raw_keys = d.get("keys")
+    if not isinstance(raw_keys, list):
+        diag("bad_shape", 3, "action=listProviderKeyPage cli_rc=0")
+    keys, skipped = skip_revoked(raw_keys)
     if skipped:
         print("跳过已撤销 key %d 个（revoked_at 非空或 status=revoked）。" % skipped)
     keys.sort(key=lambda k: (k["priority"], k["name"]))
@@ -120,8 +144,12 @@ def list_keys():
 
 def read_state(scope):
     o = api(["api", "getConfigM2Page", "--scope-key", scope, "--prefix", KEY, "--json"])
-    for f in o["data"]["fields"]:
-        if f.get("key") == KEY:
+    data = o.get("data")
+    fields = data.get("fields") if isinstance(data, dict) else None
+    if not isinstance(fields, list):
+        diag("bad_shape", 3, "action=getConfigM2Page cli_rc=0")
+    for f in fields:
+        if isinstance(f, dict) and f.get("key") == KEY:
             return {
                 "local": bool(f.get("has_published_local_assignment")),
                 "local_value": f.get("published_local_value"),
@@ -129,7 +157,7 @@ def read_state(scope):
                 "source": f.get("source_scope_key"),
                 "draft_local": bool(f.get("has_draft_local_assignment")),
             }
-    die("scope %s 未返回 %s" % (scope, KEY), 3)
+    diag("field_missing", 3, "action=getConfigM2Page cli_rc=0")
 
 
 def want_local(priority):
@@ -230,8 +258,8 @@ def write_one(r, dry_run):
     if dry_run:
         args.append("--dry-run")
     args.append("--json")
-    o, rc, first = cchp(args, body)
-    return o, rc, first, body, action, scope
+    o, rc = cchp(args, body)
+    return o, rc, body, action, scope
 
 
 def apply_all(rows, dry_run):
@@ -247,45 +275,34 @@ def apply_all(rows, dry_run):
         print("无偏差，不写入。")
         return 0
     if any(r["draft_local"] for r in writable):
-        print("存在未发布草稿（has_draft_local_assignment=true），按约定停止，不写入。",
-              file=sys.stderr)
-        return 3
+        diag("draft_present", 3)
     for i, r in enumerate(writable, 1):
         scope = "provider_key:" + r["id"]
         if read_state(scope)["draft_local"]:
-            print("变更 #%d 前发现未发布草稿（%s），停止。" % (i, scope), file=sys.stderr)
-            return 3
-        o, rc, first, body, action, scope = write_one(r, dry_run)
+            diag("draft_present", 3)
+        o, rc, body, action, scope = write_one(r, dry_run)
+        category = result_error(o, rc)
         label = "变更 #%d %s（%s）%s" % (i, r["name"], r["priority"], action)
         if dry_run:
-            if o is None:
-                print("%s -> dry-run 调用未返回 JSON（退出码 %s）：%s" % (label, rc, first))
+            if category:
+                print("%s\n  dry-run 失败[%s] 退出码=3 cli_rc=%d" % (label, category, rc))
                 return 3
-            if not o.get("ok"):
-                err = o.get("error") or {}
-                print("%s -> dry-run 失败 %s：%s" % (label, err.get("kind"), err.get("message")))
-                return 3
-            req = o.get("dry_run") or {}
+            req = o.get("dry_run") if isinstance(o.get("dry_run"), dict) else {}
             print("%s\n  scope=%s body=%s\n  method=%s path=%s" % (
                 label, scope, body, req.get("method"), req.get("path")))
             continue
-        print("%s\n  scope=%s operation=saveSystemConfig ok=%s status=%s request_id=%s outcome=%s body=%s" % (
-            label, scope, o.get("ok") if o else None, o.get("status") if o else None,
-            o.get("request_id") if o else "-", (o or {}).get("outcome", "-"), body))
-        if o is None or not o.get("ok"):
-            if o is None:
-                print("  写调用未返回 JSON（退出码 %s）：%s" % (rc, first))
-            else:
-                err = o.get("error") or {}
-                print("  失败：%s %s" % (err.get("kind"), err.get("message")))
+        print("%s\n  scope=%s operation=saveSystemConfig ok=%s body=%s" % (
+            label, scope, isinstance(o, dict) and o.get("ok") is True, body))
+        if category:
+            print("  写调用失败[%s] 退出码=3 cli_rc=%d" % (category, rc))
             cur = read_state(scope)
-            print("  重读：本级覆盖=%s 本级值=%s 生效值=%s 来源=%s" % (
-                cur["local"], fmt_bool(cur["local_value"]), fmt_bool(cur["effective"]),
-                cur["source"]))
+            print("  重读：本级覆盖=%s 本级值=%s 生效值=%s" % (
+                cur["local"], fmt_bool(cur["local_value"]), fmt_bool(cur["effective"])))
             if state_ok(cur, r):
                 print("  状态已达期望，继续后续项。")
                 continue
-            print("  状态未达期望，停止（不重试未知结果的写）。", file=sys.stderr)
+            print("  状态未达期望[write_unconfirmed] 退出码=3 cli_rc=%d，停止（不重试未知结果的写）。" % rc,
+                  file=sys.stderr)
             return 3
         cur = read_state(scope)
         ok = state_ok(cur, r)
@@ -293,7 +310,7 @@ def apply_all(rows, dry_run):
             cur["local"], fmt_bool(cur["local_value"]), fmt_bool(cur["effective"]),
             cur["source"], "一致" if ok else "不一致"))
         if not ok:
-            print("  回读未达期望，停止。", file=sys.stderr)
+            print("  回读未达期望[readback_mismatch] 退出码=3 cli_rc=0，停止。", file=sys.stderr)
             return 3
     if dry_run:
         print("dry-run 结束：未发送任何写请求。")
@@ -311,6 +328,23 @@ def self_test():
     def st(local, val, eff, src, draft=False):
         return {"local": local, "local_value": val, "effective": eff,
                 "source": src, "draft_local": draft}
+
+    def capture(fn):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = fn()
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    fail = 0
+
+    def check(label, ok, detail=""):
+        nonlocal fail
+        if not ok:
+            fail += 1
+        print(("OK " if ok else "FAIL ") + label + ((" " + detail) if not ok and detail else ""))
 
     cases = [
         ("十位为1 本级true 生效true", k("k1", 11, "A"),
@@ -330,26 +364,95 @@ def self_test():
         ("本级true 被上级锁成false", k("k8", 15, "H"),
          st(True, True, False, "provider_key:k8"), "manual"),
     ]
-    fail = 0
     for title, key, state, want in cases:
         r = row(key, state)
-        got = r["fix"]
-        if got != want:
-            fail += 1
-        print("%s %s priority=%s 本级=%s 生效=%s 判定=%s 期望=%s（%s）" % (
-            "OK" if got == want else "FAIL", title, key["priority"],
-            fmt_local(r), fmt_bool(state["effective"]), got, want, r["note"]))
+        check("%s priority=%s 判定=%s 期望=%s（%s）" % (
+            title, key["priority"], r["fix"], want, r["note"]), r["fix"] == want)
     kept, skipped = skip_revoked([
         {"id": "r1", "priority": 51, "name": "R", "status": "active",
          "revoked_at": "2026-11-01T00:00:00Z"},
         {"id": "r2", "priority": 52, "name": "S", "status": "revoked"},
         {"id": "r3", "priority": 53, "name": "T", "status": "active"},
     ])
-    rev_ok = [x["id"] for x in kept] == ["r3"] and skipped == 2
-    if not rev_ok:
-        fail += 1
-    print("%s 撤销跳过 保留=%s 跳过=%d 期望=['r3']/2" % (
-        "OK" if rev_ok else "FAIL", [x["id"] for x in kept], skipped))
+    check("撤销跳过 保留=%s 跳过=%d 期望=['r3']/2" % ([x["id"] for x in kept], skipped),
+          [x["id"] for x in kept] == ["r3"] and skipped == 2)
+
+    # 失败分类：先看退出码；非零时即使 ok=true 也不得成功。
+    for obj, rc, want in ((None, 2, "command_failed"), ({"ok": True}, 1, "command_failed"),
+                          (None, 0, "output_not_json"), ({"ok": False}, 0, "api_failed"),
+                          ({"ok": "yes"}, 0, "api_failed"), ({"ok": True}, 0, None)):
+        check("结果分类 rc=%r -> %s" % (rc, want), result_error(obj, rc) == want)
+
+    marker = "SYNTHETIC_STDERR_MARKER"
+
+    class Fake:
+        def __init__(self, stdout, rc):
+            self.stdout, self.returncode, self.stderr = stdout, rc, marker + "\n"
+
+    code, out, err = capture(lambda: api(["api", "listProviderKeyPage", "--json"],
+                                         run=lambda *a, **kw: Fake('{"ok": true}', 1)))
+    check("读：非零退出码即使 ok=true 也失败且不回显原文",
+          code == 3 and "command_failed" in err and "cli_rc=1" in err
+          and marker not in out and marker not in err)
+    code, out, err = capture(lambda: api(["api", "listProviderKeyPage", "--json"],
+                                         run=lambda *a, **kw: Fake("not json", 0)))
+    check("读：坏 JSON 失败且不回显原文",
+          code == 3 and "output_not_json" in err and "cli_rc=0" in err and marker not in out + err)
+    code, out, err = capture(lambda: api(
+        ["api", "listProviderKeyPage", "--json"],
+        run=lambda *a, **kw: Fake('{"ok": false, "error": {"message": "%s"}}' % marker, 0)))
+    check("读：服务失败包固定类别且不回显 error.message",
+          code == 3 and "api_failed" in err and "cli_rc=0" in err and marker not in out + err)
+
+    def boom(*args, **kwargs):
+        raise OSError("synthetic-boom")
+
+    code, out, err = capture(lambda: api(["api", "listProviderKeyPage", "--json"], run=boom))
+    check("执行错误无退出码时固定类别",
+          code == 3 and "command_error" in err and "cli_rc=" not in err
+          and "synthetic-boom" not in out + err)
+
+    # 写：非零、坏 JSON、失败包都先回读，达到期望才继续；未达期望以 3 停止。
+    global read_state, write_one
+    old_read, old_write = read_state, write_one
+    r = row(k("w1", 11, "W"), st(False, None, False, "organization:o1"))
+    good = {"local": True, "local_value": True, "effective": True,
+            "source": "provider_key:w1", "draft_local": False}
+    bad = {"local": False, "local_value": None, "effective": False,
+           "source": "organization:o1", "draft_local": False}
+    try:
+        for label, result in (("非零+ok=true", ({"ok": True}, 1)),
+                              ("坏 JSON", (None, 0)),
+                              ("失败包", ({"ok": False, "error": {"message": marker}}, 0))):
+            read_state = lambda scope, _state=good: dict(_state)
+            write_one = lambda r, dry, _result=result: (
+                _result[0], _result[1], "{}", "设本级 true", "provider_key:" + r["id"])
+            code, out, err = capture(lambda: apply_all([r], False))
+            check("写：%s 先回读且达期望则继续" % label,
+                  code == 0 and "状态已达期望" in out and marker not in out and marker not in err)
+        read_state = lambda scope, _state=bad: dict(_state)
+        write_one = lambda r, dry: ({"ok": False, "error": {"message": marker}}, 0, "{}",
+                                    "设本级 true", "provider_key:" + r["id"])
+        code, out, err = capture(lambda: apply_all([r], False))
+        check("写：失败后回读未达期望以 3 停止且不回显原文",
+              code == 3 and "write_unconfirmed" in err and "cli_rc=0" in err
+              and marker not in out and marker not in err)
+        read_state = lambda scope, _state=good: dict(_state)
+        write_one = lambda r, dry: ({"ok": True}, 1, "{}", "设本级 true", "provider_key:" + r["id"])
+        code, out, err = capture(lambda: apply_all([r], True))
+        check("dry-run：非零退出码明确失败",
+              code == 3 and "dry-run 失败[command_failed]" in out and "cli_rc=1" in out
+              and marker not in out + err)
+        read_state = lambda scope, _state=good: dict(_state)
+        write_one = lambda r, dry: ({"ok": "yes", "error": {"message": marker}}, 0, "{}",
+                                    "设本级 true", "provider_key:" + r["id"])
+        code, out, err = capture(lambda: apply_all([r], False))
+        check("写：ok 非 True 判失败且输出本地布尔",
+              code == 0 and "ok=False" in out and "ok=yes" not in out and "api_failed" in out
+              and marker not in out + err)
+    finally:
+        read_state, write_one = old_read, old_write
+
     print("self-test %s" % ("通过" if not fail else "失败 %d 项" % fail))
     return 0 if not fail else 1
 
@@ -362,23 +465,26 @@ def main():
     known = {"--apply", "--dry-run", "--self-test"}
     unknown = [a for a in argv if a not in known]
     if unknown:
-        die("未知参数 %s（可用：%s；用 --help 查看用法）" % (" ".join(unknown), " ".join(sorted(known))))
+        diag("bad_args", 2)
     if "--self-test" in argv:
         return self_test()
     if "--apply" in argv and "--dry-run" in argv:
-        die("--apply 与 --dry-run 不能同时使用")
+        diag("bad_args", 2)
     global ENV
-    ENV = make_env()
-    dry_only = "--dry-run" in argv
-    rows = collect()
-    bad = print_table(rows, "\n会话复用核对（只读，来自已发布配置）：")
-    if "--apply" not in argv and not dry_only:
+    try:
+        ENV = make_env()
+        dry_only = "--dry-run" in argv
+        rows = collect()
+        bad = print_table(rows, "\n会话复用核对（只读，来自已发布配置）：")
+        if "--apply" not in argv and not dry_only:
+            return 1 if bad else 0
+        rc = apply_all(rows, dry_only)
+        if rc == 3 or dry_only:
+            return rc
+        bad = print_table(collect(), "\n写后回读：")
         return 1 if bad else 0
-    rc = apply_all(rows, dry_only)
-    if rc == 3 or dry_only:
-        return rc
-    bad = print_table(collect(), "\n写后回读：")
-    return 1 if bad else 0
+    except (KeyError, TypeError, ValueError):
+        diag("bad_shape", 3)
 
 
 if __name__ == "__main__":
