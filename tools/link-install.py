@@ -699,28 +699,34 @@ def git_is_ancestor(checkout, ancestor, descendant):
 
 
 ADOPTION_SOURCES = ("skills", "subagents", "prompt")
+UPGRADE_SOURCES = ("prompt", "skills", "subagents", "tools/sync-targets.json", "platforms/paseo")
 
 
 def git_blob_hash(data):
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
-def run_previous_check(checkout, home, codex_home, commit, blob):
+def run_previous_check(checkout, home, codex_home, commit, blob, ends=("codex",),
+                       codex_global_source="agents-md"):
     """用 O 自己的安装器字节在同一实际根只读执行 check，取真实旧动作投影。"""
     data = git_bytes(checkout, "show", commit + ":tools/link-install.py")
     if git_blob_hash(data) != blob:
         raise InstallError("adoption_previous_blob_mismatch", "O:tools/link-install.py")
-    directory = Path(tempfile.mkdtemp(prefix="link-install-adopt-"))
+    directory = Path(tempfile.mkdtemp(prefix="link-install-check-"))
     root = os.stat(directory, follow_symlinks=False)
     try:
         tool = directory / "link-install.py"
         fd = os.open(tool, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        proc = subprocess.run(
-            [sys.executable, "-B", str(tool), "--checkout", str(checkout), "--home", str(home),
-             "--ends", "codex", "--codex-home", str(codex_home), "--check"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=120)
+        command = [sys.executable, "-B", str(tool), "--checkout", str(checkout),
+                   "--home", str(home), "--ends", *ends]
+        if codex_home is not None:
+            command.extend(["--codex-home", str(codex_home)])
+        if codex_global_source != "agents-md":
+            command.extend(["--codex-global-source", codex_global_source])
+        proc = subprocess.run(command + ["--check"], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=120)
         return proc.returncode, json.loads(proc.stdout)
     finally:
         try:
@@ -798,6 +804,41 @@ def native_role_adoption(checkout, home, tree, target, base, blobs, codex_home):
     return actions, errors, [base_commit, commit, old_blob, new_blob]
 
 
+def upgrade_delta(previous, current):
+    """旧 --check=match 已覆盖旧动作；完整有序投影相等即目标动作也一致。"""
+    if previous["actions"] != [public_action(action) for action in current]:
+        return [{"code": "upgrade_projection_mismatch", "path": "actions"}]
+    return []
+
+
+def installer_upgrade(checkout, home, tree, target, ends, codex_home, codex_global_source):
+    """只读跨安装器准入：旧 HEAD 与目标提交各用原字节 check，同一实际根、同一选择。"""
+    commit, read = revision_reader(checkout, target)
+    base_commit = git_value(checkout, "rev-parse", "HEAD")
+    old_blob = git_value(checkout, "rev-parse", base_commit + ":tools/link-install.py")
+    new_blob = git_value(checkout, "rev-parse", commit + ":tools/link-install.py")
+    errors = []
+    if not git_is_ancestor(checkout, base_commit, commit):
+        errors.append({"code": "upgrade_target_not_descendant", "path": str(checkout)})
+    if git_blob_hash(Path(__file__).read_bytes()) != new_blob:
+        errors.append({"code": "upgrade_running_tool_mismatch", "path": "tools/link-install.py"})
+    if errors:
+        return [], errors, [base_commit, commit, old_blob, new_blob]
+    previous_code, previous = run_previous_check(
+        checkout, home, codex_home, base_commit, old_blob, ends, codex_global_source)
+    if previous_code != 0 or previous.get("status") != "match" or previous.get("errors"):
+        errors.append({"code": "upgrade_previous_check_failed", "path": str(checkout)})
+    actions, plan_errors = plan(checkout, home, tree, read, ends=ends, codex_home=codex_home,
+                                codex_global_source=codex_global_source)
+    errors.extend(plan_errors)
+    if not errors:
+        errors.extend(upgrade_delta(previous, actions))
+    if git_bytes(checkout, "diff-tree", "-r", "--raw", "--no-commit-id", base_commit, commit,
+                 "--", *UPGRADE_SOURCES):
+        errors.append({"code": "upgrade_sources_changed", "path": str(checkout)})
+    return actions, errors, [base_commit, commit, old_blob, new_blob]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkout", type=Path, default=Path(__file__).resolve().parents[1])
@@ -816,11 +857,14 @@ def main(argv=None):
     modes.add_argument("--preflight", metavar="TARGET_REV", help="切版本前只读预检本地 Git 目标版本")
     modes.add_argument("--check-native-role-adoption", metavar="TARGET_REV",
                        help="只读：新版登记对同一实际根的全 match 与两原生角色新增范围；不写文件")
+    modes.add_argument("--check-installer-upgrade", metavar="TARGET_REV",
+                       help="只读：旧版 checkout 与目标安装器同一实际根均 match 且投影一致；不写文件")
     args = parser.parse_args(argv)
     if args.previous and not args.apply:
         parser.error("--previous requires --apply")
     report = {"schemaVersion": 1, "mode": "apply" if args.apply else "check" if args.check else "preflight" if args.preflight
-              else "check-native-role-adoption" if args.check_native_role_adoption else "plan",
+              else "check-native-role-adoption" if args.check_native_role_adoption
+              else "check-installer-upgrade" if args.check_installer_upgrade else "plan",
               "actions": [], "errors": []}
     try:
         if not args.checkout.is_absolute():
@@ -861,6 +905,16 @@ def main(argv=None):
                 checkout, home, tree, args.check_native_role_adoption, args.adoption_base,
                 (args.adoption_blobs or "").split(","), codex_home)
             errors.extend(adoption_errors)
+            report.update(previousHead=binding[0], targetHead=binding[1],
+                          previousInstallerBlob=binding[2], targetInstallerBlob=binding[3])
+        elif args.check_installer_upgrade:
+            errors = []
+            if report["trackedState"] != "clean":
+                errors.append({"code": "checkout_dirty", "path": str(checkout)})
+            actions, upgrade_errors, binding = installer_upgrade(
+                checkout, home, tree, args.check_installer_upgrade,
+                ends, codex_home, args.codex_global_source)
+            errors.extend(upgrade_errors)
             report.update(previousHead=binding[0], targetHead=binding[1],
                           previousInstallerBlob=binding[2], targetInstallerBlob=binding[3])
         else:
@@ -925,7 +979,7 @@ def main(argv=None):
             report["errors"] = errors
             matched = not errors and all(a["state"] == "match" for a in actions)
             report["status"], code = ("completed", 0) if matched else ("different", 1)
-        elif args.check_native_role_adoption:
+        elif args.check_native_role_adoption or args.check_installer_upgrade:
             matched = not errors and all(a["state"] == "match" for a in actions)
             if matched:
                 report["status"], code = "match", 0

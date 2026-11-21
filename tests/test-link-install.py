@@ -410,6 +410,71 @@ module.main(sys.argv[2:])
         self.assertIn("installer_changed", [e["code"] for e in report["errors"]])
         self.assertEqual(self.snapshot(), baseline)
 
+    def upgrade_site(self):
+        """旧版本安装器已装好的现场；目标提交换回当前工具字节。"""
+        tool = self.checkout / "tools/link-install.py"
+        new_bytes = tool.read_bytes()
+        tool.write_bytes(new_bytes + b"\n# previous installer\n")
+        old = self.commit()
+        subprocess.run([sys.executable, "-B", str(tool), "--checkout", str(self.checkout),
+                        "--home", str(self.home), "--apply"], env=self.env, check=True,
+                       capture_output=True)
+        tool.write_bytes(new_bytes)
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        return old, new
+
+    def test_installer_upgrade_check_allows_only_identical_projection(self):
+        old, new = self.upgrade_site()
+        baseline = self.snapshot()
+        preflight = subprocess.run(
+            [sys.executable, "-B", str(self.checkout / "tools/link-install.py"),
+             "--checkout", str(self.checkout), "--home", str(self.home), "--preflight", new],
+            env=self.env, capture_output=True)
+        report = json.loads(preflight.stdout)
+        self.assertEqual((preflight.returncode, report["status"]), (2, "blocked"))
+        self.assertIn("installer_changed", [e["code"] for e in report["errors"]])
+        for ends in ((), ("--ends", "paseo")):
+            with self.subTest(ends=ends):
+                rc, report = self.call("--check-installer-upgrade", new, *ends)
+                self.assertEqual((rc, report["status"], report["errors"]), (0, "match", []))
+                self.assertEqual((report["previousHead"], report["targetHead"]), (old, new))
+                self.assertEqual(self.snapshot(), baseline)
+        self.git("checkout", "-q", new)
+        self.assertEqual(self.call("--check")[0], 0)
+
+    def test_installer_upgrade_blocks_target_only_layout_and_source_change(self):
+        old, new = self.upgrade_site()
+        self.git("checkout", "-q", new)
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_bytes())
+        skill = next(obj for obj in registry["objects"]
+                     if obj["type"] == "skill" and obj["ends"]["codex"]["present"])
+        skill["ends"]["codex"]["paths"].append("~/.codex/upgrade-extra.md")
+        registry_file.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
+        target = self.commit()
+        self.git("checkout", "-q", old)
+        (self.home / ".codex/upgrade-extra.md").symlink_to(
+            str((self.checkout / skill["source"]).parent))
+        before = self.snapshot()
+        rc, report = self.call("--check-installer-upgrade", target)
+        codes = [e["code"] for e in report["errors"]]
+        self.assertEqual((rc, report["status"]), (2, "blocked"))
+        self.assertIn("upgrade_projection_mismatch", codes)
+        self.assertIn("upgrade_sources_changed", codes)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_installer_upgrade_rejects_existing_override(self):
+        old, new = self.upgrade_site()
+        # 旧夹具是当前工具加注释，两版都带严格 override 检查；此处只核目标模式仍拒绝。
+        override = self.home / ".luno/homes/lens-gdr/AGENTS.override.md"
+        override.write_bytes(b"USER OVERRIDE")
+        before = self.snapshot()
+        rc, report = self.call("--check-installer-upgrade", new)
+        self.assertEqual((rc, report["status"]), (2, "blocked"))
+        self.assertIn("agents_override_shadowing", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), before)
+
     def test_registry_layout_change_stops_before_writes(self):
         # 安装器相同，但登记把同一公开入口推导到别的目标，同样不算已证明的同布局。
         self.assertEqual(self.call("--apply")[0], 0)
