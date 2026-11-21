@@ -173,9 +173,14 @@ class InstallTest(unittest.TestCase):
 
     def test_codex_override_shadowing_is_reported_without_reading_or_overwriting(self):
         self.assertEqual(self.call("--apply")[0], 0)
-        for relative in (".codex", ".luno/homes/lens-codex", ".luno/homes/forge-codex"):
-            with self.subTest(home=relative):
-                override = self.home / relative / "AGENTS.override.md"
+        registry = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        entries = [self.home / path.removeprefix("~/")
+                   for obj in registry["objects"] for end in ("codex", "paseo")
+                   for path in obj["ends"][end].get("paths", ()) if path.endswith("/AGENTS.md")]
+        self.assertTrue(entries)
+        for entry in entries:
+            with self.subTest(home=entry.parent):
+                override = entry.with_name("AGENTS.override.md")
                 override.write_bytes(b"USER OVERRIDE")
                 before = self.snapshot()
                 for mode in ("--check", "--apply"):

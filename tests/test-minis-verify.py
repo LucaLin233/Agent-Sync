@@ -226,6 +226,8 @@ class MinisVerify(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("file_exec", self.codes(doc))
         self.assertIn("file_bytes", self.codes(doc))
+        self.assertEqual(self.status(doc, "package-set"), "match")
+        self.assertEqual(self.status(doc, "file:skills/alpha/references/a.md"), "different")
         self.assertEqual(self.status(doc, "file:skills/alpha/references/empty.md"), "match")
         _w(self.soul, "---\nname: Other\nicon: z\n---\nSOUL 正文\n")
         good = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
@@ -548,7 +550,31 @@ class MinisVerify(unittest.TestCase):
         # 后续独立稳定资源仍相对正确父 fd 核对，不被前一个缺证升级为假阳性
         self.assertEqual(self.status(doc, "file:skills/alpha2/references/empty.md"), "match")
         self.assertEqual(self.status(doc, "exec:skills/alpha2/references/empty.md"), "match")
-        self.assertEqual(self.status(doc, "package-set"), "match")
+        self.assertEqual(self.status(doc, "file:skills/alpha2/references/sub/deep.md"), "different")
+        self.assertEqual(self.status(doc, "package-set"), "different")
+
+    # 5d 枚举确认缺件后、逐文件复核前被补齐：集合差异仍须产生 issue，不能只剩 file/exec match
+    def test_enumeration_missing_still_reports_issue_if_file_reappears(self):
+        tool = load_tool()
+        real = tool._enumerate
+        target = os.path.join(self.dir, "SKILL.md")
+        away = target + ".away"
+
+        def enumerate_while_absent(fd):
+            os.rename(target, away)
+            try:
+                return real(fd)
+            finally:
+                os.rename(away, target)
+
+        argv = ["--repo", self.fx["repo"], "--git-version", self.fx["first"],
+                "--root", self.root, "--object", "alpha"]
+        with mock.patch.object(tool, "_enumerate", side_effect=enumerate_while_absent):
+            rc, doc, _text = self.run_main(argv, tool)
+        self.assertEqual(rc, 1, doc["issues"])
+        self.assertIn("file_missing", self.codes(doc))
+        self.assertEqual(self.status(doc, "file:skills/alpha/SKILL.md"), "match")
+        self.assertEqual(self.status(doc, "package-set"), "different")
 
     # 5e SOUL 读取期间持续改写：file/exec 均降级，不残留未经证实的 exec match
     def test_soul_change_clears_exec_match(self):

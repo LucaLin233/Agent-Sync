@@ -270,6 +270,10 @@ def inject(p):
         target=p/rel;target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(b'synthetic retired official resource')
 case('退役官方资源进入运行树（%d 个逐个报出）'%len(RETIRED),1,'禁止分发完整官方资源',inject,n=len(RETIRED))
+def unreadable_with_retired(p):
+    (p/'tools/sync-targets.json').write_text('{bad')
+    inject(p)
+case('登记不可解析仍检查退役官方资源',1,'禁止分发完整官方资源',unreadable_with_retired,n=len(RETIRED))
 
 # ── frontmatter 剥离 ──
 for text,want in (('---\n---\n正文\n---\n尾部','正文\n---\n尾部'),
