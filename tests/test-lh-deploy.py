@@ -2,10 +2,12 @@
 """lh-deploy 离线合成用例：真实子进程假 CLI/假 collect/假 verify，不联网、无秘密。
 
 覆盖：base 验收非 0 → 零写（含第二对象不启动）；写失败 → 不再补写、不报成功、changed=unknown；
-post 非 0 → rc≠0 且不报 completed；正常路径可过（负控：去掉阻断即转绿）；argv 原样传递。
+post 非 0 → rc≠0 且不报 completed；正常路径可过（负控：去掉阻断即转绿）；argv 原样传递；
+SSH 目标默认/独立覆盖、pre/post ssh_auth_failed 的零写与写后状态。
 成本：Minis/iSH 本批 runner 实测 10.29s（秒级汇总10s），直接模块9.857s；真实总截止/信号/KeyRoot清理回归及恢复正控不可用mock或删断言降级。仅opt-in，父已接受本批小幅超10秒例外；如需提速另行证明等价。
 """
 import base64
+import copy
 import json
 import os
 import shutil
@@ -19,18 +21,30 @@ TOOL = os.path.join(os.path.dirname(HERE), "tools", "lh-deploy.py")
 TOOLS_DIR = os.path.join(os.path.dirname(HERE), "tools")
 TOOL_REAL_COLLECT = os.path.join(TOOLS_DIR, "lh-collect.py")
 TOOL_REAL_BODY = os.path.join(TOOLS_DIR, "body_contract.py")
+TOOL_SHARED_TARGET = os.path.join(TOOLS_DIR, "ssh_target.py")
 PY = sys.executable or "python3"
 
 STUB_COLLECT = """#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
+fd = int(args[args.index("--_cleanup-fd") + 1]) if "--_cleanup-fd" in args else None
 def ack():
-    if "--_cleanup-fd" in args:
-        os.write(int(args[args.index("--_cleanup-fd") + 1]),
-                 b'{"event":"cleanup","residuals":[]}' + bytes([10]))
+    if fd is not None:
+        os.write(fd, b'{"event":"cleanup","residuals":[]}' + bytes([10]))
+here = os.path.dirname(os.path.abspath(__file__))
+raw = sys.stdin.buffer.read()
+with open(os.path.join(here, ".collect.stdin"), "wb") as h:
+    h.write(raw)
 out = args[args.index("--out-dir") + 1]
 os.mkdir(out, 0o700)
 name = args[args.index("--object") + 1]
+fail = os.path.join(here, ".fail-" + os.path.basename(out).split("-")[0])
+if os.path.exists(fail):
+    code = open(fail, encoding="utf-8").read().strip()
+    ack()
+    if fd is not None:
+        os.write(fd, json.dumps({"event": "result", "error": code}).encode() + bytes([10]))
+    sys.exit(3)
 if name.startswith("prompt/"):
     role = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".agentcontent")
     value = open(role, encoding="utf-8").read() if os.path.exists(role) else "x\\n"
@@ -143,6 +157,7 @@ class Case(unittest.TestCase):
                     "LOBEHUB_SERVER": "https://example.invalid",
                     "LOBEHUB_CLI_API_KEY": "test-token-value"}
         self.write("tools/lh-collect.py", STUB_COLLECT)
+        shutil.copyfile(TOOL_SHARED_TARGET, os.path.join(self.repo, "tools", "ssh_target.py"))
         realgit = shutil.which("git")
         self.assertTrue(realgit and os.path.isabs(realgit))
         with open(os.path.join(self.bin, "git"), "w", encoding="utf-8") as handle:
@@ -208,14 +223,14 @@ class Case(unittest.TestCase):
         with open(os.path.join(self.repo, "tools", ".verdict." + phase), "w") as handle:
             handle.write(str(rc))
 
-    def run_tool(self, objects=("one",), env=None, timeout="30"):
+    def run_tool(self, objects=("one",), env=None, timeout="30", target=None):
         argv = [PY, "-I", "-B", TOOL, "--repo", self.repo, "--base", self.base,
                 "--merged", self.merged, "--out-dir", self.out,
                 "--instance-ref", "inst-1", "--source-basis", "basis-ref",
                 "--source-version", "2.3.3+testbuild", "--total-timeout", timeout]
         for item in objects:
             argv += ["--object", item]
-        return subprocess.run(argv, input=json.dumps(TARGET).encode(),
+        return subprocess.run(argv, input=json.dumps(target or TARGET).encode(),
                               env=dict(env or self.env), capture_output=True, timeout=120)
 
     def argv_log(self):
@@ -370,6 +385,97 @@ class Case(unittest.TestCase):
         self.assertEqual(os.stat(cfg).st_mode & 0o777, 0o600)
         self.assertTrue(os.path.isdir(os.path.join(self.out, "post-0")))
 
+    def test_shared_ssh_target_defaults_and_explicit_overrides(self):
+        """两工具同一解析：省略逐字段补 root:9399，显式可独立覆盖，非法值 bad_target。"""
+        import importlib.util
+
+        def load(name, path):
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        deploy = load("lh_deploy_target", TOOL)
+        collect = load("lh_collect_target", TOOL_REAL_COLLECT)
+        cases = (
+            ((), "deploy", 2222),
+            (("user",), "root", 2222),
+            (("port",), "deploy", 9399),
+            (("user", "port"), "root", 9399),
+        )
+        for omitted, user, port in cases:
+            target = copy.deepcopy(TARGET)
+            target["ssh"]["user"] = "deploy"
+            target["ssh"]["port"] = 2222
+            for key in omitted:
+                target["ssh"].pop(key)
+            raw = json.dumps(target).encode()
+            normalized = deploy._target(raw)
+            ssh, pg = collect._target(raw)
+            self.assertEqual((normalized["ssh"]["user"], normalized["ssh"]["port"]),
+                             (user, port))
+            self.assertEqual((ssh["user"], ssh["port"]), (user, port))
+            self.assertEqual(normalized["ssh"], ssh)
+            self.assertEqual(normalized["postgres"], pg)
+        bad = copy.deepcopy(TARGET)
+        bad["ssh"]["port"] = "22"
+        for module in (deploy, collect):
+            with self.assertRaises(module.Fail) as caught:
+                module._target(json.dumps(bad).encode())
+            self.assertEqual(caught.exception.code, "bad_target")
+            self.assertEqual(caught.exception.exit, 2)
+
+    def test_deploy_forwards_original_target_bytes(self):
+        """省略默认字段时 deploy 只共享校验，子采集器仍收到原始 stdin bytes。"""
+        self.lh(0)
+        target = copy.deepcopy(TARGET)
+        target["ssh"].pop("user")
+        target["ssh"].pop("port")
+        proc = self.run_tool(("one",), target=target)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with open(os.path.join(self.repo, "tools", ".collect.stdin"), "rb") as handle:
+            self.assertEqual(handle.read(), json.dumps(target).encode())
+
+    def test_deploy_rejects_bad_target_before_child(self):
+        self.lh(0)
+        target = copy.deepcopy(TARGET)
+        target["ssh"]["user"] = "bad user"
+        proc = self.run_tool(("one",), target=target)
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertEqual(json.loads(proc.stderr)["error"], "bad_target")
+        self.assertFalse(os.path.exists(os.path.join(self.repo, "tools", ".collect.stdin")))
+        self.assertEqual(self.argv_log(), [])
+
+    def test_pre_auth_failure_blocks_all_writes(self):
+        with open(os.path.join(self.repo, "tools", ".fail-pre"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("ssh_auth_failed\n")
+        self.lh(0)
+        proc = self.run_tool(("one",))
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["objects"][0]["phase"], "pre")
+        self.assertEqual(summary["objects"][0]["code"], "ssh_auth_failed")
+        self.assertEqual(summary["objects"][0]["changed"], False)
+        self.assertEqual(json.loads(proc.stderr)["error"], "ssh_auth_failed")
+        self.assertEqual(self.argv_log(), [])
+
+    def test_post_auth_failure_reports_unknown_write_without_retry(self):
+        with open(os.path.join(self.repo, "tools", ".fail-post"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("ssh_auth_failed\n")
+        self.lh(0)
+        proc = self.run_tool(("one",))
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["objects"][0]["phase"], "post")
+        self.assertEqual(summary["objects"][0]["code"], "ssh_auth_failed")
+        self.assertEqual(summary["objects"][0]["changed"], "unknown")
+        self.assertEqual(self.argv_log(), [
+            "skill", "install", "https://github.com/o/r/tree/main/skills/one"])
+        self.assertFalse(os.path.exists(os.path.join(self.out, "post-0-fix")))
+
 
     def test_collect_hard_deadline_cleanup_and_recovery(self):
         """R2 唯一新增回归：真实 deploy→collect 子进程的超时清理与恢复正控。
@@ -437,6 +543,7 @@ class Case(unittest.TestCase):
         for index, (code, rc, expected) in enumerate((
                 ("resource_read_error", 2, "resource_read_error"),
                 ("source_unverified", 3, "source_unverified"),
+                ("ssh_auth_failed", 3, "ssh_auth_failed"),
                 (None, 2, "cli_error"),
                 (secret, 2, "cli_error"))):
             with self.subTest(code=code):
@@ -469,6 +576,27 @@ class Case(unittest.TestCase):
         expected = "missing_variable:SSH_PRIVATE_KEY_B64"
         self.assertEqual(json.loads(proc.stdout)["objects"][0]["code"], expected)
         self.assertEqual(json.loads(proc.stderr)["error"], expected)
+        self.assertEqual(self.argv_log(), [])
+
+    def test_real_collect_auth_failure_propagates_zero_write(self):
+        """真实 collect 的 ssh 认证失败经固定码通道传到 deploy：pre 失败零 CLI。"""
+        shutil.copyfile(TOOL_REAL_COLLECT, os.path.join(self.repo, "tools", "lh-collect.py"))
+        fake = os.path.join(self.bin, "ssh")
+        with open(fake, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\ncat > /dev/null\n"
+                         "printf 'u@h.example: Permission denied (publickey).\\n' >&2\n"
+                         "exit 255\n")
+        os.chmod(fake, 0o755)
+        env = dict(self.env, SSH_PRIVATE_KEY_B64=base64.b64encode(
+            b"synthetic-test-sentinel").decode())
+        self.lh(0)
+        proc = self.run_tool(("one",), env=env)
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["objects"][0]["phase"], "pre")
+        self.assertEqual(summary["objects"][0]["code"], "ssh_auth_failed")
+        self.assertEqual(summary["objects"][0]["changed"], False)
+        self.assertEqual(json.loads(proc.stderr)["error"], "ssh_auth_failed")
         self.assertEqual(self.argv_log(), [])
 
 class DependencySeamTest(unittest.TestCase):

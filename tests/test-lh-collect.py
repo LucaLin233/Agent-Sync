@@ -2,9 +2,11 @@
 """lh-collect 离线合成用例：不联网、无秘密、无真实实例。
 
 覆盖：白名单投影、资源实际完整键（非登记自证）、只读交集调用、null/空串区分、尾 LF 保留、
-原响应/失败调用与观察关联、Agent 未核准前提真实 rc3、缺失源行 rc3 不写证据。
+原响应/失败调用与观察关联、Agent 未核准前提真实 rc3、缺失源行 rc3 不写证据、
+SSH 目标默认/独立覆盖及 255 认证失败与其它失败分类。
 """
 import base64
+import copy
 import importlib.util
 import io
 import json
@@ -20,6 +22,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(os.path.dirname(HERE), "tools", "lh-collect.py")
+SHARED = os.path.join(os.path.dirname(HERE), "tools", "ssh_target.py")
 PY = sys.executable or "python3"
 
 FAKE_SSH = """#!/bin/sh
@@ -88,6 +91,7 @@ class Case(unittest.TestCase):
         self.tool = os.path.join(self.tmp, "lh-collect.py")
         with open(self.tool, "w", encoding="utf-8") as handle:
             handle.write(code.replace(needle, 'ROOT_PARENT = ' + repr(self.tmp)))
+        shutil.copyfile(SHARED, os.path.join(self.tmp, "ssh_target.py"))
         self.repo = os.path.join(self.tmp, "repo")
         os.makedirs(os.path.join(self.repo, "tools"))
         os.makedirs(os.path.join(self.repo, "skills", "luno-ops", "references"))
@@ -132,6 +136,16 @@ class Case(unittest.TestCase):
         os.chmod(ssh, 0o755)
         with open(os.path.join(self.tmp, "bin", "row"), "w", encoding="utf-8") as handle:
             handle.write(output + "\n")
+
+    def fake_ssh_failure(self, code, stderr):
+        ssh = os.path.join(self.tmp, "bin", "ssh")
+        with open(ssh, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nhere=$(dirname \"$0\")\ncat > /dev/null\n"
+                         "cat \"$here/ssh.stderr\" >&2\nexit %d\n" % code)
+        os.chmod(ssh, 0o755)
+        with open(os.path.join(self.tmp, "bin", "ssh.stderr"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(stderr)
 
     def run_tool(self, extra_env=None, objects=("luno-ops",), target=TARGET):
         argv = [PY, "-I", "-B", self.tool, "--repo", self.repo, "--git-version", self.version,
@@ -290,6 +304,99 @@ class Case(unittest.TestCase):
         proc = self.run_tool(self.creds())
         self.assertEqual(proc.returncode, 3)
         self.assertFalse(os.path.exists(os.path.join(self.out, "skill-evidence.json")))
+
+    def test_ssh_target_defaults_and_overrides(self):
+        """omit 字段逐字段补 root:9399；显式 user/port 可独立覆盖并原样用于 ssh。"""
+        self.fake_ssh(row())
+        cases = (
+            ((), "deploy", 2222),
+            (("user",), "root", 2222),
+            (("port",), "deploy", 9399),
+            (("user", "port"), "root", 9399),
+        )
+        for index, (omitted, user, port) in enumerate(cases):
+            with self.subTest(omitted=omitted):
+                target = copy.deepcopy(TARGET)
+                target["ssh"]["user"] = "deploy"
+                target["ssh"]["port"] = 2222
+                for key in omitted:
+                    target["ssh"].pop(key)
+                self.out = os.path.join(self.tmp, "out-defaults-%d" % index)
+                proc = self.run_tool(self.creds(), target=target)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                with open(os.path.join(self.tmp, "bin", "argv"), encoding="utf-8") as handle:
+                    argv = handle.read().splitlines()
+                self.assertEqual(argv[argv.index("--") + 1], user + "@h.example")
+                self.assertEqual(argv[argv.index("-p") + 1], str(port))
+
+    def test_ssh_target_rejects_invalid_explicit(self):
+        """缺失必填项和显式非法 user/port 均 bad_target/rc2，不进入 ssh。"""
+        self.fake_ssh(row())
+        cases = []
+        for missing in ("host", "knownHostsFile"):
+            target = copy.deepcopy(TARGET)
+            target["ssh"].pop(missing)
+            cases.append(target)
+        for value in ("", "bad user", None, "root\n"):
+            target = copy.deepcopy(TARGET)
+            target["ssh"]["user"] = value
+            cases.append(target)
+        for value in ("22", 0, 65536, True, 22.0):
+            target = copy.deepcopy(TARGET)
+            target["ssh"]["port"] = value
+            cases.append(target)
+        target = copy.deepcopy(TARGET)
+        target["postgres"].pop("database")
+        cases.append(target)
+        target = copy.deepcopy(TARGET)
+        target["ssh"]["extra"] = "x"
+        cases.append(target)
+        for index, target in enumerate(cases):
+            with self.subTest(index=index):
+                self.out = os.path.join(self.tmp, "out-bad-%d" % index)
+                proc = self.run_tool(self.creds(), target=target)
+                self.assertEqual(proc.returncode, 2, proc.stderr)
+                self.assertEqual(json.loads(proc.stderr)["error"], "bad_target")
+                self.assertFalse(os.path.exists(self.out))
+
+    def test_ssh_255_auth_failure_is_fixed_and_redacted(self):
+        """仅本次目标最后的 OpenSSH 认证拒绝行映射 ssh_auth_failed/rc3 且脱敏。"""
+        upper = copy.deepcopy(TARGET)
+        upper["ssh"]["host"] = "H.Example"
+        cases = (
+            (TARGET, "u@h.example: Permission denied (publickey).\n"),
+            (TARGET, "u@h.example: Permission denied ().\n"),
+            (upper, "u@h.example: Permission denied (publickey,password).\n"),
+        )
+        for index, (target, stderr) in enumerate(cases):
+            with self.subTest(index=index):
+                self.fake_ssh_failure(255, stderr)
+                self.out = os.path.join(self.tmp, "out-auth-%d" % index)
+                proc = self.run_tool(self.creds(), target=target)
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertEqual(json.loads(proc.stderr)["error"], "ssh_auth_failed")
+                out = proc.stdout + proc.stderr
+                self.assertIn(b"ssh_auth_failed", out)
+                self.assertNotIn(b"Permission denied", out)
+                self.assertNotIn(b"h.example", out)
+
+    def test_ssh_255_non_auth_stays_source_unverified(self):
+        """其它诊断、非本次目标或非终止行不得冒充认证失败。"""
+        for index, text in enumerate((
+                "ssh: connect to host h.example port 22: Connection refused\n",
+                "",
+                "psql: Permission denied (container).\nConnection closed by remote host.\n",
+                "root@h.example: Permission denied (publickey).\n",
+                "u@other.example: Permission denied (publickey).\n",
+                "u@h.example: Permission denied (publickey).\n"
+                "Connection closed by remote host.\n")):
+            with self.subTest(index=index):
+                self.fake_ssh_failure(255, text)
+                self.out = os.path.join(self.tmp, "out-255-%d" % index)
+                proc = self.run_tool(self.creds())
+                self.assertEqual(proc.returncode, 3, proc.stderr)
+                self.assertEqual(json.loads(proc.stderr)["error"], "source_unverified")
+                self.assertNotIn(b"h.example", proc.stdout + proc.stderr)
 
     def test_source_version_required(self):
         """调用方人工核实的来源版本必填；缺参在看凭据前 rc2。"""
