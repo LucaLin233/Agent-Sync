@@ -157,6 +157,8 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 **自有接口说明补充**（2026-11-17 源码核对）：`@lobehub/cli@0.0.95`，依据 npm gitHead 固定的 [`apps/cli/src/commands/goal/objective.ts`](https://github.com/lobehub/lobehub/blob/1a49740448ebdc0c947dfe7715a3fcd459a372fa/apps/cli/src/commands/goal/objective.ts) 第 229–265、346–399 行，自编 `goal evaluate` 的执行、环境、输出与回写边界说明；未行为实测，不新增吸收件。
 
+**自有接口说明补充**（2026-11-21 源码核对）：`@lobehub/cli@0.0.157` 的 npm gitHead 为 [`lobehub/lobehub@579099b1849c09091c3db4b17a60fbb891bb8014`](https://github.com/lobehub/lobehub/tree/579099b1849c09091c3db4b17a60fbb891bb8014/apps/cli/src/commands)。取证路径：`apps/cli/src/commands/topic/lifecycle.ts`、`apps/cli/src/commands/work.ts`、`apps/cli/src/commands/artboardComments.ts`、`apps/cli/src/commands/artboardOps.ts`、`apps/cli/src/commands/skill.ts`、`packages/database/src/models/work/agentWork.ts`（L270–317、L420–439）、`apps/server/src/services/artboard/index.ts`（L264–282）；对应正文为 `topic`、`work`、`artboard` 与 `skill install` 的副作用说明，自编，未行为实测，不新增吸收件。版本号只作本次静态核对的历史证据出处，不表示最低支持或固定版本。
+
 ### CCHP 本端层
 
 `references/cchp.md` 只保留本端认证/输出边界、组织写入约定、恢复及链路核验、带版本的实例经验；官方已覆盖的 CLI 说明、业务示例、输出、错误和分页不再维护中文副本。原 `cchp-source.md`、`cchp-workflow-org.md`、`cchp-workflow-providers.md`、`cchp-coverage-rules.md` 退役，历史取材证据可从 β 前 main 提交 `217ff083cf536cf9f946ffc9a233bc748dffc44b` 恢复。本端层保留历史精选改写的 MIT 版权通知及 `LICENSE.upstream.txt`，不因精简删除必要许可。本端层必需加载官方 cchp，不覆盖官方正文，官方凭据回退不适用于本端。

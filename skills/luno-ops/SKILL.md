@@ -19,7 +19,7 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 - **服务与远端**
   - 服务的部署、配置、运行和排障（systemd/PM2/Docker/Compose、端口与暴露面、Nginx、DNS、TLS）：`references/service-runtime.md`〔分支 service-runtime〕。
   - 远端工作目录和文件落位、交付件、改配置或生产文件、备份、快照、恢复和清理：`references/service-runtime.md`〔分支 remote-files-backup〕。
-  - SSH 连接和非交互命令定位：`references/service-runtime.md`〔分支 ssh〕。
+  - SSH 连接、非交互命令定位，以及服务器本机非登录 Shell 中的命令定位：`references/service-runtime.md`〔分支 ssh〕。
 - **执行环境**
   - 执行环境选址、脚本运行或测试、派发选址，选定沙箱后的调用与回传，以及本机测速：按 `luno-platform`〈运行端〉当前端〈执行环境〉读取它指定的本技能资源（`references/execution-environment.md`、`references/cfst.md`）及触发条件。
 
