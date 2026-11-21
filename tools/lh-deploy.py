@@ -10,6 +10,8 @@
 并核安装分支 HEAD 仍等于 merged；随后新建 pre 观察（tools/lh-collect.py + tools/lh-verify.py）对 base 验收，
 任意非 0 即零写；通过后紧邻执行官方 CLI 写；写后再核分支 HEAD，仍以新建 post 观察对 merged 验收。
 Agent 对象按登记 ID 对 systemRole 做 pre/post 原字节核对；首个错误后其余对象 not_run。
+target.json 与 lh-collect 共用解析：ssh 的 user/port 可省略并逐字段补 root/9399，显式值原样；
+SSH 认证失败沿固定码通道报 ssh_auth_failed/3：pre 阶段零写，post 阶段只报实际写后状态、不纠正不重投。
 
 退出码：0 全部 post 通过 / 1 确证差异 / 2 执行、格式、写失败、超时或清理失败 / 3 缺证或首版不支持（并存 2>3>1>0）。
 stdout 一份摘要 JSON，不回显正文、资源、坐标或凭据。
@@ -28,8 +30,6 @@ import time
 import urllib.parse
 
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
-USER_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_.-]{0,31}\Z")
-HOST_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
 GIT_ENV = {
     "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": os.devnull,
     "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -43,7 +43,7 @@ CLEANUP_RESERVE = 2.0
 COLLECT_ERROR_CODES = frozenset((
     "bad_args", "bad_target", "cleanup_failed", "git_error", "identity_difference",
     "internal_error", "missing_evidence", "registry_invalid", "resource_read_error",
-    "source_unverified", "timeout", "unsafe_path",
+    "source_unverified", "ssh_auth_failed", "timeout", "unsafe_path",
     "missing_variable:SSH_PRIVATE_KEY_B64", "missing_variable:LOBEHUB_SERVER",
     "missing_variable:LOBEHUB_CLI_API_KEY",
 ))
@@ -158,44 +158,31 @@ def _classify(entry):
 
 
 def _target(raw):
-    def pairs(items):
-        out = {}
-        for key, value in items:
-            if key in out:
-                raise Fail("bad_target", 2)
-            out[key] = value
-        return out
+    """严格非秘密目标：与 lh-collect 共用 tools/ssh_target.py 的解析与默认值。"""
+    module = _ssh_target()
     try:
-        doc = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
-    except (ValueError, UnicodeError):
+        return module.parse(raw)
+    except module.TargetError:
         raise Fail("bad_target", 2) from None
-    if not isinstance(doc, dict) or set(doc) != {"ssh", "postgres"}:
-        raise Fail("bad_target", 2)
-    ssh, pg = doc["ssh"], doc["postgres"]
-    if not isinstance(ssh, dict) or set(ssh) != {"host", "port", "user", "knownHostsFile"}:
-        raise Fail("bad_target", 2)
-    if not isinstance(pg, dict) or set(pg) != {"container", "database", "port", "user"}:
-        raise Fail("bad_target", 2)
-    for node in (ssh, pg):
-        for value in node.values():
-            if isinstance(value, str) and (not value or any(ord(c) < 0x21 or ord(c) == 0x7f for c in value)):
-                raise Fail("bad_target", 2)
-    if not isinstance(ssh["host"], str) or not HOST_RE.match(ssh["host"]):
-        raise Fail("bad_target", 2)
-    if not isinstance(ssh["user"], str) or not USER_RE.match(ssh["user"]):
-        raise Fail("bad_target", 2)
-    if type(ssh["port"]) is not int or not 1 <= ssh["port"] <= 65535:
-        raise Fail("bad_target", 2)
-    if not isinstance(ssh["knownHostsFile"], str) or not ssh["knownHostsFile"].startswith("/"):
-        raise Fail("bad_target", 2)
-    for key in ("container", "database", "user"):
-        if not isinstance(pg[key], str) or not USER_RE.match(pg[key]):
-            raise Fail("bad_target", 2)
-    if type(pg["port"]) is not int or not 1 <= pg["port"] <= 65535:
-        raise Fail("bad_target", 2)
-    return doc
 
 
+_TARGET_MODULE = None
+
+
+def _ssh_target():
+    """按本文件位置加载共享解析器；-I 不把脚本目录放进 sys.path，故显式加载。"""
+    global _TARGET_MODULE
+    if _TARGET_MODULE is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "lh_ssh_target", os.path.join(here, "ssh_target.py"))
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except (OSError, AttributeError):
+            raise Fail("internal_error", 2) from None
+        _TARGET_MODULE = module
+    return _TARGET_MODULE
 def _outfd(path):
     """从 / 逐组件 nofollow 锚定已创建的 out 根。"""
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))

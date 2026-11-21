@@ -11,15 +11,20 @@
 登记 ID 取固定投影（id/user_id/workspace_id/system_role，`is_deleted IS NOT TRUE`），写入 `agent-evidence.json`，
 不读默认配置、知识关联或凭据列。
 
-目标 JSON 只在内存使用，不落盘、不回显：根键 ssh/postgres；不接收 query/command 或任何凭据。
+目标 JSON 只在内存使用，不落盘、不回显：根键 ssh/postgres；ssh 必填 host/knownHostsFile，
+user/port 省略时逐字段补默认 root/9399，显式合法值原样；postgres 四项仍全部显式。
+不接收 query/command 或任何凭据。
 
 退出码：0 采集完整 / 2 参数、格式、执行、不安全出口或读取错误 / 3 缺证或未核准前提（并存按 2>3>0）。
+仅当 ssh 返回 255 且 stderr 最后一行为本次目标的 OpenSSH 认证拒绝时记 ssh_auth_failed/3；
+stderr 只用于内存判类后丢弃。
 stdout 一份摘要 JSON；stderr 只固定码。正文、资源、坐标与凭据不进摘要。
 """
 import argparse
 import base64
 import binascii
 import datetime
+import importlib.util
 import json
 import os
 import re
@@ -30,11 +35,9 @@ import sys
 import time
 
 HEX40_RE = re.compile(r"\A[0-9a-f]{40}\Z")
-NAME_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-HOST_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9.-]{0,252}\Z")
-USER_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_.-]{0,31}\Z")
 REL_PATH_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._/-]{0,255}\Z")
 MAX_SQL_OUT = 2_000_000
+MAX_SSH_STDERR = 64 * 1024
 SSH_SECRETS = ("SSH_PRIVATE_KEY_B64",)
 API_SECRETS = ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY")
 BASE_ENV = {"LC_ALL": "C.UTF-8"}
@@ -251,40 +254,32 @@ def _classify(entry):
 
 
 def _target(raw):
-    """严格非秘密目标：固定键、固定类型，拒绝未知/重复键与控制字符。"""
+    """严格非秘密目标：与 lh-deploy 共用 tools/ssh_target.py 的解析与默认值。"""
+    module = _ssh_target()
     try:
-        doc = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
-    except (ValueError, UnicodeError):
+        doc = module.parse(raw)
+    except module.TargetError:
         raise Fail("bad_target") from None
-    if not isinstance(doc, dict) or set(doc) != {"ssh", "postgres"}:
-        raise Fail("bad_target")
-    ssh, pg = doc["ssh"], doc["postgres"]
-    if not isinstance(ssh, dict) or set(ssh) != {"host", "port", "user", "knownHostsFile"}:
-        raise Fail("bad_target")
-    if not isinstance(pg, dict) or set(pg) != {"container", "database", "port", "user"}:
-        raise Fail("bad_target")
-    for node in (ssh, pg):
-        for value in node.values():
-            if isinstance(value, str):
-                if not value or any(ord(ch) < 0x21 or ord(ch) == 0x7f for ch in value):
-                    raise Fail("bad_target")
-    for key, regex in (("host", HOST_RE), ("user", USER_RE)):
-        if not isinstance(ssh[key], str) or not regex.match(ssh[key]):
-            raise Fail("bad_target")
-    if not isinstance(ssh["knownHostsFile"], str) or not ssh["knownHostsFile"].startswith("/") \
-            or not NAME_RE.match(os.path.basename(ssh["knownHostsFile"])):
-        raise Fail("bad_target")
-    for key in ("port",):
-        if type(ssh[key]) is not int or not 1 <= ssh[key] <= 65535:
-            raise Fail("bad_target")
-        if type(pg[key]) is not int or not 1 <= pg[key] <= 65535:
-            raise Fail("bad_target")
-    for key in ("container", "database", "user"):
-        if not isinstance(pg[key], str) or not USER_RE.match(pg[key]):
-            raise Fail("bad_target")
-    return ssh, pg
+    return doc["ssh"], doc["postgres"]
 
 
+_TARGET_MODULE = None
+
+
+def _ssh_target():
+    """按本文件位置加载共享解析器；-I 不把脚本目录放进 sys.path，故显式加载。"""
+    global _TARGET_MODULE
+    if _TARGET_MODULE is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        spec = importlib.util.spec_from_file_location(
+            "lh_ssh_target", os.path.join(here, "ssh_target.py"))
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except (OSError, AttributeError):
+            raise Fail("internal_error") from None
+        _TARGET_MODULE = module
+    return _TARGET_MODULE
 def _need(name):
     """只核指定变量的存在性，不读值、不枚举、不回显。"""
     value = os.environ.get(name)
@@ -483,12 +478,12 @@ def _ssh_run(ssh, pg, keyfile, sql, variables, limits):
     _check()
     try:
         proc = _spawn(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                      stderr=subprocess.DEVNULL, env=_env(), shell=False)
+                      stderr=subprocess.PIPE, env=_env(), shell=False)
     except (OSError, subprocess.SubprocessError):
         raise Fail("source_unverified", 3) from None
     reaped = False
     try:
-        out, _ = proc.communicate(sql.encode("utf-8"), timeout=limits.left())
+        out, err = proc.communicate(sql.encode("utf-8"), timeout=limits.left())
         reaped = True
     except subprocess.TimeoutExpired:
         reaped = _reap(proc, limits.hard)
@@ -502,10 +497,36 @@ def _ssh_run(ssh, pg, keyfile, sql, variables, limits):
             _ACTIVE.discard(proc)
     _check()
     if proc.returncode != 0:
+        if proc.returncode == 255 and len(err) <= MAX_SSH_STDERR \
+                and _ssh_auth_failure(err, ssh["user"], ssh["host"]):
+            raise Fail("ssh_auth_failed", 3)
         raise Fail("source_unverified", 3)
     if len(out) > MAX_SQL_OUT:
         raise Fail("source_unverified", 3)
     return out
+
+
+def _ssh_auth_failure(stderr, user, host):
+    """仅识别本次目标最后的 OpenSSH `user@host: Permission denied (...)` 终止行。
+
+    OpenSSH 的实际 fatal 行使用 server_user 与已规范化的 host（hostname 为小写），
+    methods 允许为空。stderr 只在本函数内存中读取，不保留、不回显。
+    """
+    lines = [line.strip() for line in stderr.replace(b"\r", b"").split(b"\n")
+             if line.strip()]
+    if not lines:
+        return False
+    line = lines[-1]
+    prefix = user.encode("utf-8") + b"@"
+    if not line.startswith(prefix):
+        return False
+    seen_host, sep, tail = line[len(prefix):].partition(b": Permission denied (")
+    if not sep or not tail.endswith(b")."):
+        return False
+    if seen_host.lower() != host.encode("ascii").lower():
+        return False
+    methods = tail[:-2]
+    return re.fullmatch(rb"[A-Za-z0-9,._+-]*", methods) is not None
 
 
 def _auth_call(repo, skill_id, path, limits):

@@ -137,6 +137,7 @@ for pth in ('tests/run-tests.sh','tests/test_paths.py','.github/workflows/tests.
 check('select：普通未映射正文只 smoke',P.select(['README.md'])==[['smoke']])
 check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) for p,x in (('skills/luno-core/references/sync.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-redact.py']),('skills/luno-surge/SKILL.md',['case','test-surge-package.py']))))
 check('select：collect 双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/lh-collect.py']))),str(P.select(['tools/lh-collect.py'])))
+check('select：共享 SSH 解析双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/ssh_target.py']))),str(P.select(['tools/ssh_target.py'])))
 try:P.select(['tests/nope.py']);ok=False
 except ValueError:ok=True
 check('select：未知 tests 路径拒绝',ok)
