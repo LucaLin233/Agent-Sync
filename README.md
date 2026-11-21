@@ -169,7 +169,7 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
    - 预检：`CO fetch origin`，记下当前 HEAD 为旧版、`origin/main` 为新版，运行 `LI --preflight <新版>`。只有检出干净、现有安装一致、新版登记无冲突时才返回就绪；输出列出旧版、新版与将退役的入口。
    - 升级：`CO merge --ff-only <新版>`，再运行 `LI --apply --previous <旧版>` 与 `LI --check`。只退役旧版独有的公开软链和受管生成文件，目录、设置和登录态不动。`--apply` 中断时，可用同样的参数重跑完成升级；中断留下的暂存残留不参与判断，也不被清掉，按 `residue` 报告交你核对。
    - 首版只支持同布局：升级与回退要求两版的 `tools/link-install.py` 逐字节相同、并由登记推导出相同的公开入口目标。旧版登记先通过核验、进入这套兼容比较后，安装器一变（可能改变渲染路径）就在 `--preflight` 和 `--apply --previous` 写入前停止并报告 `installer_changed`，该停止码不与登记核验阶段的结果混用；同一公开入口目标不同报 `layout_changed`；旧版没有宿主端登记时报 `previous_without_host_installation`，已有宿主端登记但找不到旧版 `tools/link-install.py` 时报 `previous_installer_missing`。首版不承诺跨布局回退，也不迁移布局；维护窗口从 Git 切换前一直开到 `--check` 结束，期间暂停新会话。
-   - 跨安装器只读准入：旧版 `--preflight` 报 `installer_changed`，但两版受管树相同（例如只改了 `tools/link-install.py` 的 override 检查）时，可从目标提交取出安装器原字节，在干净旧版检出上只读核对。入口自行从当前 HEAD 和目标提交的 Git 对象取两个安装器 blob，并绑定运行中的目标工具字节，不需手抄 blob。`CHECKOUT`、`INSTALL_HOME` 按实际根设置，`NEW` 取已核完整目标 SHA；下列代码块在容器内执行，按该 checkout 实际使用的每套参数各调用 `run_check` 一次（下面列出 Codex 与 paseo 两套，默认两端时去掉参数即可），全部 rc0 才进入快进：
+   - 跨安装器只读准入：旧版 `--preflight` 报 `installer_changed`，但两版受管树相同（例如只改了 `tools/link-install.py` 的 override 检查）时，可从目标提交取出安装器原字节，在干净旧版检出上只读核对。入口自行从当前 HEAD 和目标提交的 Git 对象取两个安装器 blob，并绑定运行中的目标工具字节，不需手抄 blob。`CHECKOUT`、`INSTALL_HOME` 按实际根设置，`NEW` 取已核完整目标 SHA。在目标环境中按实际使用的每套参数各调用 `run_check` 一次，沿用现有 `--ends`、`--codex-home` 和 `--codex-global-source` 选择。下例为默认同时管理两端的 Compose 安装。全部 rc0 才进入快进：
 
      ```sh
      CHECKOUT=/home/paseo/.luno/agent-sync
@@ -184,8 +184,7 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
        python3 -B "$TMP/link-install.py" --checkout "$CHECKOUT" --home "$INSTALL_HOME" \
          --check-installer-upgrade "$NEW" "$@"
      }
-     run_check --ends codex --codex-home /home/paseo/.codex --codex-global-source paseo-append-system-prompt || exit 1
-     run_check --ends paseo || exit 1
+     run_check || exit 1
      ```
 
      入口要求旧版 HEAD 干净、旧版为新版祖先、运行中的目标工具字节等于 `$NEW` 的安装器；旧安装器执行自己的 `--check`，目标安装器按目标提交的登记和受管源核对同一实际根。同一旧版 HEAD 下每套参数的实际选择都必须通过；两版完整公开投影必须相同且目标每项 `match`，`prompt/`、`skills/`、`subagents/`、`tools/sync-targets.json`、`platforms/paseo/` 均未变，否则阻断。布局或受管源变更新增/退役项仍须该 PR 提供迁移与回退步骤，不能借此绕过。全部通过后在同一维护窗口只快进一次：`git -C "$CHECKOUT" merge --ff-only "$NEW"`；随后对每套参数逐一用新版 `--check`，任一失败立即 `git -C "$CHECKOUT" reset --keep "$OLD"` 并对所有选择重新检查。两版安装器相异时不得运行 `--apply`。普通 `--preflight` / `--apply --previous` 遇 `installer_changed` 仍按前条阻断，原升级、回退和首装撤回流程不变。更改安装器的 PR 合入前须在目标实际宿主上用旧版做上述只读预检，结果或迁移/回退步骤随 PR 记录；沿用现有流程，不为此新增 CI job。

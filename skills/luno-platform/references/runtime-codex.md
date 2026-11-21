@@ -1,6 +1,6 @@
 # Codex 端运行适配
 
-本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
+本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；Paseo 派发与接续按 `luno-platform`〈运行端〉读对应分支。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
 本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式 opt-in `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 只等于 `prompt/LUNO.md` 原文，GLOBAL 由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；安装器不读写该配置，设置与生成文件须在同一受控窗口切换并回读。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
 
@@ -22,7 +22,7 @@ Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，
 
 ## 派发通道
 
-- 本端所有委派（含通用兜底）的默认通道按 `references/runtime-paseo.md`〈派发通道〉。满足 `luno-platform`〈运行端〉的 Paseo 加载条件，或独立 Codex CLI 已有明确获准的 Paseo CLI 目标时，先完整读取该资源。无已核验的 Paseo 通道时，只停依赖派发的步骤并报告。只有用户明确指定才使用 Codex 原生 LENS/FORGE，独立 Codex CLI 也适用。
+- 本端所有委派（含通用兜底）默认按 `references/runtime-paseo.md`〔分支 paseo-dispatch〕使用已核验的 Paseo 通道。独立 Codex CLI 使用 Paseo CLI 前须有明确获准的目标。无已核验通道时，只停依赖派发的步骤并报告。只有用户明确指定才使用 Codex 原生 LENS/FORGE。
 - Codex CLI 0.170.0 支持通过 `[agents.<角色名>]` 的 `config_file` 注册原生角色，并由角色文件中的 `developer_instructions` 指定 LENS 或 FORGE。只有在当次授权内完成配置、必要审查及实际角色和模型元数据核验后，才能把它作为相应角色通道采用；原文资源存在、角色说明、昵称和自述都不算注册或运行成功。未注册、不可用或身份不可核时，仍按 `luno-core/references/review.md`〔分支 delegation〕〈任务归属〉停止依赖任务并报告；已获准且可用的 paseo 角色通道保留原用途，不自动迁移。
 - 原生子代理保留父会话的 AGENTS 指令及其权限上下文；角色 developer instructions 可以覆盖角色身份指令，但不删除、隐藏父提示词或私人内容，也不构成操作系统、凭据或数据隔离。子代理继承父当前 provider、审批、沙箱及 MCP 配置，角色配置不得扩大父权限或绕过审批。角色可按明确授权分别指定模型和思考强度；不得将配置值冒充实际运行模型，其他版本须重新核证。
 - 平台不设单次或累计时限，负责人为每次派发设定时限。

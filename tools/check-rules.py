@@ -36,10 +36,12 @@ REQUIRED_READS = (
     ('skills/luno-platform/SKILL.md', '按当前端完整读取对应资源：'),
     ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
     ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
-    ('skills/luno-platform/SKILL.md', '在 Codex 端且可用 paseo 编排工具或存在指定变量 `PASEO_AGENT_ID` 时，'
-                                      '另读 `references/runtime-paseo.md`'),
+    ('skills/luno-platform/SKILL.md', 'Codex 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，'
+                                      '完整读取 `references/runtime-paseo.md`〔分支 paseo-dispatch〕'),
+    ('skills/luno-platform/SKILL.md', '接续 Paseo 主会话前，完整读取 '
+                                      '`references/runtime-paseo.md`〔分支 paseo-resume〕'),
     ('skills/luno-platform/references/runtime-codex.md',
-     '与 `references/runtime-host.md` 合用；会话由 paseo 启动时另叠加 `references/runtime-paseo.md`'),
+     '与 `references/runtime-host.md` 合用；Paseo 派发与接续按 `luno-platform`〈运行端〉读对应分支'),
     ('skills/luno-platform/references/runtime-host.md',
      '并与 `references/runtime-codex.md` 合用'),
     ('skills/luno-platform/references/runtime-paseo.md',
