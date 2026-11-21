@@ -263,6 +263,25 @@ class Case(unittest.TestCase):
         self.assertEqual(summary["objects"][1]["status"], "not_run")
         self.assertEqual(len([p for p in os.listdir(self.out) if p.startswith("post-")]), 0)
 
+    def test_branch_move_during_second_precheck_blocks_second_install(self):
+        self.lh(0)
+        head = os.path.join(self.bin, "head")
+        self.write("tools/lh-verify.py", f"""from pathlib import Path
+import sys
+if any(Path(arg).parent.name == "pre-1" for arg in sys.argv[1:]):
+    Path({head!r}).write_text({self.base!r}, encoding="utf-8")
+{STUB_VERIFY}""")
+        proc = self.run_tool(("one", "two"))
+        self.assertEqual(proc.returncode, 3, proc.stderr)
+        summary = json.loads(proc.stdout)
+        self.assertEqual(summary["status"], "partial")
+        self.assertEqual(summary["objects"][0]["status"], "completed")
+        second = summary["objects"][1]
+        self.assertEqual((second["phase"], second["code"], second["changed"]),
+                         ("pre", "branch_changed", False))
+        self.assertEqual(self.argv_log(), [
+            "skill", "install", "https://github.com/o/r/tree/main/skills/one"])
+
     def test_post_difference_not_reported_completed(self):
         self.lh(0)
         self.verdict("post", 1)

@@ -8,7 +8,7 @@
 
 顺序：无凭据阶段先核两版登记的身份/类型/kind/ID/source/installSource 相同、资源只增不减、旧 blob 完整可读，
 并核安装分支 HEAD 仍等于 merged；随后新建 pre 观察（tools/lh-collect.py + tools/lh-verify.py）对 base 验收，
-任意非 0 即零写；通过后紧邻执行官方 CLI 写；写后再核分支 HEAD，仍以新建 post 观察对 merged 验收。
+任意非 0 即停止当前对象的写入；技能安装前紧邻重核分支 HEAD，写后再核并以新建 post 观察对 merged 验收。
 Agent 对象按登记 ID 对 systemRole 做 pre/post 原字节核对；首个错误后其余对象 not_run。
 target.json 与 lh-collect 共用解析：ssh 的 user/port 可省略并逐字段补 root/9399，显式值原样；
 SSH 认证失败沿固定码通道报 ssh_auth_failed/3：pre 阶段零写，post 阶段只报实际写后状态、不纠正不重投。
@@ -115,7 +115,7 @@ def _batch_blobs_complete(data, keys):
     return pos == len(data)
 
 
-def _git(repo, args, data=None, timeout=60):
+def _git(repo, args, data=None, timeout=60, phase="admission"):
     extra = {"input": data} if data is not None else {"stdin": subprocess.DEVNULL}
     try:
         proc = subprocess.run(
@@ -124,7 +124,7 @@ def _git(repo, args, data=None, timeout=60):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             shell=False, timeout=timeout, **extra)
     except (OSError, subprocess.SubprocessError):
-        raise Fail("git_error", 3) from None
+        raise Fail("git_error", 3, phase) from None
     return proc
 
 
@@ -354,31 +354,32 @@ def _tail_lf_only(verify_json, evidence_path, expected):
     return isinstance(content, str) and expected.endswith(b"\n") and observed == expected[:-1]
 
 
-def _install_source(entry, merged, timeout):
+def _install_source(entry, merged, timeout, phase="admission"):
     """登记 installSource 必须是公开 repo 的单段分支子目录，且该分支 HEAD 等于 merged。"""
     url = entry.get("installSource")
     source = entry.get("source") or ""
     if not isinstance(url, str) or not url:
-        raise Fail("missing_evidence", 3)
+        raise Fail("missing_evidence", 3, phase)
     parts = urllib.parse.urlsplit(url)
     segs = [seg for seg in parts.path.split("/") if seg]
     if parts.scheme != "https" or parts.netloc != "github.com" or parts.query or parts.fragment \
             or len(segs) < 5 or segs[2] != "tree":
-        raise Fail("registry_invalid", 3)
+        raise Fail("registry_invalid", 3, phase)
     owner, repo_name, branch = segs[0], segs[1], segs[3]
     subdir = "/".join(segs[4:])
     for token in (owner, repo_name, branch):
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", token):
-            raise Fail("registry_invalid", 3)
+            raise Fail("registry_invalid", 3, phase)
     if source.rsplit("/", 1)[0] != subdir:
-        raise Fail("registry_invalid", 3)
+        raise Fail("registry_invalid", 3, phase)
+    ref = "refs/heads/" + branch
     proc = _git(os.getcwd(), ["ls-remote", "https://github.com/%s/%s" % (owner, repo_name),
-                              "refs/heads/" + branch], timeout=timeout)
+                              ref], timeout=timeout, phase=phase)
     if proc.returncode != 0:
-        raise Fail("source_unverified", 3)
-    rows = [ln.split("\t") for ln in proc.stdout.decode("utf-8", "replace").splitlines() if ln]
-    if len(rows) != 1 or rows[0][1] != "refs/heads/" + branch or rows[0][0] != merged:
-        raise Fail("branch_changed", 3)
+        raise Fail("source_unverified", 3, phase)
+    rows = [ln for ln in proc.stdout.decode("utf-8", "replace").splitlines() if ln]
+    if rows != [merged + "\t" + ref]:
+        raise Fail("branch_changed", 3, phase)
     return url
 
 
@@ -634,21 +635,19 @@ def main(argv=None):
         for name in ("LOBEHUB_SERVER", "LOBEHUB_CLI_API_KEY"):
             if not os.environ.get(name):
                 raise Fail("missing_variable:" + name, 3)
-        installs = {}
-        for name, old, new, kind, lh_id in plan:
+        for _, _, new, kind, _ in plan:
             if kind == "skill":
-                installs[name] = _install_source(new, args.merged, min(60, args.total_timeout))
+                _install_source(new, args.merged, min(60, args.total_timeout))
         # 旧 blob 完整可读（源 + 全部旧资源），缺即停，不做 lazy fetch。
         blobs = []
         for name, old, _, _, _ in plan:
             blobs.append(old["source"])
             blobs.extend(old.get("resources") or [])
-        if blobs:
-            keys = list(dict.fromkeys(blobs))
-            request = "".join("%s:%s\n" % (args.base, p) for p in keys).encode("utf-8")
-            proc = _git(args.repo, ["cat-file", "--batch"], request)
-            if proc.returncode != 0 or not _batch_blobs_complete(proc.stdout, keys):
-                raise Fail("source_unverified", 3)
+        keys = list(dict.fromkeys(blobs))
+        request = "".join("%s:%s\n" % (args.base, p) for p in keys).encode("utf-8")
+        proc = _git(args.repo, ["cat-file", "--batch"], request)
+        if proc.returncode != 0 or not _batch_blobs_complete(proc.stdout, keys):
+            raise Fail("source_unverified", 3)
         os.mkdir(args.out_dir, 0o700)
         os.chmod(args.out_dir, 0o700)
         HOME_HOLDER[0] = os.path.join(args.out_dir, "cli-home")
@@ -711,14 +710,15 @@ def main(argv=None):
                 _write_artifact(args.out_dir, "verify-pre-%d.json" % index, vout, limits)
                 if vrc != 0:
                     raise Fail("pre_difference", 1, "pre")
+                # pre 采集与验收期间安装分支可能推进。
+                install = _install_source(new, args.merged, left(), "pre")
                 entry.update(phase="write", status="running")
                 wrote = True
                 entry["changed"] = "unknown"
-                rc = _cli(api_env, ["lh", "skill", "install", installs[name]], left(), "write")
+                rc = _cli(api_env, ["lh", "skill", "install", install], left(), "write")
                 if rc != 0:
                     raise Fail("cli_error", 2, "write", changed="unknown")
-                if kind == "skill":
-                    _install_source(new, args.merged, left())
+                _install_source(new, args.merged, left(), "post")
                 post_dir = os.path.join(args.out_dir, "post-%d" % index)
                 _collect(args.repo, name, args.merged, post_dir, args, target_raw, "post", limits)
                 vrc, vout = _verify(args.repo, name, args.merged,
@@ -728,9 +728,9 @@ def main(argv=None):
                 _write_artifact(args.out_dir, "verify-post-%d.json" % index, vout, limits)
                 if vrc != 0:
                     # 规格 6 唯一纠正例外：仅当 verify 原 JSON 的差异恰为 content，
-                    # 且现场 content 恰等于期望正文 + 一个尾 LF，才以 argv 原样补一次全文。
+                    # 且现场 content 恰比期望正文少一个尾 LF，才以 argv 原样补一次全文。
                     expected = _body_bytes(args.repo, args.merged, new["source"], limits)
-                    if kind == "skill" and _tail_lf_only(
+                    if _tail_lf_only(
                             vout, os.path.join(post_dir, "skill-evidence.json"), expected):
                         try:
                             arg = os.fsdecode(expected)
@@ -771,9 +771,7 @@ def main(argv=None):
                              changed=exc.changed if exc.changed else entry.get("changed", False))
                 summary["errors"].append(exc.code)
                 stop = True
-                rank = {2: 3, 3: 2, 1: 1, 0: 0}
-                if err is None or rank.get(exc.exit, 0) > rank.get(err.exit, 0):
-                    err = exc
+                err = exc
         done = [e for e in summary["objects"] if e["status"] == "completed"]
         bad = [e for e in summary["objects"] if e["status"] == "failed"]
         if not bad and len(done) == len(plan):

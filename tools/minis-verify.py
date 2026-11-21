@@ -592,39 +592,35 @@ def _enumerate(dfd):
 def _check_skill(entry, ctx):
     rep, rid = ctx["rep"], entry["id"]
     mini = entry["minis"]
-    src = entry["source"]
     rels = ctx["rels"][rid]
     base = ctx["root_parts"] + _abs_parts(mini["path"], "expected_contract_error")[:-1]
     status = {}
     reset = [False]
     f = Fence(base, missing_code="file_missing")
     try:
-        files = dirs = None
-        extra_bad = False
-        enum_cls = None
         try:
             files, dirs = _enumerate(f.fd)
         except Reject as exc:
             rep.issue(exc.code, rid, None)
-            enum_cls = CODES[exc.code][0]
-        expected_dirs = set()
-        for rel in rels:
-            comps = rel.split("/")[:-1]
-            for i in range(1, len(comps) + 1):
-                expected_dirs.add("/".join(comps[:i]))
-        extras = []
-        if files is not None:
-            extras = sorted(set(files) - set(rels)) + sorted(set(dirs) - expected_dirs)
-            for rel in extras:
+            status["package-set"] = "not_checked"
+        else:
+            expected_dirs = set()
+            for rel in rels:
+                comps = rel.split("/")[:-1]
+                for i in range(1, len(comps) + 1):
+                    expected_dirs.add("/".join(comps[:i]))
+            for rel in sorted(files.keys() - rels.keys()) + sorted(dirs.keys() - expected_dirs):
                 rep.issue("package_set", rid, rel if _safe_rel(rel) else None)
-            extra_bad = bool(extras)
+            for rel in sorted(rels):
+                if files.get(rel) != "file":
+                    code = "file_type" if rel in files or rel in dirs else "file_missing"
+                    rep.issue(code, rid, rel if _safe_rel(rel) else None)
+            status["package-set"] = (
+                "match" if files == dict.fromkeys(rels, "file") and dirs.keys() == expected_dirs
+                else "different")
         for rel, repo_path in rels.items():
-            expect = ctx["blobs"].get(repo_path)
-            mode = ctx["modes"].get(repo_path)
-            if expect is None or mode is None:
-                raise Reject("expected_contract_error")
-            if mode not in ("100644", "100755"):
-                raise Reject("unsupported_git_mode")
+            expect = ctx["blobs"][repo_path]
+            mode = ctx["modes"][repo_path]
             comps = rel.split("/")
             name = comps.pop()
             path = rel if _safe_rel(rel) else None
@@ -634,19 +630,14 @@ def _check_skill(entry, ctx):
                 for comp in comps:
                     f.push(comp)
                     depth += 1
-                data, cls = _member(f.fd, name, rep, rid, path, expect)
+                _, cls = _member(f.fd, name, rep, rid, path, expect)
                 estatus = _exec_status(f.fd, name, mode == "100755", rep, rid, path)
             except Reject as exc:
                 rep.issue(exc.code, rid, path)
                 fstatus = "different" if CODES[exc.code][0] == "difference" else "not_checked"
                 estatus = "not_checked"
             else:
-                if cls is None:
-                    fstatus = "match"
-                else:
-                    fstatus = "different" if cls == "difference" else "not_checked"
-                    if cls == "difference":
-                        extra_bad = True
+                fstatus = "match" if cls is None else "different" if cls == "difference" else "not_checked"
             finally:
                 # 部分 push 成功后下一层失败也必须逐层退栈，后续资源才回到正确父 fd。
                 for _ in range(depth):
@@ -655,10 +646,6 @@ def _check_skill(entry, ctx):
             if fstatus == "not_checked" and estatus == "match":
                 estatus = "not_checked"     # 读取未获证时不得残留同一名字的 exec match
             status["exec:" + repo_path] = estatus
-        if enum_cls is not None:
-            status["package-set"] = "not_checked"
-        else:
-            status["package-set"] = "different" if extra_bad else "match"
     finally:
         try:
             f.recheck()
@@ -677,11 +664,7 @@ def _check_field_file(entry, ctx):
     if "alsoFile" not in mini:
         return {}
     parts = _abs_parts(mini["alsoFile"], "expected_contract_error")
-    mode, expect = ctx["modes"].get(src), ctx["blobs"].get(src)
-    if mode is None or expect is None:
-        raise Reject("expected_contract_error")
-    if mode not in ("100644", "100755"):
-        raise Reject("unsupported_git_mode")
+    mode, expect = ctx["modes"][src], ctx["blobs"][src]
     body = ctx["body"]
     try:
         git_body = body.body_bytes(expect)
@@ -876,11 +859,7 @@ def _field_status(rep, rid, state, allowed):
     if state[0] == "null":
         rep.issue("field_value", rid, None)
         return "different"
-    try:
-        raw = state[1].encode("utf-8")
-    except UnicodeEncodeError:
-        rep.issue("bad_json", rid, None)
-        return "not_checked"
+    raw = state[1].encode("utf-8")
     if raw in allowed:
         return "match"
     rep.issue("field_value", rid, None)
