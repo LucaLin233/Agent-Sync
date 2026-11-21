@@ -4,11 +4,11 @@
 <!-- BEGIN memory-common -->
 # LUNO｜经验与记忆纠错
 
-日志及未指定的其他记忆各端自持，不互导。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向私人副本，Minis 为唯一真源；宿主端副本路径以当次明确配置为准（安装器相对布局为 `<安装根>/.luno/memory/GLOBAL.md`），按 `luno-core/references/sync.md`〔分支 sync-host〕复制；LobeHub 优先私人助理空间文件，仅在确认该能力不可用时以私有知识库文档兜底，均须按已核实的文件路径或文档 ID 完整读取，不以检索片段或摘要代替，不导入原生记忆。目标独有修改或冲突即停，不回写或双向合并；涉及 LobeHub 私人副本时，完整读 `references/lobehub-knowledge.md`〔分支 knowledge〕；涉及宿主端副本时，按 `luno-core/references/sync.md`〔分支 sync-host〕及 `references/runtime-host.md`〈记忆入口〉。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有实际涉及记忆更正、整理、保存经验或实施经验固化时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
+日志及未指定的其他记忆各端自持，不互导。唯一窄例外是用户指定的 Minis `/var/minis/memory/GLOBAL.md` 整份单向私人副本，Minis 为唯一真源；宿主端副本路径以当次明确配置为准（安装器相对布局为 `<安装根>/.luno/memory/GLOBAL.md`），按 `luno-core/references/sync.md`〔分支 sync-host〕复制，不以检索片段或摘要代替，不导入原生记忆。目标独有修改或冲突即停，不回写或双向合并；涉及宿主端副本时，按 `luno-core/references/sync.md`〔分支 sync-host〕及 `references/runtime-host.md`〈记忆入口〉。普通的事实或偏好纠正，以及已经定位的单次自验错误，直接给出更正、依据和适用范围，不因纠正本身加载维护资源；只有实际涉及记忆更正、整理、保存经验或实施经验固化时，才基于已授权的材料按维护资源分诊和处置。原因不明就不下定论，也不为凑字段新增记忆。
 
 ## 资源与触发
 
-纯检索记忆时，完整读取本分支及本端检索入口，不加载仅写入格式和容量维护。写入、整理或更正记忆，保存经验或实施经验固化，以及对这些动作做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕；检索中命中这些情形，或发现日志达到约 100 KiB、注入截断时，也须补读 maintenance 及其命中的 correction 分支。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时，先读 maintenance，再读 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口；LobeHub 记忆操作、规划或审查另完整读取 `references/lobehub-knowledge.md`〔分支 lobehub-memory〕。宿主端（Codex）的记忆操作、规划或审查另完整读取 `references/runtime-host.md`〈记忆入口〉。
+纯检索记忆时，完整读取本分支及本端检索入口，不加载仅写入格式和容量维护。写入、整理或更正记忆，保存经验或实施经验固化，以及对这些动作做规划或审查之前，完整读取 `references/memory-common.md`〔分支 maintenance〕；检索中命中这些情形，或发现日志达到约 100 KiB、注入截断时，也须补读 maintenance 及其命中的 correction 分支。涉及 Minis 记忆日志的注入、截断或容量评估及相关建议或结论时，先读 maintenance，再读 `references/minis-memory.md`〔分支 minis-memory-injection〕。Minis 上第一次做记忆操作前，另完整读取 `references/minis-memory.md`〔分支 minis-memory〕 并按其〈Minis 记忆读写入口〉选定入口。宿主端（Codex）的记忆操作、规划或审查另完整读取 `references/runtime-host.md`〈记忆入口〉。
 
 ## 检索与采用
 

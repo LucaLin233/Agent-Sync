@@ -122,7 +122,7 @@ for label,args,stdin in (('未知组',('group','nope'),None),
     code,out=rt(*args,stdin=stdin)
     check('runner 拒绝%s（rc=2，未跑任何入口）'%label,code==2 and not ran(out),'rc=%d\n%s'%(code,out[-300:]))
 code,out=rt('select-paths',stdin='tests/run-tests.sh\0tools/check-rules.py\0')
-check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["case", "test-link-install.py"], ["group", "auth"], ["group", "identity"], ["group", "verify"], ["group", "minis-verify"], ["group", "lh-wiring"], ["case", "sync-all.sh"], ["case", "test-runner.sh"], ["group", "gate"]]',out)
+check('select-paths：full 与定向组并存，且不受 PYTHONPATH 影响',code==0 and out.strip()=='[["full"], ["case", "test-link-install.py"], ["group", "auth"], ["group", "identity"], ["group", "minis-verify"], ["case", "sync-all.sh"], ["case", "test-runner.sh"], ["group", "gate"]]',out)
 def expand(doc):
     got=set()
     for s in doc:
@@ -136,8 +136,7 @@ for pth in ('tests/run-tests.sh','tests/test_paths.py','.github/workflows/tests.
     check('select：%s 展开全 %d 入口各一次'%(pth,len(names)),expand(P.select([pth]))==names,str(P.select([pth])))
 check('select：普通未映射正文只 smoke',P.select(['README.md'])==[['smoke']])
 check('select：已映射 .md 照表不作后缀豁免',all(x in P.select([p]) for p,x in (('skills/luno-core/references/sync.md',['case','test-redact.py']),('skills/luno-platform/references/minis.md',['case','test-redact.py']),('skills/luno-surge/SKILL.md',['case','test-surge-package.py']))))
-check('select：collect 双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/lh-collect.py']))),str(P.select(['tools/lh-collect.py'])))
-check('select：共享 SSH 解析双消费者',{('case','test-lh-collect.py'),('case','test-lh-deploy.py')}<=set(map(tuple,P.select(['tools/ssh_target.py']))),str(P.select(['tools/ssh_target.py'])))
+check('select：退役的 lh 专项删除 diff 仍可选路且都落到 full',all(P.select([p])==[['full']] for p in ('tests/test-lh-collect.py','tests/test-lh-deploy.py','tests/test-lh-verify.py')),str([P.select([p]) for p in ('tests/test-lh-collect.py','tests/test-lh-deploy.py','tests/test-lh-verify.py')]))
 try:P.select(['tests/nope.py']);ok=False
 except ValueError:ok=True
 check('select：未知 tests 路径拒绝',ok)
@@ -190,20 +189,20 @@ g('checkout','-q','-b','feat',C1);(R2/'skills/luno-core/references').mkdir(paren
 g('checkout','-q','main');g('merge','-q','--no-ff','-m','m','feat');MM=g('rev-parse','HEAD')
 r=ci('pull_request',BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA=MM)
 check('CI：PR 测 B→M，base 前进不算 PR 变化',r.returncode==0 and plan(r)=='[["smoke"], ["group", "identity"]]' and 'identity' in (R2/'selected.json').read_text(),r.stdout[-300:]+r.stderr[-300:])
-g('checkout','-q','-b','feat2',C1);(R2/'tools').mkdir(exist_ok=True);(R2/'tools/lh-verify.py').write_text('v\n');cm('d1')
+g('checkout','-q','-b','feat2',C1);(R2/'tools').mkdir(exist_ok=True);(R2/'tools/minis-verify.py').write_text('v\n');cm('d1')
 (R2/'skills/luno-platform/references').mkdir(parents=True,exist_ok=True);(R2/'skills/luno-platform/references/minis.md').write_text('m\n');D2=cm('d2')
 r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
-check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py')),r.stdout[-300:])
+check('CI：push 取 before→after，多提交都在',r.returncode==0 and all(x in plan(r) for x in ('test-minis-verify.py','test-redact.py')),r.stdout[-300:])
 # R3 直接回归：本地 replace ref 不得改变选路（最外层 Git 禁配置生效）；去掉保护须真实反例
 g('replace',C1,D2)
 r=ci('push',BEFORE_SHA=C1,AFTER_SHA=D2)
 check('CI：本地 replace ref 下仍按原始两棵树选路（禁 replace 生效）',
-      r.returncode==0 and all(x in plan(r) for x in ('test-lh-verify.py','test-redact.py')),r.stdout[-300:]+r.stderr[-300:])
+      r.returncode==0 and all(x in plan(r) for x in ('test-minis-verify.py','test-redact.py')),r.stdout[-300:]+r.stderr[-300:])
 RED_PRE=PRE.replace('GIT_NO_REPLACE_OBJECTS=1 ','')
 assert RED_PRE!=PRE and 'GIT_NO_REPLACE_OBJECTS' not in RED_PRE
 r=ci('push',pre=RED_PRE,BEFORE_SHA=C1,AFTER_SHA=D2)
 check('负控：去掉 GIT_NO_REPLACE_OBJECTS 后同一 replace ref 令 gate 退化为 smoke',
-      r.returncode==0 and 'test-lh-verify.py' not in plan(r) and plan(r)=='[["smoke"]]',plan(r)+r.stderr[-200:])
+      r.returncode==0 and 'test-minis-verify.py' not in plan(r) and plan(r)=='[["smoke"]]',plan(r)+r.stderr[-200:])
 g('replace','-d',C1)
 for kw,label in ((dict(BASE_SHA=C2,HEAD_SHA=C3,MERGE_SHA='a'*40),'缺对象'),(dict(BEFORE_SHA='0'*40,AFTER_SHA=D2),'全零')):
     r=ci('push' if 'BEFORE_SHA' in kw else 'pull_request',**kw)

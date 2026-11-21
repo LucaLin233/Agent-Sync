@@ -8,11 +8,9 @@
     "bytes": "原始字节读取；UTF-8 严格校验（含 frontmatter）；文本入口禁 BOM；CRLF 不归一；尾换行不规范化",
     "fields": "frontmatter 字段用 YAML 解析取值（缺字段/null/空串三分）；平台 JSON 字段解码后按值比较，不 trim",
     "resources": "包资源（references/scripts/assets 等）按原始字节复制与比较，不做正文规范化",
-    "comparison": "文件载荷用全文；平台字段（soul.body / systemRole / skill content / persona prefix）用正文",
+    "comparison": "文件载荷用全文；平台字段（soul.body / 子代理 instructions）用正文",
     "fieldTrailingNewline": {
       "measured": {
-        "lh.skill.edit.content": "原样存储（写入 1695 B 正文 → 回读 1695 B）",
-        "lh.agent.edit.systemRole": "原样存储（写入 3791 B 正文 → 回读 3791 B）",
         "minis.soul.body": "保留（写入 3790 B → 回读 3791 B：**强制补尾换行**，故仓库须带尾换行）",
         "minis.subagents.*.instructions": "**剥除**（写入带尾换行 → 回读无），故仓库三份子代理文件**不带**尾换行"
       },
@@ -34,12 +32,6 @@
           "kind": "field",
           "field": "soul.body",
           "alsoFile": "/var/minis/memory/SOUL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "agent",
-          "id": "agt_0Q1gmmEVOqF1",
-          "field": "systemRole"
         },
         "codex": {
           "present": true,
@@ -67,12 +59,6 @@
           "present": true,
           "kind": "field",
           "field": "subagents.8DF7ECDE-B73E-411C-80D1-02DCA7542D75.instructions"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "agent",
-          "id": "agt_EyGvkuZ3InQj",
-          "field": "systemRole"
         },
         "codex": {
           "present": true,
@@ -108,12 +94,6 @@
           "kind": "field",
           "field": "subagents.9FF19B3C-3D0A-4E22-9986-4FC5900DCDA3.instructions"
         },
-        "lobehub": {
-          "present": true,
-          "kind": "agent",
-          "id": "agt_JSQo9uyuxMU9",
-          "field": "systemRole"
-        },
         "codex": {
           "present": true,
           "kind": "generated",
@@ -148,9 +128,6 @@
           "kind": "field",
           "field": "subagents.general.instructions"
         },
-        "lobehub": {
-          "present": false
-        },
         "codex": {
           "present": false
         },
@@ -158,7 +135,7 @@
           "present": false
         }
       },
-      "note": "Minis 内置通用执行兜底，非 FORGE 副本；名字与描述固定、不可删；按类型批量覆盖时须排除。LobeHub 设计无此对象。"
+      "note": "Minis 内置通用执行兜底，非 FORGE 副本；名字与描述固定、不可删；按类型批量覆盖时须排除。"
     },
     {
       "id": "luno-core",
@@ -186,12 +163,6 @@
           "kind": "file",
           "path": "/var/minis/skills/luno-core/SKILL.md"
         },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_uwJOacJnCwCZ",
-          "fields": "content,name,description"
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -209,9 +180,7 @@
             "~/.luno/homes/forge-gdr/skills/luno-core"
           ]
         }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-core",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
+      }
     },
     {
       "id": "luno-ops",
@@ -233,12 +202,6 @@
           "kind": "file",
           "path": "/var/minis/skills/luno-ops/SKILL.md"
         },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_GFH4VX36mLmY",
-          "fields": "content,name,description"
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -256,9 +219,7 @@
             "~/.luno/homes/forge-gdr/skills/luno-ops"
           ]
         }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-ops",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
+      }
     },
     {
       "id": "luno-authoring",
@@ -279,12 +240,6 @@
           "kind": "file",
           "path": "/var/minis/skills/luno-authoring/SKILL.md"
         },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_RBqxBjRlC67z",
-          "fields": "content,name,description"
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -302,9 +257,7 @@
             "~/.luno/homes/forge-gdr/skills/luno-authoring"
           ]
         }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-authoring",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
+      }
     },
     {
       "id": "luno-platform",
@@ -322,14 +275,10 @@
         "skills/luno-platform/references/cchp-upstream/references/pagination.md",
         "skills/luno-platform/references/cchp-upstream/references/workflows.md",
         "skills/luno-platform/references/cchp.md",
-        "skills/luno-platform/references/lobehub-instance.md",
-        "skills/luno-platform/references/lobehub-knowledge.md",
-        "skills/luno-platform/references/lobehub.md",
         "skills/luno-platform/references/memory-common.md",
         "skills/luno-platform/references/minis-memory.md",
         "skills/luno-platform/references/minis.md",
         "skills/luno-platform/references/runtime-minis.md",
-        "skills/luno-platform/references/runtime-lobehub.md",
         "skills/luno-platform/references/runtime-host.md",
         "skills/luno-platform/references/runtime-codex.md",
         "skills/luno-platform/references/runtime-paseo.md"
@@ -342,12 +291,6 @@
           "present": true,
           "kind": "file",
           "path": "/var/minis/skills/luno-platform/SKILL.md"
-        },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_rHZXciQezHsZ",
-          "fields": "content,name,description"
         },
         "codex": {
           "present": true,
@@ -367,8 +310,7 @@
           ]
         }
       },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-platform",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。 本候选新增 memory-common/minis-memory 两份记忆资源，LobeHub 记忆保留在 lobehub-knowledge 的命中分支，另承接 CCHP 上游包；不表示已部署或独立对象已删除。"
+      "note": "本候选新增 memory-common/minis-memory 两份记忆资源，另承接 CCHP 上游包；不表示已部署或独立对象已删除。"
     },
     {
       "id": "luno-surge",
@@ -400,12 +342,6 @@
           "kind": "file",
           "path": "/var/minis/skills/luno-surge/SKILL.md"
         },
-        "lobehub": {
-          "present": true,
-          "kind": "skill",
-          "id": "skl_JkqkEHmFY57U",
-          "fields": "content,name,description"
-        },
         "codex": {
           "present": true,
           "kind": "link",
@@ -423,9 +359,7 @@
             "~/.luno/homes/forge-gdr/skills/luno-surge"
           ]
         }
-      },
-      "installSource": "https://github.com/LucaLin233/Agent-Sync/tree/main/skills/luno-surge",
-      "note": "LobeHub ID 为 2026-11-12 删除重装后回读的实际 ID；identifier 为 lucalin233-agent-sync-<name>。"
+      }
     }
   ]
 }

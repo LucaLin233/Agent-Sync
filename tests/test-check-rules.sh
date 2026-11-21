@@ -202,13 +202,12 @@ case('被指向的分支缺 END 定界',1,'分支指针失效',
 case('身份登记不可读',3,'身份登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{bad'))
 case('身份登记为空',3,'身份登记不可用',lambda p:(p/'tools/sync-targets.json').write_text('{"objects":[]}'))
 case('身份与技能源不一致',1,'身份与技能源不一致',lambda p:skill_obj(p,lambda o:o.__setitem__('id','wrong-name')))
-def shared_id(p):
-    def fn(d):
-        sk=[o for o in d['objects'] if o['type']=='skill'];sk[1]['ends']['lobehub']['id']=sk[0]['ends']['lobehub']['id']
-    registry(p,fn)
-case('同一平台 ID 多占',1,'平台身份多占',shared_id)
-case('缺位仍带 ID',1,'缺位身份冲突',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('present',False)))
-case('平台 ID 非法形态',1,'平台身份形态',lambda p:skill_obj(p,lambda o:o['ends']['lobehub'].__setitem__('id','bad')))
+def missing_with_id(p):
+    def fn(o):
+        o['ends']['minis']['present']=False
+        o['ends']['minis']['id']='leftover'
+    skill_obj(p,fn)
+case('缺位仍带 ID',1,'缺位身份冲突',missing_with_id)
 case('身份端缺 present',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends']['minis'].pop('present')))
 case('宿主端也须显式登记',1,'身份端结构',lambda p:skill_obj(p,lambda o:o['ends'].pop('codex')))
 case('宿主端路径须为 HOME 相对路径',1,'宿主端路径形态',
@@ -246,8 +245,7 @@ case('义务块重复',1,'义务块缺失或重复',lambda p:append(p,OB_SRC,'\n
 case('义务块为空',1,'义务块为空',lambda p:edit(p,OB_SRC,ob_empty))
 
 # 产品入口下沉后，原产品边界仍须逐个负控；从守卫声明现读，不钉正文措辞。
-PRODUCT_PATHS={'skills/luno-platform/SKILL.md', 'skills/luno-platform/references/cchp.md',
-               'skills/luno-platform/references/lobehub.md'}
+PRODUCT_PATHS={'skills/luno-platform/SKILL.md', 'skills/luno-platform/references/cchp.md'}
 PRODUCT_OBS=[(src,head) for src,head in G.OBLIGATIONS if src in PRODUCT_PATHS and head!='## 范围']
 assert PRODUCT_OBS, '产品入口义务负控不能空转'
 def drop_product_obs(p):
