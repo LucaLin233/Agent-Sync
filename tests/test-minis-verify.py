@@ -226,6 +226,8 @@ class MinisVerify(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("file_exec", self.codes(doc))
         self.assertIn("file_bytes", self.codes(doc))
+        self.assertEqual(self.status(doc, "package-set"), "match")
+        self.assertEqual(self.status(doc, "file:skills/alpha/references/a.md"), "different")
         self.assertEqual(self.status(doc, "file:skills/alpha/references/empty.md"), "match")
         _w(self.soul, "---\nname: Other\nicon: z\n---\nSOUL 正文\n")
         good = self.write_projection(self.one("prompt/P.md", "soul.body", self.body()))
@@ -548,7 +550,8 @@ class MinisVerify(unittest.TestCase):
         # 后续独立稳定资源仍相对正确父 fd 核对，不被前一个缺证升级为假阳性
         self.assertEqual(self.status(doc, "file:skills/alpha2/references/empty.md"), "match")
         self.assertEqual(self.status(doc, "exec:skills/alpha2/references/empty.md"), "match")
-        self.assertEqual(self.status(doc, "package-set"), "match")
+        self.assertEqual(self.status(doc, "file:skills/alpha2/references/sub/deep.md"), "different")
+        self.assertEqual(self.status(doc, "package-set"), "different")
 
     # 5e SOUL 读取期间持续改写：file/exec 均降级，不残留未经证实的 exec match
     def test_soul_change_clears_exec_match(self):

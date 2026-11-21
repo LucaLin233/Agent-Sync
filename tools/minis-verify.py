@@ -600,7 +600,6 @@ def _check_skill(entry, ctx):
     f = Fence(base, missing_code="file_missing")
     try:
         files = dirs = None
-        extra_bad = False
         enum_cls = None
         try:
             files, dirs = _enumerate(f.fd)
@@ -617,7 +616,6 @@ def _check_skill(entry, ctx):
             extras = sorted(set(files) - set(rels)) + sorted(set(dirs) - expected_dirs)
             for rel in extras:
                 rep.issue("package_set", rid, rel if _safe_rel(rel) else None)
-            extra_bad = bool(extras)
         for rel, repo_path in rels.items():
             expect = ctx["blobs"].get(repo_path)
             mode = ctx["modes"].get(repo_path)
@@ -645,8 +643,6 @@ def _check_skill(entry, ctx):
                     fstatus = "match"
                 else:
                     fstatus = "different" if cls == "difference" else "not_checked"
-                    if cls == "difference":
-                        extra_bad = True
             finally:
                 # 部分 push 成功后下一层失败也必须逐层退栈，后续资源才回到正确父 fd。
                 for _ in range(depth):
@@ -658,7 +654,9 @@ def _check_skill(entry, ctx):
         if enum_cls is not None:
             status["package-set"] = "not_checked"
         else:
-            status["package-set"] = "different" if extra_bad else "match"
+            status["package-set"] = (
+                "different" if files != dict.fromkeys(rels, "file")
+                or dirs.keys() != expected_dirs else "match")
     finally:
         try:
             f.recheck()
