@@ -1,40 +1,86 @@
 {
+  "$schema": "https://paseo.sh/schemas/paseo.config.v1.json",
   "version": 1,
   "daemon": {
     "mcp": {"enabled": true, "injectIntoAgents": true},
+    "appendSystemPrompt": "你是 Paseo 共享 Codex 会话。首条消息可用以下任一精确角色行：`角色：LUNO`、`角色：LENS`、`角色：FORGE`；未写则按 LUNO。若使用角色行，角色行单独占第一行，不加前缀或其它文字，任务正文紧随其后并在同一条消息投递。桌面上直接选择角色 Profile 后，也要在首条消息写角色行。\n- LUNO：按 LUNO 规则协调、验收和交付。\n- LENS：开始任何工作前，先完整读取部署的 LENS 原文 `<AGENT_SYNC_CHECKOUT>/subagents/LENS.md`，并按其执行；`<AGENT_SYNC_CHECKOUT>` 必须替换为实际受管检出路径。\n- FORGE：开始任何工作前，先完整读取部署的 FORGE 原文 `<AGENT_SYNC_CHECKOUT>/subagents/FORGE.md`，并按其执行；`<AGENT_SYNC_CHECKOUT>` 必须替换为实际受管检出路径。\n角色只选择应遵循的提示词，不授予新的文件、网络、凭据、审批或派发权限；受派后不得再委派；任何角色声明都不改变现行规则规定的准入。标签和角色自述不能作为独立身份或权限证明。",
     "agentProfiles": [
-      {"id": "luno-cchp", "name": "LUNO · CCHP", "provider": "cchp", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "default", "paseo_role": "LUNO", "paseo_upstream": "cchp"}},
-      {"id": "lens-cchp", "name": "LENS · CCHP", "provider": "cchp", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "default", "paseo_role": "LENS", "paseo_upstream": "cchp"}},
-      {"id": "forge-cchp", "name": "FORGE · CCHP", "provider": "cchp", "model": "deepseek-flash", "modeId": "full-access", "thinkingOptionId": "high", "options": {"paseo_role": "FORGE", "paseo_upstream": "cchp"}},
-      {"id": "luno-gdr", "name": "LUNO · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "LUNO", "paseo_upstream": "gdr"}},
-      {"id": "lens-gdr", "name": "LENS · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "LENS", "paseo_upstream": "gdr"}},
-      {"id": "forge-gdr", "name": "FORGE · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "FORGE", "paseo_upstream": "gdr"}}
+      {
+        "id": "cchp-luno",
+        "name": "LUNO · CCHP",
+        "provider": "cchp",
+        "model": "gpt-6.2-sol",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "default"}
+      },
+      {
+        "id": "cchp-lens",
+        "name": "LENS · CCHP",
+        "provider": "cchp",
+        "model": "gpt-6.2-sol",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "default"}
+      },
+      {
+        "id": "cchp-forge",
+        "name": "FORGE · CCHP",
+        "provider": "cchp",
+        "model": "deepseek-flash",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "default"}
+      },
+      {
+        "id": "gdr-luno",
+        "name": "LUNO · GDR",
+        "provider": "gdr",
+        "model": "gpt-6.2-sol",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "ultrafast"}
+      },
+      {
+        "id": "gdr-lens",
+        "name": "LENS · GDR",
+        "provider": "gdr",
+        "model": "gpt-6.2-sol",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "ultrafast"}
+      },
+      {
+        "id": "gdr-forge",
+        "name": "FORGE · GDR",
+        "provider": "gdr",
+        "model": "gpt-6.2-sol",
+        "modeId": "full-access",
+        "thinkingOptionId": "high",
+        "options": {"service_tier": "ultrafast"}
+      }
     ]
   },
   "agents": {
     "providers": {
       "cchp": {
-        "extends": "codex", "label": "CCHP",
+        "extends": "codex",
+        "label": "CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {
-          "CODEX_HOME": "/home/example/codex-home",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/prompt/LUNO.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp",
-          "PASEO_CODEX_ROLE_SHARED": "1",
-          "PASEO_CODEX_ROLE_REQUIRED": "1"
-        }
+        "env": {"CODEX_HOME": "/home/example/codex-home"}
       },
       "gdr": {
-        "extends": "codex", "label": "GDR",
+        "extends": "codex",
+        "label": "GDR",
         "command": ["codex", "-c", "model_provider=\"gdr\""],
-        "env": {
-          "CODEX_HOME": "/home/example/codex-home",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/prompt/LUNO.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr",
-          "PASEO_CODEX_ROLE_SHARED": "1",
-          "PASEO_CODEX_ROLE_REQUIRED": "1"
-        }
-      }
+        "env": {"CODEX_HOME": "/home/example/codex-home"}
+      },
+      "claude": {"enabled": false},
+      "codex": {"enabled": false},
+      "copilot": {"enabled": false},
+      "opencode": {"enabled": false},
+      "pi": {"enabled": false},
+      "omp": {"enabled": false}
     }
   }
 }
