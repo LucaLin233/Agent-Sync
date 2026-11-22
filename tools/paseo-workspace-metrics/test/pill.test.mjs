@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { formatCachePillLabel, formatCacheRate } from "../shared/metrics.ts";
 import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries } from "../shared/agents.ts";
+import { workspaceInScope } from "../shared/scope.ts";
 
 const codex = (id, workspaceId, input, cached, extra = {}) => projectDirectoryAgent({
   id,
@@ -81,4 +82,11 @@ test("pill and panel share one-decimal percentage formatting", () => {
   assert.equal(formatCacheRate(1), "100.0%");
   assert.equal(formatCacheRate(0), "0.0%");
   assert.equal(formatCachePillLabel(0.982), "缓存 98.2%");
+});
+
+test("the panel and pill share one scope policy, closed unless opted in", () => {
+  assert.equal(workspaceInScope({ enabled: true, workspaceIds: ["w1"], allWorkspaces: false }, "w1"), true);
+  assert.equal(workspaceInScope({ enabled: true, workspaceIds: ["w1"], allWorkspaces: false }, "w2"), false);
+  assert.equal(workspaceInScope({ enabled: true, workspaceIds: [], allWorkspaces: true }, "w2"), true);
+  assert.equal(workspaceInScope({ enabled: false, workspaceIds: [], allWorkspaces: true }, "w2"), false);
 });

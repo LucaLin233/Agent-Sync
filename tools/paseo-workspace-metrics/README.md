@@ -5,16 +5,18 @@
 本目录源码：
 
 ```sh
-paseo plugin install "$PWD"
+paseo plugin install "$PWD" --id a-workspace-metrics
 ```
 
 已合并的仓库版本：
 
 ```sh
-paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --ref main
+paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --id a-workspace-metrics --ref <ref>
 ```
 
-在工作区输入框输入 `/metrics`（无参数），或从命令中心搜索「打开工作区用量」。已有对话的输入框工具条会显示「缓存 98.2%」按钮：优先显示当前工作区 Codex 累计缓存率；尚未取到累计结果时显示「缓存 …」，累计接口不可用时显示「累计 —」，有结果但没有有效样本时显示「缓存 —」。点击仍打开该对话所属 workspace 的同一面板；按钮随当前 host 的会话目录增删，归档、后台或没有 workspace 的会话不注册，重连后按新快照重建并限制同一会话只保留一个。`/metrics` 在 Paseo 0.17.1 不与内建客户端命令（`exit`、`quit`、`q`、`clear`、`new`）冲突。
+安装后在「设置 → 插件 → 工作区用量」的齿轮打开设置：默认只显示最近样本，累计统计关闭；打开「累计统计」后默认按本机全部 workspace 各自汇总，可在「高级设置」里改为只查询指定 workspace ID，并可选填 Codex home（留空自动发现）。保存使用 host 设置的 revision，其他客户端和已打开的面板、输入框按钮会随设置订阅刷新并清除旧累计缓存，不需要重载插件。
+
+在工作区输入框输入 `/metrics`（无参数），或从命令中心搜索「打开工作区用量」。已有对话的输入框工具条会显示缓存按钮：累计开启时优先显示当前工作区 Codex 累计缓存率（「缓存 98.2%」），累计关闭或不可用时显示最近样本（「最近 98.2%」）；加载中为「缓存 …」，无有效样本为「缓存 —」或「最近 —」。点击仍打开该对话所属 workspace 的同一面板；按钮随当前 host 的会话目录增删，归档、后台或没有 workspace 的会话不注册，重连后按新快照重建并限制同一会话只保留一个。`/metrics` 在 Paseo 0.17.1 不与内建客户端命令（`exit`、`quit`、`q`、`clear`、`new`）冲突。
 
 面板同时显示累计缓存率、累计覆盖、累计缓存读取/总输入，以及现有的最近样本缓存率和最近覆盖，便于对照。累计由 daemon 侧 RPC 读取 Codex rollouts；最近样本仍由 Paseo 的 `lastUsage` 读取。输入框按钮与面板共用累计口径和一位小数格式，但按钮由会话目录订阅触发更新，面板在打开或刷新时读取，两者采样时点可能不同。
 
@@ -23,15 +25,15 @@ paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics 
 | 累计缓存率 | 服务端按当前 workspace 的可见 Codex 会话校验 `workspaceId`、归档状态、provider 或 `persistence.metadata.provider = "codex"` 标记，以及 UUID 形式的 `nativeHandle`。每个唯一 native 会话只取最新一笔有效 `payload.info.total_token_usage`，汇总 `cached_input_tokens / input_tokens`。closed 会话计入；归档、后台、跨 workspace 或无法确认的会话排除。缺失、无效或不完整快照不计为 0。 |
 | 累计覆盖 | `covered / eligible`：有有效累计快照的唯一 native 会话数 / 当前 workspace 可确认的 Codex 唯一 native 会话数。另有缺失和排除会话数用于说明失败原因。 |
 | 最近样本缓存率 | 每个可确认使用 Codex 的会话取当前 `lastUsage` 一次。汇总缓存读取后除以汇总输入，Codex 输入已包含缓存读取。缺字段或分母无效时排除该样本，明确上报零缓存命中会纳入计算。覆盖分母是当前面板可见会话数。 |
-| 输入框缓存按钮 | 有累计结果时与「累计缓存率」同口径、同格式；加载中「缓存 …」，接口不可用「累计 —」，无有效样本「缓存 —」。不会把缺失当 0，也不混用最近样本口径。 |
+| 输入框缓存按钮 | 累计开启且可用时与「累计缓存率」同口径、同格式；累计关闭或不可用时显示「最近」样本口径。加载中「缓存 …」，无有效样本「缓存 —」或「最近 —」。不会把缺失当 0，也不会把两种口径混成一个数。 |
 | Paseo 首段观测 | 打开会话详情后，仅用同一轮的 daemon 时间戳，取 `turn_started` 到首个 `assistant_message` 事件。首个事件可能是工具操作后的文本或一条合成消息。服务商 TTFT 和纯生成 TPS 未上报。 |
 | Paseo 整轮耗时与整轮输出速率 | 耗时从轮开始到终态。内置 Claude Code 成功轮次另用该轮主循环输出 token 除以整轮耗时，包含工具与等待。计数缺失、轮次不完整或断线时段留空。 |
 
 ## 累计数据来源与边界
 
-Codex 数据根依次尝试：daemon 进程的 `CODEX_HOME`、插件 host 设置 `codexHome`，最后才是 `~/.codex`。插件设置的 `codexHome` 必须解析到 daemon 用户家目录内；`CODEX_HOME` 作为管理员配置的外部根保留，规范化并解析软链后必须仍位于其配置根所在目录内。workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
+Codex 数据根：填写插件 host 设置 `codexHome` 时作为显式覆盖优先使用，必须解析到 daemon 用户家目录内；不存在、不是绝对路径或越界时返回明确错误，不会静默回退到其他根。留空时先用 daemon 进程的 `CODEX_HOME`（作为管理员配置的外部根，规范化并解析软链后必须仍位于其配置根所在目录内），最后才是 `~/.codex`。workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
 
-服务端只服务 host 设置 `workspaceIds` 允许的 workspace；未配置或列表为空时累计功能关闭，前端也不发累计查询。服务端只接受 workspace ID 和会话 ID，不接受客户端路径；每个会话都用 Paseo 的 exact agent ref 刷新后校验，拒绝跨 workspace、归档、非 Codex 或 `nativeHandle` 不是 UUID 的成员。rollout 文件名必须与该 UUID 精确匹配。每个 UUID 的日期目录或归档精确匹配结果最多缓存 30 秒；文件按 `dev/ino/size/mtime/ctime` 校验身份并只从上次偏移继续读取，不建立全局会话索引。单文件上限 256 MiB，单目录条目上限 5,000。
+累计统计默认关闭，关闭时服务端不访问任何 cumulative 数据，即使设置里还留有旧 allowlist。显式打开后默认覆盖本机全部 workspace；高级设置可写入 `allWorkspaces: false` 和 `workspaceIds` 限制名单，空名单会报错而不会放开。旧版只含 `allWorkspaces: true` 或非空 `workspaceIds` 的设置继续按原含义启用；新设置用可选 `cumulativeEnabled` 统一表达开关。服务端仍逐一校验每个会话的 workspace、归档、后台、Codex 标记与 UUID，范围读取失败时前端不会声称该 workspace 不在白名单。服务端只接受 workspace ID 和会话 ID，不接受客户端路径；每个会话都用 Paseo 的 exact agent ref 刷新后校验，拒绝跨 workspace、归档、后台、非 Codex 或 `nativeHandle` 不是 UUID 的成员。rollout 文件名必须与该 UUID 精确匹配。每个 UUID 的日期目录或归档精确匹配结果最多缓存 30 秒；文件按 `dev/ino/size/mtime/ctime` 校验身份并只从上次偏移继续读取，不建立全局会话索引。单文件上限 256 MiB，单目录条目上限 5,000。
 
 JSONL 每行先看前 240 字节是否同时含 `event_msg` 与 `token_count` 标记，命中后才 `JSON.parse` 并复核 `type` 和 `payload.type`。只读取 `payload.info.total_token_usage.input_tokens` 与 `cached_input_tokens`，要求非负安全整数且缓存不超过输入；同一会话较新的累计快照覆盖旧值，不累加。RPC 只返回计数、覆盖和错误说明，不返回会话路径、native 会话 ID 或消息内容。
 
