@@ -38,6 +38,8 @@ REQUIRED_READS = (
     ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
     ('skills/luno-platform/SKILL.md', 'Codex 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，'
                                       '完整读取 `references/runtime-paseo.md`〔分支 paseo-dispatch〕'),
+    ('skills/luno-platform/SKILL.md', 'Paseo 的查询、管理、配置或恢复前，完整读取 '
+                                      '`references/runtime-paseo.md`〔分支 paseo-operations〕'),
     ('skills/luno-platform/SKILL.md', '接续 Paseo 主会话前，完整读取 '
                                       '`references/runtime-paseo.md`〔分支 paseo-resume〕'),
     ('skills/luno-platform/references/runtime-codex.md',

@@ -2,17 +2,22 @@
 
 适用 Paseo 0.16.0 及以上。在插件已启用的 daemon 主机上安装源码，安装无需构建。
 
-本目录源码：
+本目录源码（本地开发路径）：
 
 ```sh
-paseo plugin install "$PWD" --id a-workspace-metrics
+PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID，或按本次部署选定}
+paseo plugin install "$PWD" --id "$PLUGIN_ID"
 ```
 
-已合并的仓库版本：
+正式部署只从已合并并通过验证的提交安装。现有安装的运行 ID 从目标 daemon 的 `paseo plugin ls` 读取后继续沿用；新部署按本次部署选定。两种来源共用同一个 `PLUGIN_ID`。`REF` 填已核对的提交：
 
 ```sh
-paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --id a-workspace-metrics --ref <ref>
+PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID，或按本次部署选定}
+REF=${REF:?填已核对的已合并提交}
+paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --id "$PLUGIN_ID" --ref "$REF"
 ```
+
+安装后用 `paseo plugin ls "$PLUGIN_ID"` 回读运行 ID、安装源和已安装修订，再按目标现场核对设置与运行状态；该命令不联系远端，回读一致不证明远端已有更新。
 
 安装后在「设置 → 插件 → 工作区用量」的齿轮打开设置：默认只显示最近样本，累计统计关闭；打开「累计统计」后默认按本机全部 workspace 各自汇总，可在「高级设置」里改为只查询指定 workspace ID，并可选填 Codex home（留空自动发现）。保存使用 host 设置的 revision，其他客户端和已打开的面板、输入框按钮会随设置订阅刷新并清除旧累计缓存，不需要重载插件。
 
