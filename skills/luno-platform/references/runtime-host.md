@@ -22,7 +22,7 @@
 
 ## 技能根
 
-实际技能根按对应运行端及版本的官方发现规则和本次配置核实。paseo 角色用 `~/.luno/homes/<角色 provider>/skills/<技能名>/`；Codex 的 HOME、CODEX_HOME 和技能搜索根不能混为一项，见 `references/runtime-codex.md`。安装器支持的入口指向受管检出 `skills/<技能名>/`，安装根重定位本身不证明 CLI 会发现技能。
+实际技能根按对应运行端及版本的官方发现规则和本次配置核实。paseo 角色用 `~/.luno/homes/<已登记的角色家目录名>/skills/<技能名>/`；Codex 的 HOME、CODEX_HOME 和技能搜索根不能混为一项，见 `references/runtime-codex.md`。安装器支持的入口指向受管检出 `skills/<技能名>/`，安装根重定位本身不证明 CLI 会发现技能。
 
 ## 工作副本
 

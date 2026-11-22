@@ -210,7 +210,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## Paseo 服务端补丁
 
-`platforms/paseo/codex-role-verification-v0.16.2.patch` 基于 `getpaseo/paseo@2ee30f4164af42ba209236ab3a31bf9532592fc3`（v0.16.2），取材范围为 `packages/server/src/server/agent/` 下补丁列出的文件及其差分上下文。变更包括 Codex 角色会话核验、自定义 provider 的状态转发、模型切换回读和定向回归。2026-11-20 核实固定提交的服务端许可可取，随包附件与上游原文逐字节一致。 [上游许可原文](https://github.com/getpaseo/paseo/blob/2ee30f4164af42ba209236ab3a31bf9532592fc3/packages/server/LICENSE) · [随包许可](platforms/paseo/LICENSE.upstream.txt)
+`platforms/paseo/codex-role-verification-v0.17.1.patch` 基于 `getpaseo/paseo@043f0995d4d7e91ab12f3eecef1afce055a81972`（v0.17.1），取材范围为 `packages/server/src/server/` 下补丁列出的 `session.ts`、`agent/agent-manager.ts`、`agent/agent-projections.ts`、`agent/agent-sdk-types.ts`、`agent/provider-registry.ts`、`agent/providers/codex-app-server-agent.ts` 及其差分上下文。变更包括共享 Codex 角色绑定与启动门禁、`codexRoleVerification` 的 role/upstream 回读、桌面前台默认 LUNO、草稿 Speed 能力查询及调用方 env/metadata 隔离。2026-11-22 核实固定提交的许可可取：该提交根 `LICENSE`、`packages/server/LICENSE` 与随包 `platforms/paseo/LICENSE.upstream.txt` 的 SHA256 均为 `79d5aedce6aa0adc547336dc1bd34c5cc9308ba110fac7079ed97515ee573ad3`，逐字节一致。 [上游许可原文](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/LICENSE) · [随包许可](platforms/paseo/LICENSE.upstream.txt)
 
 ## 已移除与退役的来源
 
