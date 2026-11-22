@@ -7,6 +7,8 @@ import {
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { formatCacheRate, summarizeLatestSamples, tokenCount } from "../shared/metrics";
+import { useCumulativeUsage } from "./use-cumulative";
+import { useWorkspaceScope } from "./use-scope";
 import { useLiveTurn } from "./use-turn";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
 
@@ -127,11 +129,31 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     orderBy: ["createdAt", "desc"],
   });
   const query = useWorkspaceUsage(host.id, workspaceId, refs);
+  const scope = useWorkspaceScope();
+  const cumulativeEnabled = (scope.data?.workspaceIds ?? []).includes(workspaceId);
+  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled);
   const samples = refs.map(({ id }) => query.data?.get(id)?.cacheSample ?? null);
   const totals = summarizeLatestSamples(samples);
   const colors = theme.colors;
-  const pending = refs.length > 0 && query.isPending;
-  const unavailable = refs.length - (query.data?.size ?? 0);
+  const recentPending = refs.length > 0 && query.isPending;
+  const recentUnavailable = refs.length - (query.data?.size ?? 0);
+  const scopePending = scope.isPending;
+  const scopeError = scope.error ? "RPC 读取失败" : scope.data?.error ?? null;
+  const cumulativePending = cumulativeEnabled && refs.length > 0 && cumulative.isPending;
+  const cumulativeError = cumulativeEnabled && cumulative.error ? "RPC 读取失败" : cumulative.data?.error ?? null;
+  const hasCumulative = cumulativeEnabled && Boolean(cumulative.data) && !cumulativeError;
+  const cumulativeValue = (value: string) => {
+    if (scopePending) return "读取中…";
+    if (scopeError || !cumulativeEnabled) return "未启用";
+    if (cumulativePending) return "读取中…";
+    return value;
+  };
+  const refreshing = query.isFetching || (cumulativeEnabled && cumulative.isFetching);
+
+  const refresh = () => {
+    void query.refetch();
+    if (cumulativeEnabled) void cumulative.refetch();
+  };
 
   return (
     <ScrollView
@@ -140,33 +162,79 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     >
       <View style={{ gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.surface1 }}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-          <Metric label="工作区累计缓存率" value="—" colors={colors} />
+          <Metric
+            label="累计缓存率"
+            value={cumulativeValue(formatCacheRate(hasCumulative ? cumulative.data?.rate ?? null : null))}
+            colors={colors}
+          />
+          <Metric
+            label="累计覆盖"
+            value={cumulativeValue(hasCumulative ? cumulative.data?.covered + " / " + cumulative.data?.eligible : "—")}
+            colors={colors}
+          />
           <Metric label="最近样本缓存率" value={formatCacheRate(totals.rate)} colors={colors} />
-          <Metric label="覆盖会话" value={pending ? "读取中…" : totals.covered + " / " + refs.length} colors={colors} />
+          <Metric
+            label="最近覆盖"
+            value={recentPending ? "读取中…" : totals.covered + " / " + refs.length}
+            colors={colors}
+          />
         </View>
+        {scopePending && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>正在读取本机累计范围…</Text>
+        )}
+        {!scopePending && (scopeError || !cumulativeEnabled) && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+            累计未启用：本机允许列表不含此 workspace，以下仅显示最近样本。
+          </Text>
+        )}
+        {cumulativeEnabled && cumulativeError && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+            累计缓存率不可用：{cumulativeError}。不会按 0 计入。
+          </Text>
+        )}
+        {cumulativePending && !cumulativeError && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>正在读取 Codex 累计用量…</Text>
+        )}
+        {hasCumulative && (
+          <>
+            <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+              累计缓存读取 {count(cumulative.data?.cachedInputTokens ?? null)} / 总输入 {count(cumulative.data?.inputTokens ?? null)} token
+            </Text>
+            {(cumulative.data?.missing ?? 0) > 0 && (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+                {cumulative.data?.missing} 个 Codex 会话缺少累计快照，未按 0 计入。
+              </Text>
+            )}
+            {(cumulative.data?.unavailable ?? 0) > 0 && (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+                {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
+              </Text>
+            )}
+          </>
+        )}
         <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-          Paseo 0.17.1 缺少可统一分母的历史累计用量。最近样本取可确认使用 Codex 的会话各自最后上报的一笔输入。
+          累计取每个唯一 native Codex 会话最后一笔 total_token_usage；最近样本另取各会话当前 lastUsage，两者时点可能不同。
         </Text>
         {totals.rate !== null && (
           <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            缓存读取 {count(totals.cached)} / 总输入 {count(totals.input)} token
+            最近缓存读取 {count(totals.cached)} / 总输入 {count(totals.input)} token
           </Text>
         )}
-        {!pending && unavailable > 0 && (
+        {!recentPending && recentUnavailable > 0 && (
           <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            {unavailable} 个会话当前无法读取用量快照。
+            {recentUnavailable} 个会话当前无法读取最近用量快照。
           </Text>
         )}
         {refs.length > 0 && (
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{ disabled: query.isFetching }}
-            disabled={query.isFetching}
-            onPress={() => void query.refetch()}
+            accessibilityState={{ disabled: refreshing }}
+            disabled={refreshing}
+            onPress={refresh}
             style={{ alignSelf: "flex-start", paddingVertical: 8 }}
           >
-            <Text style={{ color: query.isFetching ? colors.foregroundMuted : colors.accent, fontWeight: "600" }}>
-              {query.isFetching ? "正在读取…" : "刷新用量"}
+            <Text style={{ color: refreshing ? colors.foregroundMuted : colors.accent, fontWeight: "600" }}>
+              {refreshing ? "正在读取…" : "刷新用量"}
             </Text>
           </Pressable>
         )}
