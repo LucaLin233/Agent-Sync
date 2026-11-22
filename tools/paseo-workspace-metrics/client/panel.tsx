@@ -1,14 +1,16 @@
 import {
   type AgentRef,
   type PluginWorkspacePanelProps,
+  useSubscription,
   useAgent,
   useAgents,
 } from "@getpaseo/plugin/client";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { formatCacheRate, summarizeLatestSamples, tokenCount } from "../shared/metrics";
+import { workspaceInScope, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
 import { useCumulativeUsage } from "./use-cumulative";
-import { useWorkspaceScope } from "./use-scope";
 import { useLiveTurn } from "./use-turn";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
 
@@ -129,16 +131,32 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     orderBy: ["createdAt", "desc"],
   });
   const query = useWorkspaceUsage(host.id, workspaceId, refs);
-  const scope = useWorkspaceScope();
-  const cumulativeEnabled = (scope.data?.workspaceIds ?? []).includes(workspaceId);
-  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled);
+  const queryClient = useQueryClient();
+  const [scope, setScope] = useState<WorkspaceScope | null>(null);
+  const [scopeRevision, setScopeRevision] = useState(0);
+  const scopeSubscription = useSubscription(workspaceSettingsSubscription, {}, (event) => {
+    setScope(event);
+    setScopeRevision((revision) => revision + 1);
+    queryClient.removeQueries({ queryKey: ["workspace-metrics-cumulative"] });
+  });
+  const cumulativeEnabled = scope !== null && workspaceInScope(scope, workspaceId);
+  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled, scopeRevision);
   const samples = refs.map(({ id }) => query.data?.get(id)?.cacheSample ?? null);
   const totals = summarizeLatestSamples(samples);
   const colors = theme.colors;
   const recentPending = refs.length > 0 && query.isPending;
   const recentUnavailable = refs.length - (query.data?.size ?? 0);
-  const scopePending = scope.isPending;
-  const scopeError = scope.error ? "RPC 读取失败" : scope.data?.error ?? null;
+  const scopePending = scope === null && scopeSubscription.status === "connecting";
+  const scopeRequestFailed = scope === null &&
+    (scopeSubscription.status === "error" || scopeSubscription.status === "closed");
+  const scopeError = scopeRequestFailed ? "设置订阅不可用" : scope?.error ?? null;
+  const scopeBlocked = scopeRequestFailed
+    ? "累计范围读取失败"
+    : scope?.error
+      ? "累计设置错误：" + scope.error
+      : scope && !scope.enabled
+        ? "累计统计已关闭"
+        : "累计未启用：本机允许列表不含此 workspace";
   const cumulativePending = cumulativeEnabled && refs.length > 0 && cumulative.isPending;
   const cumulativeError = cumulativeEnabled && cumulative.error ? "RPC 读取失败" : cumulative.data?.error ?? null;
   const hasCumulative = cumulativeEnabled && Boolean(cumulative.data) && !cumulativeError;
@@ -184,7 +202,7 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
         )}
         {!scopePending && (scopeError || !cumulativeEnabled) && (
           <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            累计未启用：本机允许列表不含此 workspace，以下仅显示最近样本。
+            {scopeBlocked}，以下仅显示最近样本。
           </Text>
         )}
         {cumulativeEnabled && cumulativeError && (

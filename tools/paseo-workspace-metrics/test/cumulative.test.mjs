@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, resolveCodexHome } from "../server/cumulative.ts";
+import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, createScopeSubscriptionHandler, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -246,7 +246,7 @@ test("no configured workspace allowlist disables cumulative reads", async (t) =>
     { codexHome: root },
   );
   assert.equal(result.eligible, 0);
-  assert.equal(result.error, "未配置 workspace 允许列表");
+  assert.equal(result.error, "累计统计未启用");
 });
 
 test("a same-length in-place replacement is parsed again", async (t) => {
@@ -328,4 +328,202 @@ test("the default Codex root remains under the daemon user's home", async (t) =>
   const root = await makeCodexRoot(home, ".codex");
   const result = await resolveCodexHome(settingsFor({}), { home, env: "" });
   assert.equal(result.root, await fs.realpath(root));
+});
+
+test("settings default to the explicit allowlist and refuse other workspaces", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const result = await collectCumulativeUsage(
+    { workspaceId: "wks_other", agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { codexHome: root, settings: settingsFor({ workspaceIds: [WS] }) },
+  );
+  assert.equal(result.eligible, 0);
+  assert.equal(result.error, "当前 workspace 不在本机累计用量允许范围");
+});
+
+test("allWorkspaces totals two workspaces separately and never mixes them", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  await writeSession(root, a, [token(100, 90)]);
+  await writeSession(root, b, [token(400, 100)]);
+  const snapshots = [snapshot("agent-a", a), snapshot("agent-b", b, { workspaceId: "wks_two" })];
+  const first = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor(snapshots),
+    { codexHome: root, allWorkspaces: true },
+  );
+  const second = await collectCumulativeUsage(
+    { workspaceId: "wks_two", agentIds: ["agent-b"] },
+    paseoFor(snapshots),
+    { codexHome: root, allWorkspaces: true },
+  );
+  assert.deepEqual(first, {
+    workspaceId: WS,
+    inputTokens: 100,
+    cachedInputTokens: 90,
+    covered: 1,
+    eligible: 1,
+    missing: 0,
+    unavailable: 0,
+    rate: 0.9,
+    error: null,
+  });
+  assert.deepEqual(second, {
+    workspaceId: "wks_two",
+    inputTokens: 400,
+    cachedInputTokens: 100,
+    covered: 1,
+    eligible: 1,
+    missing: 0,
+    unavailable: 0,
+    rate: 0.25,
+    error: null,
+  });
+});
+
+test("allWorkspaces still rejects agents from another workspace and background agents", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  await writeSession(root, a, [token(100, 50)]);
+  await writeSession(root, b, [token(900, 800)]);
+  const result = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a", "agent-b", "agent-bg"] },
+    paseoFor([
+      snapshot("agent-a", a),
+      snapshot("agent-b", b, { workspaceId: "wks_two" }),
+      snapshot("agent-bg", b, { background: true }),
+    ]),
+    { codexHome: root, allWorkspaces: true },
+  );
+  assert.equal(result.covered, 1);
+  assert.equal(result.eligible, 1);
+  assert.equal(result.unavailable, 2);
+  assert.equal(result.inputTokens, 100);
+  assert.equal(result.cachedInputTokens, 50);
+});
+
+test("scope reports all mode and keeps the old empty default closed", async () => {
+  const open = await workspaceScope(settingsFor({ allWorkspaces: true }));
+  assert.equal(open.allWorkspaces, true);
+  assert.equal(open.enabled, true);
+  assert.equal(open.error, null);
+  const closed = await workspaceScope(settingsFor({}));
+  assert.equal(closed.enabled, false);
+  assert.equal(closed.allWorkspaces, false);
+  assert.equal(closed.error, null);
+});
+
+test("the explicit switch stops reads even when the old allowlist remains", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  let refreshes = 0;
+  const paseo = {
+    agents: {
+      ref() {
+        refreshes += 1;
+        return { refresh: async () => snapshot("agent-a", uuid(1)) };
+      },
+    },
+  };
+  const result = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: root, cumulativeEnabled: false, allWorkspaces: true, workspaceIds: [WS] },
+  );
+  assert.equal(result.error, "累计统计未启用");
+  assert.equal(result.eligible, 0);
+  assert.equal(refreshes, 0);
+});
+
+test("legacy settings stay enabled, and a fresh document stays off", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const legacy = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { codexHome: root, settings: settingsFor({ workspaceIds: [WS] }) },
+  );
+  assert.equal(legacy.error, null);
+  assert.equal(legacy.eligible, 1);
+  const fresh = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { codexHome: root, settings: settingsFor({}) },
+  );
+  assert.equal(fresh.error, "累计统计未启用");
+});
+
+test("the settings stream survives until release and unsubscribes once", async () => {
+  let listener;
+  let unsubscribed = 0;
+  const settings = {
+    read: async () => ({ status: "ready", values: { allWorkspaces: true } }),
+    subscribe(fn) {
+      listener = fn;
+      return () => { unsubscribed += 1; };
+    },
+  };
+  const controller = new AbortController();
+  const events = [];
+  let settled = false;
+  const pending = createScopeSubscriptionHandler(settings)({}, {
+    push: async (event) => { events.push(event); },
+    signal: controller.signal,
+  }).then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(settled, false);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].allWorkspaces, true);
+  await listener();
+  assert.equal(events.length, 2);
+  controller.abort();
+  await pending;
+  assert.equal(settled, true);
+  assert.equal(unsubscribed, 1);
+});
+
+test("an older in-flight result cannot repopulate the cache after a settings change", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const first = uuid(1);
+  const second = uuid(2);
+  await writeSession(root, first, [token(100, 10)]);
+  await writeSession(root, second, [token(200, 150)]);
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const slow = {
+    agents: {
+      ref() {
+        return { refresh: async () => { await gate; return snapshot("agent-a", first); } };
+      },
+    },
+  };
+  const options = { codexHome: root, allWorkspaces: true };
+  const oldRequest = collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    slow,
+    options,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  clearCumulativeCaches();
+  const fresh = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", second)]),
+    options,
+  );
+  assert.equal(fresh.inputTokens, 200);
+  release();
+  await oldRequest;
+  const cached = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", second)]),
+    options,
+  );
+  assert.equal(cached.inputTokens, 200);
+  assert.equal(cached.cachedInputTokens, 150);
 });

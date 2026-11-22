@@ -6,10 +6,11 @@ import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { cumulativeUsageRpc } from "../shared/cumulative.ts";
 import { summarizeLatestSamples } from "../shared/metrics.ts";
+import { effectiveWorkspaceScope, type WorkspaceSettingsValues } from "../shared/scope.ts";
 
 export interface CodexHomeSettings {
   read(): Promise<
-    | { status: "ready"; values: { codexHome?: string; workspaceIds?: string[] } }
+    | { status: "ready"; values: WorkspaceSettingsValues & { codexHome?: string } }
     | { status: "invalid"; error: string }
   >;
 }
@@ -51,8 +52,10 @@ const fileCache = new Map<string, FileState>();
 const inflight = new Map<string, Promise<SessionCounts | null>>();
 const workspaceCache = new Map<string, { at: number; value: RpcOutput<typeof cumulativeUsageRpc> }>();
 const workspaceInflight = new Map<string, Promise<RpcOutput<typeof cumulativeUsageRpc>>>();
+let cacheGeneration = 0;
 
 export function clearCumulativeCaches() {
+  cacheGeneration += 1;
   pathCache.clear();
   fileCache.clear();
   inflight.clear();
@@ -71,10 +74,6 @@ function isToken(value: unknown): value is number {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
-}
-
-function isWorkspaceId(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 128;
 }
 
 function parseTokenLine(line: string, state: FileState) {
@@ -328,7 +327,9 @@ async function findSessionFile(root: string, uuid: string, createdMs: number | n
   return best;
 }
 
-async function readSettings(settings?: CodexHomeSettings): Promise<{ codexHome?: string; workspaceIds?: string[] }> {
+async function readSettings(
+  settings?: CodexHomeSettings,
+): Promise<WorkspaceSettingsValues & { codexHome?: string }> {
   if (!settings) return {};
   try {
     const state = await settings.read();
@@ -341,11 +342,13 @@ async function readSettings(settings?: CodexHomeSettings): Promise<{ codexHome?:
 
 export async function workspaceScope(settings?: CodexHomeSettings) {
   const values = await readSettings(settings);
-  const workspaceIds = (values.workspaceIds ?? []).filter(isWorkspaceId);
+  const scope = effectiveWorkspaceScope(values);
   return {
-    workspaceIds,
+    enabled: scope.enabled,
+    workspaceIds: scope.workspaceIds,
+    allWorkspaces: scope.allWorkspaces,
     codexHomeConfigured: Boolean(values.codexHome || process.env.CODEX_HOME),
-    error: workspaceIds.length > 0 ? null : "未配置 workspace 允许列表",
+    error: scope.error,
   };
 }
 
@@ -444,16 +447,24 @@ function empty(
 async function collectCumulativeUsageUncached(
   input: RpcInput<typeof cumulativeUsageRpc>,
   paseo: PluginHandlerContext["paseo"],
-  options: { settings?: CodexHomeSettings; codexHome?: string; workspaceIds?: string[] } = {},
+  options: {
+    settings?: CodexHomeSettings;
+    codexHome?: string;
+    cumulativeEnabled?: boolean;
+    workspaceIds?: string[];
+    allWorkspaces?: boolean;
+    scope?: ReturnType<typeof effectiveWorkspaceScope>;
+  } = {},
 ): Promise<RpcOutput<typeof cumulativeUsageRpc>> {
   const workspaceId = input.workspaceId;
-  const configured = options.workspaceIds
-    ? options.workspaceIds.filter(isWorkspaceId)
-    : (await readSettings(options.settings)).workspaceIds?.filter(isWorkspaceId) ?? [];
-  if (configured.length === 0) {
-    return empty(workspaceId, 0, 0, "未配置 workspace 允许列表");
+  const scope = options.scope ?? effectiveWorkspaceScope(await resolveWorkspaceValues(options));
+  if (!scope.enabled) {
+    return empty(workspaceId, 0, 0, "累计统计未启用");
   }
-  if (!configured.includes(workspaceId)) {
+  if (scope.error) {
+    return empty(workspaceId, 0, 0, scope.error);
+  }
+  if (!scope.allWorkspaces && !scope.workspaceIds.includes(workspaceId)) {
     return empty(workspaceId, 0, 0, "当前 workspace 不在本机累计用量允许范围");
   }
 
@@ -470,7 +481,7 @@ async function collectCumulativeUsageUncached(
       continue;
     }
     const agent = result?.agent;
-    if (!agent || agent.workspaceId !== workspaceId || agent.archivedAt) {
+    if (!agent || agent.workspaceId !== workspaceId || agent.archivedAt || agent.background) {
       unavailable += 1;
       continue;
     }
@@ -531,27 +542,106 @@ async function collectCumulativeUsageUncached(
   };
 }
 
+async function resolveWorkspaceValues(options: {
+  settings?: CodexHomeSettings;
+  cumulativeEnabled?: boolean;
+  workspaceIds?: string[];
+  allWorkspaces?: boolean;
+}): Promise<WorkspaceSettingsValues> {
+  if (
+    options.cumulativeEnabled !== undefined ||
+    options.workspaceIds !== undefined ||
+    options.allWorkspaces !== undefined
+  ) {
+    return {
+      cumulativeEnabled: options.cumulativeEnabled,
+      workspaceIds: options.workspaceIds,
+      allWorkspaces: options.allWorkspaces,
+    };
+  }
+  return readSettings(options.settings);
+}
+
 export function createCumulativeHandler(settings?: CodexHomeSettings) {
   return (input: RpcInput<typeof cumulativeUsageRpc>, context: PluginHandlerContext) =>
     collectCumulativeUsage(input, context.paseo, { settings });
 }
 
-export function collectCumulativeUsage(
+export async function collectCumulativeUsage(
   input: RpcInput<typeof cumulativeUsageRpc>,
   paseo: PluginHandlerContext["paseo"],
-  options: { settings?: CodexHomeSettings; codexHome?: string; workspaceIds?: string[] } = {},
+  options: {
+    settings?: CodexHomeSettings;
+    codexHome?: string;
+    cumulativeEnabled?: boolean;
+    workspaceIds?: string[];
+    allWorkspaces?: boolean;
+  } = {},
 ): Promise<RpcOutput<typeof cumulativeUsageRpc>> {
-  const key = `${input.workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${options.codexHome ?? ""}|${options.workspaceIds?.join(",") ?? ""}`;
+  const scope = effectiveWorkspaceScope(await resolveWorkspaceValues(options));
+  if (!scope.enabled) return empty(input.workspaceId, 0, 0, "累计统计未启用");
+  if (scope.error) return empty(input.workspaceId, 0, 0, scope.error);
+  const key = `${input.workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${options.codexHome ?? ""}|${scope.enabled}|${scope.allWorkspaces ? "*" : ""}|${scope.workspaceIds.join(",")}`;
   const cached = workspaceCache.get(key);
   if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return Promise.resolve(cached.value);
   const running = workspaceInflight.get(key);
   if (running) return running;
-  const task = collectCumulativeUsageUncached(input, paseo, options)
+  const generation = cacheGeneration;
+  let task: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
+  task = collectCumulativeUsageUncached(input, paseo, { ...options, scope })
     .then((value) => {
-      workspaceCache.set(key, { at: Date.now(), value });
+      if (generation === cacheGeneration) {
+        workspaceCache.set(key, { at: Date.now(), value });
+      }
       return value;
     })
-    .finally(() => workspaceInflight.delete(key));
+    .finally(() => {
+      if (workspaceInflight.get(key) === task) workspaceInflight.delete(key);
+    });
   workspaceInflight.set(key, task);
   return task;
+}
+
+type ScopeSettings = CodexHomeSettings & {
+  subscribe(listener: () => void | Promise<void>): () => void;
+};
+
+/** Keeps the settings stream open until the client releases it, then unsubscribes. */
+export function createScopeSubscriptionHandler(settings?: ScopeSettings) {
+  return async (
+    _input: unknown,
+    context: {
+      push(event: Awaited<ReturnType<typeof workspaceScope>>): Promise<void>;
+      signal: AbortSignal;
+    },
+  ) => {
+    let unsubscribe: (() => void) | null = null;
+    let closed = false;
+    const stop = () => {
+      closed = true;
+      unsubscribe?.();
+      unsubscribe = null;
+    };
+    context.signal.addEventListener("abort", stop, { once: true });
+    try {
+      if (closed) return;
+      if (settings) {
+        unsubscribe = settings.subscribe(async () => {
+          if (closed) return;
+          clearCumulativeCaches();
+          await context.push(await workspaceScope(settings));
+        });
+      }
+      if (closed) return;
+      await context.push(await workspaceScope(settings));
+      if (closed) return;
+      await new Promise<void>((resolve) => {
+        if (context.signal.aborted) resolve();
+        else context.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    } finally {
+      context.signal.removeEventListener("abort", stop);
+      stop();
+    }
+  };
 }

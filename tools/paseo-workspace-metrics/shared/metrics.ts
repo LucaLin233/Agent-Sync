@@ -50,6 +50,10 @@ export function formatCachePillLabel(rate: number | null | undefined): string {
   return "缓存 " + formatCacheRate(rate);
 }
 
+export function formatRecentPillLabel(rate: number | null | undefined): string {
+  return "最近 " + formatCacheRate(rate);
+}
+
 /** One latest sample per conversation. Repeated snapshots are never added over time. */
 export function summarizeLatestSamples(samples: readonly (CacheSample | null)[]): CacheSummary {
   let input = 0;

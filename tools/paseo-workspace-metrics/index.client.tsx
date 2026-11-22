@@ -1,9 +1,10 @@
 import type { PluginButtonRegistration, PluginClientContext } from "@getpaseo/plugin/client";
 import { MetricsPanel } from "./client/panel";
-import { pillTargetFor, projectDirectoryAgent, type DirectoryAgent } from "./shared/agents";
+import { WorkspaceMetricsSettings } from "./client/settings";
+import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries, type DirectoryAgent } from "./shared/agents";
 import { cumulativeUsageRpc } from "./shared/cumulative";
-import { formatCachePillLabel } from "./shared/metrics";
-import { workspaceScopeRpc } from "./shared/scope";
+import { formatCachePillLabel, formatRecentPillLabel } from "./shared/metrics";
+import { workspaceSettingsSubscription } from "./shared/scope";
 
 interface PillState {
   registration: PluginButtonRegistration;
@@ -22,11 +23,11 @@ export default function contribute(client: PluginClientContext) {
   const agents = new Map<string, DirectoryAgent>();
   const pills = new Map<string, PillState>();
   const cumulative = new Map<string, CumulativeState>();
-  let scope: { ids: Set<string>; error: string | null } | null = null;
-  let scopeRequested = false;
+  let scope: { ids: Set<string>; allWorkspaces: boolean; enabled: boolean; error: string | null } | null = null;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const lastRequest = new Map<string, number>();
   const lifetime = new AbortController();
+  let generation = 0;
 
   const removePill = (agentId: string) => {
     pills.get(agentId)?.registration.remove();
@@ -61,18 +62,20 @@ export default function contribute(client: PluginClientContext) {
     return ids.sort();
   };
 
-  const labelFor = (workspaceId: string) => {
+  const labelFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) => {
+    const recentLabel = () => formatRecentPillLabel(recent.get(workspaceId)?.rate);
     if (!scope) return "累计 …";
-    if (scope.error || !scope.ids.has(workspaceId)) return "累计 —";
+    if (!scope.enabled || !(scope.allWorkspaces || scope.ids.has(workspaceId))) return recentLabel();
     const state = cumulative.get(workspaceId);
     if (!state) return "缓存 …";
-    if (state.error) return "累计 —";
+    if (state.error) return recentLabel();
     return formatCachePillLabel(state.rate);
   };
 
   // Reuses live registrations; only a changed workspace or label causes a write.
   const reconcile = () => {
     if (lifetime.signal.aborted) return;
+    const recent = workspaceCacheSummaries(agents.values());
     for (const [agentId, pill] of pills) {
       const agent = agents.get(agentId);
       const target = agent ? pillTargetFor(agent) : null;
@@ -81,7 +84,7 @@ export default function contribute(client: PluginClientContext) {
     for (const agent of agents.values()) {
       const target = pillTargetFor(agent);
       if (!target) continue;
-      const label = labelFor(target.workspaceId);
+      const label = labelFor(target.workspaceId, recent);
       const existing = pills.get(agent.id);
       if (!existing) {
         addPill(agent, target.workspaceId, label);
@@ -92,16 +95,24 @@ export default function contribute(client: PluginClientContext) {
     }
   };
 
-  // Only daemon-allowlisted workspaces are requested, and the server revalidates each exact agent.
-  const scheduleCumulative = () => {
+  // Only workspaces in the effective scope are requested; the server revalidates each exact agent.
+  const scheduleCumulative = (only?: ReadonlySet<string>) => {
     if (!scope || lifetime.signal.aborted) return;
+    if (!scope.enabled) {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      cumulative.clear();
+      return;
+    }
     const workspaces = new Set<string>();
     for (const agent of agents.values()) {
-      if (agent.workspaceId && !agent.archived && !agent.background && scope.ids.has(agent.workspaceId)) {
+      if (!agent.workspaceId || agent.archived || agent.background) continue;
+      if (scope.allWorkspaces || scope.ids.has(agent.workspaceId)) {
         workspaces.add(agent.workspaceId);
       }
     }
     for (const workspaceId of workspaces) {
+      if (only && !only.has(workspaceId)) continue;
       if (timers.has(workspaceId)) continue;
       const wait = Math.max(0, CUMULATIVE_MIN_INTERVAL_MS - (Date.now() - (lastRequest.get(workspaceId) ?? 0)));
       const timer = setTimeout(() => {
@@ -114,14 +125,15 @@ export default function contribute(client: PluginClientContext) {
           return;
         }
         lastRequest.set(workspaceId, Date.now());
+        const requestGeneration = generation;
         void client.rpc(cumulativeUsageRpc, { workspaceId, agentIds })
           .then((result) => {
-            if (lifetime.signal.aborted) return;
+            if (lifetime.signal.aborted || generation !== requestGeneration) return;
             cumulative.set(workspaceId, { rate: result.rate, error: result.error });
             reconcile();
           })
           .catch((error) => {
-            if (lifetime.signal.aborted) return;
+            if (lifetime.signal.aborted || generation !== requestGeneration) return;
             cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败" });
             console.error("Cumulative usage failed", error);
             reconcile();
@@ -137,35 +149,20 @@ export default function contribute(client: PluginClientContext) {
     }
   };
 
-  const loadScope = () => {
-    if (scopeRequested || lifetime.signal.aborted) return;
-    scopeRequested = true;
-    void client.rpc(workspaceScopeRpc, {})
-      .then((result) => {
-        if (lifetime.signal.aborted) return;
-        scope = { ids: new Set(result.workspaceIds), error: result.error };
-        reconcile();
-        scheduleCumulative();
-      })
-      .catch((error) => {
-        if (lifetime.signal.aborted) return;
-        scope = null;
-        scopeRequested = false;
-        console.error("Workspace scope failed", error);
-        reconcile();
-      });
-  };
-
-  const applyAgentChange = () => {
+  // An increment only refreshes the workspace it touched; a full snapshot refreshes all.
+  const applyAgentChange = (affected?: ReadonlySet<string>) => {
     reconcile();
-    scheduleCumulative();
-    if (!scope) loadScope();
+    scheduleCumulative(affected);
   };
 
   const upsert = (source: Parameters<typeof projectDirectoryAgent>[0]) => {
+    const previous = agents.get(source.id);
     const agent = projectDirectoryAgent(source);
     agents.set(agent.id, agent);
-    applyAgentChange();
+    const affected = new Set<string>();
+    if (previous?.workspaceId) affected.add(previous.workspaceId);
+    if (agent.workspaceId) affected.add(agent.workspaceId);
+    applyAgentChange(affected);
   };
 
   const removeAllPills = () => {
@@ -178,6 +175,12 @@ export default function contribute(client: PluginClientContext) {
     title: "工作区用量",
     icon: "Activity",
     Component: MetricsPanel,
+  });
+  const removeSettings = client.addSettingsScreen({
+    id: "workspace-metrics",
+    title: "工作区用量",
+    icon: "Settings",
+    Component: WorkspaceMetricsSettings,
   });
   const removeCommand = client.addCommandCenterItem({
     id: "open-metrics",
@@ -199,7 +202,32 @@ export default function contribute(client: PluginClientContext) {
     },
   });
 
-  loadScope();
+  // Settings changes clear every cached value and refresh all pills without a reload.
+  const settingsSubscription = client.subscribe(workspaceSettingsSubscription, {}, (event) => {
+    if (lifetime.signal.aborted) return;
+    generation += 1;
+    scope = {
+      ids: new Set(event.workspaceIds),
+      allWorkspaces: event.allWorkspaces,
+      enabled: event.enabled,
+      error: event.error,
+    };
+    cumulative.clear();
+    lastRequest.clear();
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
+    reconcile();
+    scheduleCumulative();
+  }, {
+    onClosed() {
+      if (lifetime.signal.aborted) return;
+      generation += 1;
+      scope = { ids: new Set(), allWorkspaces: false, enabled: false, error: "设置订阅已关闭" };
+      cumulative.clear();
+      reconcile();
+      scheduleCumulative();
+    },
+  });
 
   // This client's own daemon. A fresh snapshot after reconnection reconciles every pill.
   void client.paseo.agents
@@ -218,8 +246,9 @@ export default function contribute(client: PluginClientContext) {
           if (message.type !== "agent_update") return;
           const update = message.payload;
           if (update.kind === "remove") {
+            const previous = agents.get(update.agentId);
             agents.delete(update.agentId);
-            applyAgentChange();
+            applyAgentChange(new Set(previous?.workspaceId ? [previous.workspaceId] : []));
           } else {
             upsert(update.agent);
           }
@@ -236,6 +265,8 @@ export default function contribute(client: PluginClientContext) {
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
     removeAllPills();
+    settingsSubscription();
+    removeSettings();
     removeSlashCommand();
     removeCommand();
     removePanel();
