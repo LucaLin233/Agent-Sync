@@ -3,64 +3,36 @@
   "daemon": {
     "mcp": {"enabled": true, "injectIntoAgents": true},
     "agentProfiles": [
-      {"id": "luno-cchp", "name": "LUNO · CCHP", "provider": "luno-cchp", "model": "gpt-6.2-sol", "thinkingOptionId": "high", "notes": "{\"role\":\"LUNO\",\"upstream\":\"cchp\"}"},
-      {"id": "lens", "name": "LENS · CCHP", "provider": "lens-codex", "model": "gpt-6.2-astra", "thinkingOptionId": "medium", "notes": "{\"role\":\"LENS\",\"upstream\":\"cchp\"}"},
-      {"id": "forge", "name": "FORGE · CCHP", "provider": "forge-codex", "model": "deepseek-flash", "thinkingOptionId": "high", "notes": "{\"role\":\"FORGE\",\"upstream\":\"cchp\"}"},
-      {"id": "luno-gdr", "name": "LUNO · GDR", "provider": "luno-gdr", "model": "gpt-6.2-sol", "thinkingOptionId": "high", "notes": "{\"role\":\"LUNO\",\"upstream\":\"gdr\"}"},
-      {"id": "lens-gdr", "name": "LENS · GDR", "provider": "lens-gdr", "model": "gpt-6.2-astra", "thinkingOptionId": "medium", "notes": "{\"role\":\"LENS\",\"upstream\":\"gdr\"}"},
-      {"id": "forge-gdr", "name": "FORGE · GDR", "provider": "forge-gdr", "model": "gpt-6.1-terra", "thinkingOptionId": "xhigh", "notes": "{\"role\":\"FORGE\",\"upstream\":\"gdr\"}"}
+      {"id": "luno-cchp", "name": "LUNO · CCHP", "provider": "cchp", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "default", "paseo_role": "LUNO", "paseo_upstream": "cchp"}},
+      {"id": "lens-cchp", "name": "LENS · CCHP", "provider": "cchp", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "default", "paseo_role": "LENS", "paseo_upstream": "cchp"}},
+      {"id": "forge-cchp", "name": "FORGE · CCHP", "provider": "cchp", "model": "deepseek-flash", "modeId": "full-access", "thinkingOptionId": "high", "options": {"paseo_role": "FORGE", "paseo_upstream": "cchp"}},
+      {"id": "luno-gdr", "name": "LUNO · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "LUNO", "paseo_upstream": "gdr"}},
+      {"id": "lens-gdr", "name": "LENS · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "LENS", "paseo_upstream": "gdr"}},
+      {"id": "forge-gdr", "name": "FORGE · GDR", "provider": "gdr", "model": "gpt-6.2-sol", "modeId": "full-access", "thinkingOptionId": "high", "options": {"service_tier": "ultrafast", "paseo_role": "FORGE", "paseo_upstream": "gdr"}}
     ]
   },
   "agents": {
     "providers": {
-      "luno-cchp": {
-        "extends": "codex", "label": "LUNO · CCHP",
+      "cchp": {
+        "extends": "codex", "label": "CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/example/.codex"}
-      },
-      "codex": {
-        "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/example/.codex"}
-      },
-      "lens-codex": {
-        "extends": "codex", "label": "LENS · CCHP",
-        "command": ["codex", "-c", "model_provider=\"cchp\"", "-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"],
         "env": {
-          "CODEX_HOME": "/home/example/.luno/homes/lens-codex",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/subagents/LENS.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp"
+          "CODEX_HOME": "/home/example/codex-home",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/prompt/LUNO.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp",
+          "PASEO_CODEX_ROLE_SHARED": "1",
+          "PASEO_CODEX_ROLE_REQUIRED": "1"
         }
       },
-      "forge-codex": {
-        "extends": "codex", "label": "FORGE · CCHP",
-        "command": ["codex", "-c", "model_provider=\"cchp\"", "-c", "agents.enabled=false", "-c", "features.multi_agent_v2=false"],
-        "env": {
-          "CODEX_HOME": "/home/example/.luno/homes/forge-codex",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/subagents/FORGE.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "cchp"
-        }
-      },
-      "luno-gdr": {
-        "extends": "codex", "label": "LUNO · GDR",
-        "command": ["codex", "-c", "model_provider=\"gdr\""],
-        "env": {"CODEX_HOME": "/home/example/.codex"}
-      },
-      "lens-gdr": {
-        "extends": "codex", "label": "LENS · GDR",
+      "gdr": {
+        "extends": "codex", "label": "GDR",
         "command": ["codex", "-c", "model_provider=\"gdr\""],
         "env": {
-          "CODEX_HOME": "/home/example/.luno/homes/lens-gdr",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/subagents/LENS.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr"
-        }
-      },
-      "forge-gdr": {
-        "extends": "codex", "label": "FORGE · GDR",
-        "command": ["codex", "-c", "model_provider=\"gdr\""],
-        "env": {
-          "CODEX_HOME": "/home/example/.luno/homes/forge-gdr",
-          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/subagents/FORGE.md",
-          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr"
+          "CODEX_HOME": "/home/example/codex-home",
+          "PASEO_CODEX_ROLE_SOURCE": "/home/example/.luno/agent-sync/prompt/LUNO.md",
+          "PASEO_CODEX_ROLE_MODEL_PROVIDER": "gdr",
+          "PASEO_CODEX_ROLE_SHARED": "1",
+          "PASEO_CODEX_ROLE_REQUIRED": "1"
         }
       }
     }

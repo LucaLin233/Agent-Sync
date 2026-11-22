@@ -1,11 +1,105 @@
-Paseo v0.16.2, revision 2ee30f4164af42ba209236ab3a31bf9532592fc3.
-Copyright (c) 2025-present Mohamed Boudra.
-Agent-Sync modified the files listed below to verify Codex role sessions,
-refresh verification after model changes, and test the resulting behavior.
-The Apache License, Version 2.0 is included in LICENSE.upstream.txt.
-
+diff --git a/packages/server/src/server/agent/agent-manager.ts b/packages/server/src/server/agent/agent-manager.ts
+index 0522e41..6526f24 100644
+--- a/packages/server/src/server/agent/agent-manager.ts
++++ b/packages/server/src/server/agent/agent-manager.ts
+@@ -1538,6 +1538,7 @@ export class AgentManager {
+     agentId: string | undefined,
+     options: CreateAgentOptions,
+   ): Promise<ManagedAgent> {
++    assertNoReservedRoleMetadata(options.metadata);
+     const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
+     return this.trackAgentRegistrationOperation(
+       this.runLifecycleMutation(resolvedAgentId, () =>
+@@ -1584,6 +1585,8 @@ export class AgentManager {
+   ): Promise<ManagedAgent> {
+     this.assertAcceptingAgentRegistrations();
+     config = this.withConvertedOptions(config);
++    // Caller env is not a source of provider role bindings; only plugin hooks may set them.
++    options = { ...options, env: withoutReservedRoleEnv(options.env) };
+     if (this.pluginLifecycle && !config.internal) {
+       const sent = exposeFeatureValuesToHook(config);
+       const request = await this.pluginLifecycle.before("agent.create.before", {
+@@ -1643,7 +1646,7 @@ export class AgentManager {
+       workspaceId: options.workspaceId,
+       owner: options.owner,
+       background: options.background,
+-      launchEnv: options.env ? { ...options.env } : undefined,
++      launchEnv: withoutReservedRoleEnv(options.env),
+       historyPrimed: true,
+     });
+     if (!agent.internal) {
+@@ -1734,7 +1737,7 @@ export class AgentManager {
+     const purpose = await resolveResumePurpose(record, resumeOptions?.purpose, mergedConfig.cwd);
+     const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
+ 
+-    const launchEnv = record?.launchEnv;
++    const launchEnv = withoutReservedRoleEnv(record?.launchEnv);
+     const workspaceId = resolveResumeWorkspaceId({ options, record });
+     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+       mergedConfig,
+@@ -2717,6 +2720,7 @@ export class AgentManager {
+     agentId: string,
+     patch: Record<string, JsonValue | null>,
+   ): Promise<AgentMetadata> {
++    assertNoReservedRoleMetadata(patch);
+     return this.runLifecycleMutation(agentId, async () => {
+       const liveAgent = this.agents.get(agentId);
+       if (liveAgent) {
+@@ -6343,7 +6347,7 @@ export class AgentManager {
+     client: AgentClient,
+     cwd: string,
+     paseoToolPolicy: ProviderPaseoToolsPolicy | undefined,
+-    env?: Record<string, string>,
++    callerEnv?: Record<string, string>,
+     opening?: {
+       reason: PluginSessionOpenRequest["reason"];
+       purpose: PluginSessionOpenRequest["purpose"];
+@@ -6356,6 +6360,7 @@ export class AgentManager {
+   ): Promise<AgentLaunchContext> {
+     // A plugin changing during this open must still make the resulting session stale.
+     const generation = this.sessionOpenGeneration;
++    let env = withoutReservedRoleEnv(callerEnv);
+     this.detachPluginTools(agentId);
+     let appendSystemPrompt: string[] | undefined;
+     let mcpServers: AgentSessionConfig["mcpServers"];
+@@ -6577,3 +6582,35 @@ function pluginPromptContext(
+ ): Pick<AgentLaunchContext, "appendSystemPrompt"> {
+   return appendSystemPrompt?.length ? { appendSystemPrompt } : {};
+ }
++
++/** The one metadata key a trusted plugin hook owns; public callers may not set or clear it. */
++const RESERVED_ROLE_METADATA_KEYS = new Set(["shared-role-providers.binding"]);
++
++function assertNoReservedRoleMetadata(metadata: Record<string, unknown> | undefined): void {
++  if (!metadata) return;
++  for (const key of Object.keys(metadata)) {
++    if (RESERVED_ROLE_METADATA_KEYS.has(key)) {
++      throw new Error(`Metadata key '${key}' is reserved for the role provider plugin`);
++    }
++  }
++}
++
++/** Launch env keys only a trusted session-open hook may set for Codex role sessions. */
++const RESERVED_ROLE_ENV_KEYS = new Set([
++  "PASEO_CODEX_ROLE_SOURCE",
++  "PASEO_CODEX_ROLE_MODEL_PROVIDER",
++  "PASEO_CODEX_ROLE_REQUIRED",
++  "PASEO_CODEX_ROLE_SHARED",
++  "PASEO_CODEX_ROLE",
++]);
++
++function withoutReservedRoleEnv(
++  env: Record<string, string> | undefined,
++): Record<string, string> | undefined {
++  if (!env) return undefined;
++  const next: Record<string, string> = {};
++  for (const [key, value] of Object.entries(env)) {
++    if (!RESERVED_ROLE_ENV_KEYS.has(key)) next[key] = value;
++  }
++  return next;
++}
 diff --git a/packages/server/src/server/agent/agent-projections.ts b/packages/server/src/server/agent/agent-projections.ts
-index 09d9461..f199ae4 100644
+index 3a3af01..a3a8967 100644
 --- a/packages/server/src/server/agent/agent-projections.ts
 +++ b/packages/server/src/server/agent/agent-projections.ts
 @@ -124,7 +124,7 @@ export function toAgentPayload(
@@ -32,10 +126,10 @@ index 09d9461..f199ae4 100644
    if (!record.runtimeInfo) return undefined;
    const ri = record.runtimeInfo;
 diff --git a/packages/server/src/server/agent/agent-sdk-types.ts b/packages/server/src/server/agent/agent-sdk-types.ts
-index 0267876..ba37efb 100644
+index 5116f74..73c673c 100644
 --- a/packages/server/src/server/agent/agent-sdk-types.ts
 +++ b/packages/server/src/server/agent/agent-sdk-types.ts
-@@ -710,6 +710,8 @@ export interface AgentSession {
+@@ -731,6 +731,8 @@ export interface AgentSession {
    subscribe(callback: (event: AgentStreamEvent) => void): () => void;
    streamHistory(): AsyncGenerator<AgentStreamEvent>;
    getRuntimeInfo(): Promise<AgentRuntimeInfo>;
@@ -45,10 +139,10 @@ index 0267876..ba37efb 100644
    getCurrentMode(): Promise<string | null>;
    setMode(modeId: string): Promise<void | AgentProviderNotice>;
 diff --git a/packages/server/src/server/agent/provider-registry.ts b/packages/server/src/server/agent/provider-registry.ts
-index 2449b9a..8c72502 100644
+index a80dc26..e4623c1 100644
 --- a/packages/server/src/server/agent/provider-registry.ts
 +++ b/packages/server/src/server/agent/provider-registry.ts
-@@ -465,6 +465,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
+@@ -468,6 +468,7 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
        }
      },
      getRuntimeInfo: async () => mapRuntimeInfo(provider, await inner.getRuntimeInfo()),
@@ -56,281 +150,11 @@ index 2449b9a..8c72502 100644
      getAvailableModes: () => inner.getAvailableModes(),
      getCurrentMode: () => inner.getCurrentMode(),
      setMode: (modeId) => inner.setMode(modeId),
-diff --git a/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts b/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
-index 36b5291..a0f1452 100644
---- a/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
-+++ b/packages/server/src/server/agent/providers/codex-app-server-agent.test.ts
-@@ -100,7 +100,8 @@ import {
- import { createTestLogger } from "../../../test-utils/test-logger.js";
- import { asInternals as castInternals, createStub } from "../../test-utils/class-mocks.js";
- import { AgentManager } from "../agent-manager.js";
--import { buildProviderRegistry } from "../provider-registry.js";
-+import { toAgentPayload, toStoredAgentRecord } from "../agent-projections.js";
-+import { buildProviderRegistry, wrapSessionProvider } from "../provider-registry.js";
- 
- interface CollaborationModeRecord {
-   name: string;
-@@ -178,7 +179,7 @@ function createSession(
- }
- 
- function createProviderWithFakeAppServer(
--  appServer: FakeCodexAppServer,
-+  appServer: FakeCodexAppServer | (() => FakeCodexAppServer),
-   options?: {
-     runtimeSettings?: ConstructorParameters<typeof CodexAppServerAgentClient>[1];
-     customProvider?: { id: string; label: string; extends: string };
-@@ -186,7 +187,9 @@ function createProviderWithFakeAppServer(
- ): CodexAppServerAgentClient {
-   const provider = new CodexAppServerAgentClient(createTestLogger(), options?.runtimeSettings, {
-     customProvider: options?.customProvider,
--    appServerProcess: createFakeCodexAppServerProcess(() => appServer.child),
-+    appServerProcess: createFakeCodexAppServerProcess(
-+      () => (typeof appServer === "function" ? appServer() : appServer).child,
-+    ),
-   });
-   const internals = castInternals<{
-     goalsEnabledPromise: Promise<boolean> | null;
-@@ -1545,6 +1548,235 @@ describe("Codex app-server provider", () => {
-     }
-   });
- 
-+  test.each([
-+    { scenario: "matching role", error: null },
-+    {
-+      scenario: "missing instruction sources",
-+      error: "expected role instructions were not loaded",
-+    },
-+    { scenario: "role override", error: "a role instruction override may be present" },
-+    { scenario: "different role text", error: "role instructions did not match" },
-+    {
-+      scenario: "different model provider",
-+      error: "effective thread, model or provider is unverified",
-+    },
-+    {
-+      scenario: "different resolved model",
-+      error: "effective thread, model or provider is unverified",
-+    },
-+    { scenario: "disconnected before send", error: "current thread has no startup evidence" },
-+    { scenario: "changed thread before send", error: "current thread has no startup evidence" },
-+    { scenario: "stale resume", error: "expected role instructions were not loaded" },
-+  ])("checks Codex role evidence before sending a turn: $scenario", async ({ scenario, error }) => {
-+    const root = await mkdtemp(path.join(tmpdir(), "codex-role-evidence-"));
-+    const codexHome = path.join(root, "role-home");
-+    const sourceFile = path.join(root, "FORGE.md");
-+    const entry = path.join(codexHome, "AGENTS.md");
-+    mkdirSync(codexHome);
-+    writeFileSync(sourceFile, "Role instructions\n");
-+    writeFileSync(
-+      entry,
-+      scenario === "different role text" ? "Other instructions\n" : "Role instructions\n",
-+    );
-+    if (scenario === "role override") {
-+      writeFileSync(path.join(codexHome, "AGENTS.override.md"), "Override\n");
-+    }
-+    const appServer = createFakeCodexAppServer({
-+      "thread/loaded/list": () => ({ data: scenario === "stale resume" ? [] : ["thread-1"] }),
-+      "thread/start": () => ({
-+        thread: { id: "thread-1" },
-+        model: scenario === "different resolved model" ? "other-model" : "resolved-model",
-+        modelProvider: scenario === "different model provider" ? "other" : "test-provider",
-+        ...(scenario === "missing instruction sources" ? {} : { instructionSources: [entry] }),
-+      }),
-+      "thread/resume": () => ({
-+        thread: { id: "saved-thread" },
-+        model: "resolved-model",
-+        modelProvider: "test-provider",
-+        instructionSources: [],
-+      }),
-+    });
-+    const provider = createProviderWithFakeAppServer(appServer, {
-+      runtimeSettings: {
-+        env: {
-+          CODEX_HOME: codexHome,
-+          PASEO_CODEX_ROLE_SOURCE: sourceFile,
-+          PASEO_CODEX_ROLE_MODEL_PROVIDER: "test-provider",
-+        },
-+      },
-+    });
-+    const config = createConfig({ model: "resolved-model" });
-+    let session: AgentSession | undefined;
-+    try {
-+      if (scenario === "stale resume") {
-+        await expect(
-+          provider.resumeSession({ provider: "codex", sessionId: "saved-thread" }, config),
-+        ).rejects.toThrow(error!);
-+      } else {
-+        session = await provider.createSession(config);
-+        if (scenario === "disconnected before send" || scenario === "changed thread before send") {
-+          const internals = castInternals<{
-+            waitForInterruptedTurnCleanup(): Promise<void>;
-+            handleThreadStartedNotification(event: {
-+              kind: "thread_started";
-+              threadId: string;
-+            }): void;
-+          }>(session);
-+          vi.spyOn(internals, "waitForInterruptedTurnCleanup").mockImplementationOnce(async () => {
-+            if (scenario === "disconnected before send") {
-+              appServer.child.emit("exit", 1, null);
-+              await new Promise<void>((resolve) => setImmediate(resolve));
-+            } else {
-+              internals.handleThreadStartedNotification({
-+                kind: "thread_started",
-+                threadId: "other-thread",
-+              });
-+            }
-+          });
-+        }
-+        if (error) {
-+          await expect(session.startTurn("first task")).rejects.toThrow(error);
-+        } else {
-+          await session.getRuntimeInfo();
-+          expect(session.getLiveRuntimeMetadata?.()?.codexRoleVerification).toEqual({
-+            roleMatches: true,
-+            overrideExists: false,
-+            upstreamMatches: true,
-+            resolvedModel: "resolved-model",
-+          });
-+          expect(session.usageSession?.()?.env).not.toHaveProperty("PASEO_CODEX_ROLE_SOURCE");
-+          expect(session.usageSession?.()?.env).not.toHaveProperty(
-+            "PASEO_CODEX_ROLE_MODEL_PROVIDER",
-+          );
-+          await session.startTurn("first task");
-+        }
-+      }
-+      expect(appServer.requests().filter(({ method }) => method === "turn/start")).toHaveLength(
-+        error ? 0 : 1,
-+      );
-+      appServer.assertNoErrors();
-+    } finally {
-+      await session?.close();
-+      rmSync(root, { recursive: true, force: true });
-+    }
-+  });
-+
-+  test("publishes only live role evidence for a custom Codex provider", async () => {
-+    const root = await mkdtemp(path.join(tmpdir(), "codex-role-status-"));
-+    const entry = path.join(root, "AGENTS.md");
-+    const sourceFile = path.join(root, "LENS.md");
-+    writeFileSync(entry, "Role instructions\n");
-+    writeFileSync(sourceFile, "Role instructions\n");
-+    const threadEvidence = (model: string) => ({
-+      thread: { id: "thread-1" },
-+      model,
-+      modelProvider: "test-provider",
-+      instructionSources: [entry],
-+    });
-+    let hasBackgroundTerminal = false;
-+    const appServer = createFakeCodexAppServer({
-+      "thread/start": () => threadEvidence("model-a"),
-+      "thread/loaded/list": () => ({ data: ["thread-1"] }),
-+      "thread/resume": () => threadEvidence("model-a"),
-+      "thread/backgroundTerminals/list": () => ({
-+        data: hasBackgroundTerminal ? [{}] : [],
-+        nextCursor: null,
-+      }),
-+    });
-+    let threadLoaded = false;
-+    const replacement = createFakeCodexAppServer({
-+      "thread/loaded/list": () => ({ data: threadLoaded ? ["thread-1"] : [] }),
-+      "thread/resume": (params) => {
-+        expect(params).toMatchObject({ threadId: "thread-1", model: "model-b" });
-+        threadLoaded = true;
-+        return threadEvidence("model-b");
-+      },
-+    });
-+    let started = false;
-+    const provider = createProviderWithFakeAppServer(
-+      () => {
-+        if (started) return replacement;
-+        started = true;
-+        return appServer;
-+      },
-+      {
-+        runtimeSettings: {
-+          env: {
-+            CODEX_HOME: root,
-+            PASEO_CODEX_ROLE_SOURCE: sourceFile,
-+            PASEO_CODEX_ROLE_MODEL_PROVIDER: "test-provider",
-+          },
-+        },
-+      },
-+    );
-+    const providerId = "lens-codex";
-+    const client: AgentClient = {
-+      provider: providerId,
-+      capabilities: provider.capabilities,
-+      isAvailable: async () => true,
-+      fetchCatalog: async () => ({ models: [], modes: [] }),
-+      createSession: async (...args) =>
-+        wrapSessionProvider(providerId, await provider.createSession(...args)),
-+      resumeSession: async (...args) =>
-+        wrapSessionProvider(providerId, await provider.resumeSession(...args)),
-+    };
-+    const manager = new AgentManager({
-+      clients: { [providerId]: client },
-+      logger: createTestLogger(),
-+    });
-+    let id: string | undefined;
-+    try {
-+      const agent = await manager.createAgent(
-+        createConfig({ provider: providerId, cwd: root, model: "model-a" }),
-+        undefined,
-+        {},
-+      );
-+      id = agent.id;
-+      const snapshot = () => toAgentPayload(manager.getAgent(agent.id)!);
-+      expect(snapshot().provider).toBe(providerId);
-+      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
-+        resolvedModel: "model-a",
-+      });
-+
-+      hasBackgroundTerminal = true;
-+      await expect(manager.setAgentModel(agent.id, "model-b")).rejects.toThrow(
-+        "Wait until the Codex role session is idle",
-+      );
-+      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
-+        resolvedModel: "model-a",
-+      });
-+      hasBackgroundTerminal = false;
-+      await manager.setAgentModel(agent.id, "model-b");
-+      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
-+        resolvedModel: "model-b",
-+      });
-+
-+      await agent.session!.startTurn("verified task");
-+      expect(appServer.requests().filter(({ method }) => method === "turn/start")).toHaveLength(0);
-+      expect(
-+        replacement.requests().filter(({ method }) => method === "thread/resume"),
-+      ).toHaveLength(1);
-+      expect(replacement.requests().filter(({ method }) => method === "turn/start")).toEqual([
-+        expect.objectContaining({
-+          params: expect.objectContaining({ model: "model-b", threadId: "thread-1" }),
-+        }),
-+      ]);
-+      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toMatchObject({
-+        resolvedModel: "model-b",
-+      });
-+      expect(
-+        toStoredAgentRecord(manager.getAgent(agent.id)!).runtimeInfo?.extra?.codexRoleVerification,
-+      ).toBeUndefined();
-+      await agent.session!.close();
-+      expect(snapshot().runtimeInfo?.extra?.codexRoleVerification).toBeUndefined();
-+      appServer.assertNoErrors();
-+      replacement.assertNoErrors();
-+    } finally {
-+      if (id) await manager.closeAgent(id);
-+      rmSync(root, { recursive: true, force: true });
-+    }
-+  });
-+
-   test("preapproves only granted tools on the injected Codex MCP server", async () => {
-     const session = createSession({
-       modeId: undefined,
 diff --git a/packages/server/src/server/agent/providers/codex-app-server-agent.ts b/packages/server/src/server/agent/providers/codex-app-server-agent.ts
-index efee107..fa8bc15 100644
+index cecf274..a1726fd 100644
 --- a/packages/server/src/server/agent/providers/codex-app-server-agent.ts
 +++ b/packages/server/src/server/agent/providers/codex-app-server-agent.ts
-@@ -10,6 +10,7 @@ import {
+@@ -11,6 +11,7 @@ import {
    type AgentCreateSessionOptions,
    type AgentOptionControl,
    type AgentLaunchContext,
@@ -338,11 +162,20 @@ index efee107..fa8bc15 100644
    type AgentResumeSessionOptions,
    type AgentMode,
    type AgentModelDefinition,
-@@ -317,6 +318,11 @@ interface CodexAppServerProcessPort {
+@@ -26,6 +27,7 @@ import {
+   type AgentRunResult,
+   type AgentRuntimeInfo,
+   type AgentClientInstallation,
++  type AgentDraftControls,
+   type AgentSession,
+   type AgentSessionConfig,
+   type SteerActiveTurnOptions,
+@@ -337,6 +339,12 @@ interface CodexAppServerProcessPort {
    spawn(input: CodexAppServerProcessSpawnInput): ChildProcess;
  }
  
 +interface CodexRoleBinding {
++  role: string | null;
 +  sourceFile: string;
 +  modelProvider: string;
 +}
@@ -350,7 +183,7 @@ index efee107..fa8bc15 100644
  interface CodexAppServerAgentDeps {
    appServerProcess?: CodexAppServerProcessPort;
    environment?: Record<string, string>;
-@@ -329,6 +335,7 @@ interface CodexAppServerAgentDeps {
+@@ -351,6 +359,7 @@ interface CodexAppServerAgentDeps {
    customCodexConfig?: CodexCustomProviderConfig | null;
    // The CODEX_HOME the session's app-server runs with; prompts and skills are read from it.
    codexHome?: string;
@@ -358,7 +191,7 @@ index efee107..fa8bc15 100644
    _createCodexClient?: (
      child: ChildProcessWithoutNullStreams,
      logger: Logger,
-@@ -3479,10 +3486,13 @@ export function buildCodexAppServerEnv(
+@@ -3644,10 +3653,16 @@ export function buildCodexAppServerEnv(
    runtimeSettings?: ProviderRuntimeSettings,
    launchEnv?: Record<string, string>,
  ) {
@@ -369,11 +202,14 @@ index efee107..fa8bc15 100644
    });
 +  delete env.PASEO_CODEX_ROLE_SOURCE;
 +  delete env.PASEO_CODEX_ROLE_MODEL_PROVIDER;
++  delete env.PASEO_CODEX_ROLE_REQUIRED;
++  delete env.PASEO_CODEX_ROLE_SHARED;
++  delete env.PASEO_CODEX_ROLE;
 +  return env;
  }
  
  function codexStartupStateDirKey(environment: NodeJS.ProcessEnv): string {
-@@ -3630,6 +3640,12 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -3798,6 +3813,14 @@ export class CodexAppServerAgentSession implements AgentSession {
    private activeForegroundTurnId: string | null = null;
    private activeClientMessageId: string | null = null;
    private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
@@ -382,11 +218,13 @@ index efee107..fa8bc15 100644
 +    client: CodexAppServerClient;
 +    threadId: string;
 +    resolvedModel: string;
++    role: string | null;
++    upstream: string;
 +  } | null = null;
    /** The tier the options ask for; `serviceTier` is what the current model can honor. */
    private requestedServiceTier: string | null = null;
    private speedModels: CodexModel[] = [];
-@@ -3808,6 +3824,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -3988,6 +4011,7 @@ export class CodexAppServerAgentSession implements AgentSession {
    }
  
    private async establishConnection(): Promise<void> {
@@ -394,7 +232,7 @@ index efee107..fa8bc15 100644
      if (this.initialResumePurpose === "history") {
        this.stagedHistory = await this.readArchivedHistory();
        this.connectionState = "history-ready";
-@@ -3909,6 +3926,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4100,6 +4124,7 @@ export class CodexAppServerAgentSession implements AgentSession {
  
    private async queueUnexpectedTermination(error: Error): Promise<void> {
      this.connectionState = "disconnected";
@@ -402,7 +240,7 @@ index efee107..fa8bc15 100644
      this.background.stop();
      // Finish notifications already received from this process before ending
      // their turn, so queued retry notices cannot reopen a failed retry row.
-@@ -3918,6 +3936,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4109,6 +4134,7 @@ export class CodexAppServerAgentSession implements AgentSession {
  
    private handleUnexpectedTermination(error: Error): void {
      this.connectionState = "disconnected";
@@ -410,7 +248,7 @@ index efee107..fa8bc15 100644
      this.background.stop();
      const hasActiveRootTurn = this.activeForegroundTurnId !== null || this.currentTurnId !== null;
      this.clearPendingPermissions({ preservePlanApprovals: !hasActiveRootTurn });
-@@ -4300,9 +4319,16 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4522,13 +4548,20 @@ export class CodexAppServerAgentSession implements AgentSession {
    }
  
    private async ensureThreadLoaded(): Promise<void> {
@@ -420,8 +258,12 @@ index efee107..fa8bc15 100644
 +    if (!client || !threadId) return;
 +    let roleRevision = this.roleVerificationRevision;
      // Paseo reads history only when it replays it; the resume response needs no turns.
--    const params: Record<string, unknown> = { threadId: this.currentThreadId, excludeTurns: true };
-+    const params: Record<string, unknown> = { threadId, excludeTurns: true };
+     const params: Record<string, unknown> = {
+-      threadId: this.currentThreadId,
++      threadId,
+       cwd: this.config.cwd ?? null,
+       excludeTurns: true,
+     };
 +    const roleModel = this.deps.roleBinding
 +      ? (this.config.model ?? (await this.resolveModelAndThinking()).model)
 +      : undefined;
@@ -429,26 +271,29 @@ index efee107..fa8bc15 100644
      if (this.deps.customCodexConfig) {
        // Resume otherwise prefers the provider stored on the thread, including
        // the unnamespaced key emitted by earlier Paseo versions.
-@@ -4320,25 +4346,31 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4543,25 +4576,32 @@ export class CodexAppServerAgentSession implements AgentSession {
        params.config = codexConfig;
      }
      try {
 -      const loaded = toObjectRecord(await this.client.request("thread/loaded/list", {}));
 +      const loaded = toObjectRecord(await client.request("thread/loaded/list", {}));
        const ids = Array.isArray(loaded?.data) ? loaded.data : [];
--      if (ids.includes(this.currentThreadId)) {
+-      if (!ids.includes(this.currentThreadId)) {
+-        const response = await this.client.request("thread/resume", params);
+-        this.rememberResolvedSandboxPolicy(response);
+-        this.rememberRestoredCollaborationMode(response);
 +      if (
 +        ids.includes(threadId) &&
 +        (!this.deps.roleBinding ||
 +          this.verifiedRoleFor(client, threadId)?.resolvedModel === roleModel)
 +      ) {
-         return;
++        return;
        }
--      const response = await this.client.request("thread/resume", params);
 +      roleRevision = this.beginRoleResume(client, threadId, roleRevision);
 +      const response = await client.request("thread/resume", params);
 +      await this.verifyRoleBinding(response, { client, threadId, roleModel, roleRevision });
-       this.rememberResolvedSandboxPolicy(response);
++      this.rememberResolvedSandboxPolicy(response);
++      this.rememberRestoredCollaborationMode(response);
      } catch (error) {
 -      const threadId = this.currentThreadId;
        const message = error instanceof Error ? error.message : String(error);
@@ -465,9 +310,9 @@ index efee107..fa8bc15 100644
 +        const response = await client.request("thread/resume", params);
 +        await this.verifyRoleBinding(response, { client, threadId, roleModel, roleRevision });
          this.rememberResolvedSandboxPolicy(response);
+         this.rememberRestoredCollaborationMode(response);
          this.logger.info({ threadId }, "Unarchived Codex thread to restore active Paseo agent");
-         return;
-@@ -4441,8 +4473,10 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4686,8 +4726,10 @@ export class CodexAppServerAgentSession implements AgentSession {
      };
      const { approvalPolicy, sandboxPolicyType } = this.applyTurnWorkflowPolicy(params, preset);
  
@@ -480,7 +325,7 @@ index efee107..fa8bc15 100644
      }
      const thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
      if (thinkingOptionId) {
-@@ -4616,7 +4650,8 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4855,7 +4897,8 @@ export class CodexAppServerAgentSession implements AgentSession {
      try {
        await this.pendingNotifications;
        await this.connect();
@@ -490,7 +335,7 @@ index efee107..fa8bc15 100644
          throw new Error("Codex client not initialized");
        }
  
-@@ -4632,6 +4667,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4871,6 +4914,7 @@ export class CodexAppServerAgentSession implements AgentSession {
          await this.ensureThread();
        }
  
@@ -498,9 +343,9 @@ index efee107..fa8bc15 100644
        const turnStart = await this.buildTurnStartParams(effectivePrompt, options);
        const turnId = this.createTurnId();
        this.activeForegroundTurnId = turnId;
-@@ -4663,7 +4699,8 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4902,7 +4946,8 @@ export class CodexAppServerAgentSession implements AgentSession {
        if (pendingStart.cancelRequested) {
-         throw new Error("Codex turn start was interrupted before reaching Codex");
+         throw new AgentTurnStartCanceledError();
        }
 -      await this.client.request("turn/start", turnStart.params, TURN_START_TIMEOUT_MS);
 +      this.requireVerifiedRole(client, threadId, turnStart.params);
@@ -508,7 +353,7 @@ index efee107..fa8bc15 100644
        return { turnId };
      } catch (error) {
        this.pendingForegroundTurnIdentification?.resolve(null);
-@@ -4708,6 +4745,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -4947,6 +4992,7 @@ export class CodexAppServerAgentSession implements AgentSession {
        return { status: "unavailable" };
      }
      try {
@@ -516,7 +361,7 @@ index efee107..fa8bc15 100644
        const response = await client.request(
          "turn/steer",
          {
-@@ -4852,6 +4890,20 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -5091,6 +5137,22 @@ export class CodexAppServerAgentSession implements AgentSession {
      return { ...info };
    }
  
@@ -526,6 +371,8 @@ index efee107..fa8bc15 100644
 +    if (!role || (this.config.model && this.config.model !== role.resolvedModel)) return undefined;
 +    return {
 +      codexRoleVerification: {
++        role: role.role,
++        upstream: role.upstream,
 +        roleMatches: true,
 +        overrideExists: false,
 +        upstreamMatches: true,
@@ -537,7 +384,7 @@ index efee107..fa8bc15 100644
    async getAvailableModes(): Promise<AgentMode[]> {
      if (this.autoReviewEnabled) {
        return CODEX_MODES;
-@@ -4875,7 +4927,30 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -5114,7 +5176,30 @@ export class CodexAppServerAgentSession implements AgentSession {
    }
  
    async setModel(modelId: string | null): Promise<void> {
@@ -569,15 +416,15 @@ index efee107..fa8bc15 100644
      this.refreshResolvedCollaborationMode();
      this.cachedRuntimeInfo = null;
      this.dropUnavailableServiceTier();
-@@ -5259,6 +5334,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -5503,6 +5588,7 @@ export class CodexAppServerAgentSession implements AgentSession {
        userMessageTurns: this.codexUserMessageTurns(),
        threadRollbackAvailable: this.threadRollbackAvailable,
        setThreadId: async (threadId) => {
 +        if (this.currentThreadId !== threadId) this.resetRoleVerification();
-         this.currentThreadId = threadId;
-         // Codex writes a forked thread's rollout when it forks it, even before any turn.
-         this.savedThreadId = threadId;
-@@ -5540,6 +5616,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+         await this.instructionSnapshot.apply(
+           threadId,
+           this.client!.request.bind(this.client),
+@@ -5789,6 +5875,7 @@ export class CodexAppServerAgentSession implements AgentSession {
      const client = this.client;
      this.connectionState = "disconnected";
      this.currentTurnId = null;
@@ -585,7 +432,7 @@ index efee107..fa8bc15 100644
      if (client) {
        await client.dispose();
      }
-@@ -5767,13 +5844,15 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -6016,13 +6103,15 @@ export class CodexAppServerAgentSession implements AgentSession {
    }
  
    private async ensureThread(): Promise<void> {
@@ -603,7 +450,7 @@ index efee107..fa8bc15 100644
      this.rememberResolvedSandboxPolicy(rawResponse);
      const response = toObjectRecord(rawResponse);
      const threadRecord = toObjectRecord(response?.thread);
-@@ -5781,6 +5860,7 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -6030,6 +6119,7 @@ export class CodexAppServerAgentSession implements AgentSession {
      if (!threadId) {
        throw new Error("Codex app-server did not return thread id");
      }
@@ -611,8 +458,8 @@ index efee107..fa8bc15 100644
      const responseApprovalsReviewer =
        typeof response?.approvalsReviewer === "string" ? response.approvalsReviewer : undefined;
      if (
-@@ -5796,6 +5876,125 @@ export class CodexAppServerAgentSession implements AgentSession {
-     this.currentThreadId = threadId;
+@@ -6046,6 +6136,131 @@ export class CodexAppServerAgentSession implements AgentSession {
+     this.instructionSnapshot.recordNewThread(threadId);
    }
  
 +  private beginRoleResume(
@@ -699,7 +546,13 @@ index efee107..fa8bc15 100644
 +        "Codex role verification failed: thread or connection changed during verification",
 +      );
 +    }
-+    this.verifiedRole = { client, threadId, resolvedModel };
++    this.verifiedRole = {
++      client,
++      threadId,
++      resolvedModel,
++      role: binding.role,
++      upstream: binding.modelProvider,
++    };
 +  }
 +
 +  private resetRoleVerification(): void {
@@ -737,7 +590,7 @@ index efee107..fa8bc15 100644
    private buildThreadStartRequest(model: string): {
      params: Record<string, unknown>;
      approvalPolicy?: string;
-@@ -6620,6 +6819,13 @@ export class CodexAppServerAgentSession implements AgentSession {
+@@ -6893,6 +7108,13 @@ export class CodexAppServerAgentSession implements AgentSession {
    private handleThreadStartedNotification(
      parsed: Extract<ParsedCodexNotification, { kind: "thread_started" }>,
    ): void {
@@ -751,24 +604,175 @@ index efee107..fa8bc15 100644
      this.currentThreadId = parsed.threadId;
      this.background.changed(this.currentThreadId);
      this.emitEvent({
-@@ -7765,9 +7971,20 @@ export class CodexAppServerAgentClient implements AgentClient {
-   ) {}
+@@ -8094,12 +8316,47 @@ export class CodexAppServerAgentClient implements AgentClient {
+   };
+   private goalsEnabledPromise: Promise<boolean> | null = null;
+   private autoReviewEnabledPromise: Promise<boolean> | null = null;
++  listControls?: (config: AgentSessionConfig) => Promise<AgentDraftControls>;
+ 
+   constructor(
+     private readonly logger: Logger,
+     private readonly runtimeSettings?: ProviderRuntimeSettings,
+     private readonly deps: CodexAppServerAgentDeps = {},
+-  ) {}
++  ) {
++    if (
++      runtimeSettings?.env?.PASEO_CODEX_ROLE_SHARED === "1" &&
++      runtimeSettings.env.PASEO_CODEX_ROLE_REQUIRED === "1"
++    ) {
++      this.listControls = (config) => this.listSharedDraftControls(config);
++    }
++  }
++
++  async listSharedDraftControls(config: AgentSessionConfig): Promise<AgentDraftControls> {
++    const { paseo_role: _role, paseo_upstream: _upstream, ...options } =
++      config.providerOptions ?? {};
++    if (!config.model) return { controls: [], options };
++    // Capability discovery connects without starting a thread or sending a turn.
++    const fixed = this.roleBindingFrom(this.runtimeSettings?.env, "provider");
++    if (!fixed) throw new Error("Missing fixed provider binding for draft controls");
++    const session = await this.createSession(
++      { ...config, providerOptions: options },
++      {
++        env: {
++          PASEO_CODEX_ROLE_SOURCE: fixed.sourceFile,
++          PASEO_CODEX_ROLE_MODEL_PROVIDER: fixed.modelProvider,
++          PASEO_CODEX_ROLE: "LUNO",
++        },
++      },
++    );
++    try {
++      return {
++        controls: session.controls,
++        options: applyProviderOptionsPatch({ options, patch: session.openOptionsPatch }),
++      };
++    } finally {
++      await session.close();
++    }
++  }
+ 
+   private async readInstalledCodex(signal: AbortSignal): Promise<InstalledCodex> {
+     const installed = await this.resolveInstalledCommand();
+@@ -8135,13 +8392,95 @@ export class CodexAppServerAgentClient implements AgentClient {
+   }
  
    private sessionDeps(launchEnv: Record<string, string> | undefined): CodexAppServerAgentDeps {
-+    const sourceFile = this.runtimeSettings?.env?.PASEO_CODEX_ROLE_SOURCE;
-+    const modelProvider = this.runtimeSettings?.env?.PASEO_CODEX_ROLE_MODEL_PROVIDER;
-+    if (sourceFile !== undefined || modelProvider !== undefined) {
-+      if (!sourceFile || !path.isAbsolute(sourceFile) || !modelProvider?.trim()) {
-+        throw new Error(
-+          "Codex role verification requires an absolute role source and an expected model provider",
-+        );
-+      }
-+    }
++    const roleBinding = this.resolveRoleBinding(launchEnv);
      return {
        ...this.deps,
        codexHome: resolveCodexHomeDir(buildCodexAppServerEnv(this.runtimeSettings, launchEnv)),
-+      roleBinding:
-+        sourceFile && modelProvider ? { sourceFile, modelProvider } : this.deps.roleBinding,
++      roleBinding: roleBinding ?? this.deps.roleBinding,
        customCodexConfig: this.customProviderConfig(),
      };
    }
+ 
++  /**
++   * A provider's fixed env is authoritative; a launch override may only repeat it. Shared
++   * providers leave both values to the opening plugin, which selects them from the agent's
++   * saved role. `PASEO_CODEX_ROLE_REQUIRED=1` makes a missing binding a launch failure, so a
++   * shared provider cannot start unverified when its plugin is missing.
++   */
++  private resolveRoleBinding(
++    launchEnv: Record<string, string> | undefined,
++  ): CodexRoleBinding | null {
++    const fixed = this.roleBindingFrom(this.runtimeSettings?.env, "provider");
++    const launched = this.roleBindingFrom(launchEnv, "launch");
++    if (this.runtimeSettings?.env?.PASEO_CODEX_ROLE_REQUIRED === "1") {
++      if (!launched) {
++        throw new Error(
++          "Codex role verification failed: this provider requires a launch role binding for this session",
++        );
++      }
++      if (launched.role !== "LUNO" && launched.role !== "LENS" && launched.role !== "FORGE") {
++        throw new Error(
++          "Codex role verification failed: a shared role session requires role LUNO, LENS or FORGE",
++        );
++      }
++    }
++    if (fixed) return this.withFixedRole(fixed, launched);
++    if (launched) return launched;
++    return null;
++  }
++
++  private roleBindingFrom(
++    env: Record<string, string> | undefined,
++    origin: "provider" | "launch",
++  ): CodexRoleBinding | null {
++    const sourceFile = env?.PASEO_CODEX_ROLE_SOURCE;
++    const modelProvider = env?.PASEO_CODEX_ROLE_MODEL_PROVIDER;
++    if (sourceFile === undefined && modelProvider === undefined) return null;
++    return this.validRoleBinding(sourceFile, modelProvider, env?.PASEO_CODEX_ROLE, origin);
++  }
++
++  /**
++   * A shared provider may switch the role source/home, never its upstream: the upstream is
++   * fixed by the provider ID and command. Any other provider keeps its whole binding fixed.
++   */
++  private withFixedRole(
++    fixed: CodexRoleBinding,
++    launched: CodexRoleBinding | null,
++  ): CodexRoleBinding {
++    if (!launched) return fixed;
++    if (this.runtimeSettings?.env?.PASEO_CODEX_ROLE_SHARED !== "1") {
++      if (
++        launched.sourceFile !== fixed.sourceFile ||
++        launched.modelProvider !== fixed.modelProvider
++      ) {
++        throw new Error(
++          "Codex role verification failed: a launch binding cannot override the provider's fixed role",
++        );
++      }
++      return fixed;
++    }
++    if (launched.modelProvider !== fixed.modelProvider) {
++      throw new Error(
++        "Codex role verification failed: a shared provider cannot change its upstream",
++      );
++    }
++    return launched;
++  }
++
++  private validRoleBinding(
++    sourceFile: string | undefined,
++    modelProvider: string | undefined,
++    role: string | undefined,
++    origin: "provider" | "launch",
++  ): CodexRoleBinding {
++    if (!sourceFile || !path.isAbsolute(sourceFile) || !modelProvider?.trim()) {
++      throw new Error(
++        `Codex role verification requires an absolute role source and an expected model provider in the ${origin} env`,
++      );
++    }
++    return { role: role?.trim() || null, sourceFile, modelProvider: modelProvider.trim() };
++  }
++
+   private customProviderConfig(): CodexCustomProviderConfig | null {
+     return buildCodexCustomProviderConfig(this.runtimeSettings, this.deps.customProvider);
+   }
+diff --git a/packages/server/src/server/session.ts b/packages/server/src/server/session.ts
+index 6ffe2de..8c787cb 100644
+--- a/packages/server/src/server/session.ts
++++ b/packages/server/src/server/session.ts
+@@ -5096,6 +5096,22 @@ export class Session {
+     const callerAgent = await this.resolveCreationCaller(request.callerAgentId);
+ 
+     let config = request.config;
++    // A foreground conversation opened directly in a client can omit a profile.
++    // Explicit and partial role options still go through the role plugin unchanged.
++    const options = config.providerOptions;
++    if (
++      !request.callerAgentId &&
++      !callerAgent &&
++      !request.background &&
++      (config.provider === "cchp" || config.provider === "gdr") &&
++      !Object.hasOwn(options ?? {}, "paseo_role") &&
++      !Object.hasOwn(options ?? {}, "paseo_upstream")
++    ) {
++      config = {
++        ...config,
++        providerOptions: { ...options, paseo_role: "LUNO", paseo_upstream: config.provider },
++      };
++    }
+ 
+     const intent = await resolveCreateAgentIntent({
+       explicitWorkspaceId: createdWorktree?.workspace.workspaceId ?? request.workspaceId,

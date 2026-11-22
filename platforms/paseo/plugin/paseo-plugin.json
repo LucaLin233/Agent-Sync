@@ -1,0 +1,6 @@
+{
+  "id": "shared-role-providers",
+  "requirements": {
+    "paseo": ">=0.17.1"
+  }
+}
