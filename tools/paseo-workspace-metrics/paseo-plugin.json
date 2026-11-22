@@ -2,6 +2,6 @@
   "id": "workspace-metrics",
   "name": "工作区用量",
   "requirements": {
-    "paseo": "0.17.1"
+    "paseo": ">=0.16.0"
   }
 }
