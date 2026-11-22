@@ -20,7 +20,7 @@ paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics 
 已有 Git 安装：先用 `paseo plugin ls "$PLUGIN_ID"` 核对原仓库和子目录，一致后更新到已核 ref，不要重走安装：
 
 ```sh
-PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID}
+PLUGIN_ID=${PLUGIN_ID:?先确认现有安装的运行 ID}
 REF=${REF:?填已核对的已合并提交}
 paseo plugin update "$PLUGIN_ID" --ref "$REF"
 ```
@@ -28,13 +28,15 @@ paseo plugin update "$PLUGIN_ID" --ref "$REF"
 已有本地开发安装：源码更新后用运行 ID 重载：
 
 ```sh
-PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID}
+PLUGIN_ID=${PLUGIN_ID:?先确认现有安装的运行 ID}
 paseo plugin reload "$PLUGIN_ID"
 ```
 
-现有安装的运行 ID 从目标 daemon 的 `paseo plugin ls` 读取后继续沿用；新部署按本次部署选定。安装来源不匹配时，先在授权范围内确定迁移方案，不直接按同一 ID 覆盖。
+所有安装、更新或重载写入前，确认目标 daemon、运行 ID 和本次写授权；已有 Git 安装的 `update --ref` 会直接按该 ref 更新，不重走 install。
 
-安装后用 `paseo plugin ls "$PLUGIN_ID"` 回读运行 ID、安装源和已安装修订，再按目标现场核对设置与运行状态；该命令不联系远端，回读一致不证明远端已有更新。
+运行 ID 未知时，按目标根 CLI 的 `--help` 核对是否支持全局 `--quiet`：支持时用 `paseo --quiet plugin ls` 只列 ID，否则用 `paseo plugin ls --json` 只投影 `id`。已知 ID 只核目标项，用 `paseo plugin ls "$PLUGIN_ID"`；现有安装继续沿用读到的运行 ID，新部署按本次部署选定。安装来源不匹配时，先在授权范围内确定迁移方案，不直接按同一 ID 覆盖。
+
+安装、更新或重载后都用 `paseo plugin ls "$PLUGIN_ID"` 回读目标项，只取运行 ID、安装源、已安装修订和状态这些必要字段；Git 安装或更新还要核对已安装修订等于选定提交，reload 还要核对实际回执和当前运行状态，并继续核对生效设置。`ls` 不联系远端，回读一致不证明远端已有更新。
 
 安装后在「设置 → 插件 → 工作区用量」的齿轮打开设置：默认只显示最近样本，累计统计关闭；打开「累计统计」后默认按本机全部 workspace 各自汇总，可在「高级设置」里改为只查询指定 workspace ID，并可选填 Codex home（留空自动发现）。保存使用 host 设置的 revision，其他客户端和已打开的面板、输入框按钮会随设置订阅刷新并清除旧累计缓存，不需要重载插件。
 
