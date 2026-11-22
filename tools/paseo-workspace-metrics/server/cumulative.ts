@@ -1,7 +1,7 @@
-import { constants, promises as fs } from "node:fs";
+import { constants, promises as fs, realpathSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { cumulativeUsageRpc } from "../shared/cumulative.ts";
@@ -349,31 +349,75 @@ export async function workspaceScope(settings?: CodexHomeSettings) {
   };
 }
 
-export async function resolveCodexHome(settings?: CodexHomeSettings): Promise<{ root: string | null; error: string | null }> {
-  const values = await readSettings(settings);
-  const candidates: string[] = [];
-  const env = process.env.CODEX_HOME?.trim();
-  if (env) candidates.push(env);
-  if (values.codexHome) candidates.push(values.codexHome);
-  candidates.push(join(homedir(), ".codex"));
+async function usableRoot(root: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(root);
+    if (!stat.isDirectory()) return false;
+    for (const name of ["sessions", "archived_sessions"]) {
+      try {
+        const dir = await fs.lstat(join(root, name));
+        if (dir.isDirectory() && !dir.isSymbolicLink()) return true;
+      } catch {
+        // Try the next fixed directory.
+      }
+    }
+  } catch {
+    // A missing or unreadable root is not usable.
+  }
+  return false;
+}
 
-  for (const candidate of candidates) {
-    if (!isAbsolute(candidate)) continue;
-    try {
-      const root = await fs.realpath(candidate);
-      const stat = await fs.stat(root);
-      if (!stat.isDirectory()) continue;
-      for (const name of ["sessions", "archived_sessions"]) {
-        try {
-          const dir = await fs.lstat(join(root, name));
-          if (dir.isDirectory() && !dir.isSymbolicLink()) return { root, error: null };
-        } catch {
-          // Try the next fixed root.
+export async function resolveCodexHome(
+  settings?: CodexHomeSettings,
+  options: { home?: string; env?: string | null } = {},
+): Promise<{ root: string | null; error: string | null }> {
+  const values = await readSettings(settings);
+  const home = resolve(options.home ?? homedir());
+  let homeReal = home;
+  try {
+    homeReal = realpathSync(home);
+  } catch {
+    // A missing home can still be compared lexically.
+  }
+
+  // CODEX_HOME is the daemon administrator's external root. Normalize it, then
+  // require its resolved path to stay under the configured root's parent.
+  const rawEnv = options.env === undefined ? process.env.CODEX_HOME : options.env;
+  const env = rawEnv?.trim();
+  if (env && isAbsolute(env)) {
+    const normalized = resolve(env);
+    const parent = dirname(normalized);
+    const rel = relative(parent, normalized);
+    if (rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel)) {
+      let root: string | null = null;
+      try {
+        root = realpathSync(normalized);
+      } catch {
+        // Try the configured fallbacks.
+      }
+      if (root !== null) {
+        const rootRel = relative(parent, root);
+        if (rootRel !== ".." && !rootRel.startsWith(".." + sep) && !isAbsolute(rootRel) && await usableRoot(root)) {
+          return { root, error: null };
         }
       }
-    } catch {
-      // Try the next candidate.
     }
+  }
+
+  // Plugin settings are daemon-local configuration, but their root must stay
+  // inside the daemon user's home both lexically and after resolving symlinks.
+  for (const candidate of [values.codexHome, join(home, ".codex")]) {
+    if (!candidate || !isAbsolute(candidate)) continue;
+    const normalized = resolve(candidate);
+    let root: string;
+    try {
+      root = realpathSync(normalized);
+    } catch {
+      continue;
+    }
+    const rel = relative(homeReal, root);
+    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) continue;
+    if (await usableRoot(root)) return { root, error: null };
   }
   return { root: null, error: "未找到 Codex 会话目录；请设置 CODEX_HOME 或插件 codexHome" };
 }

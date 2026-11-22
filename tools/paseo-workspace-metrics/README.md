@@ -29,7 +29,7 @@ paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics 
 
 ## 累计数据来源与边界
 
-Codex 数据根依次尝试：daemon 进程的 `CODEX_HOME`、插件 host 设置 `codexHome`，最后才是 `~/.codex`。实际 Codex home 和 workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
+Codex 数据根依次尝试：daemon 进程的 `CODEX_HOME`、插件 host 设置 `codexHome`，最后才是 `~/.codex`。插件设置的 `codexHome` 必须解析到 daemon 用户家目录内；`CODEX_HOME` 作为管理员配置的外部根保留，规范化并解析软链后必须仍位于其配置根所在目录内。workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
 
 服务端只服务 host 设置 `workspaceIds` 允许的 workspace；未配置或列表为空时累计功能关闭，前端也不发累计查询。服务端只接受 workspace ID 和会话 ID，不接受客户端路径；每个会话都用 Paseo 的 exact agent ref 刷新后校验，拒绝跨 workspace、归档、非 Codex 或 `nativeHandle` 不是 UUID 的成员。rollout 文件名必须与该 UUID 精确匹配。每个 UUID 的日期目录或归档精确匹配结果最多缓存 30 秒；文件按 `dev/ino/size/mtime/ctime` 校验身份并只从上次偏移继续读取，不建立全局会话索引。单文件上限 256 MiB，单目录条目上限 5,000。
 

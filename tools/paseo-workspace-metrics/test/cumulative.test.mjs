@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage } from "../server/cumulative.ts";
+import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, resolveCodexHome } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -23,6 +23,25 @@ async function makeRoot(t) {
   await fs.mkdir(join(root, "sessions", "2026", "11", "22"), { recursive: true });
   await fs.mkdir(join(root, "archived_sessions"), { recursive: true });
   return root;
+}
+
+async function makeHome(t) {
+  const base = await fs.mkdtemp(join(tmpdir(), "workspace-metrics-home-"));
+  t.after(async () => { await fs.rm(base, { recursive: true, force: true }); });
+  const home = join(base, "home");
+  await fs.mkdir(home, { recursive: true });
+  return { base, home };
+}
+
+async function makeCodexRoot(parent, name) {
+  const root = join(parent, name);
+  await fs.mkdir(join(root, "sessions", "2026", "11", "22"), { recursive: true });
+  await fs.mkdir(join(root, "archived_sessions"), { recursive: true });
+  return root;
+}
+
+function settingsFor(values) {
+  return { read: async () => ({ status: "ready", values }) };
 }
 
 function sessionFile(root, id, sub = "sessions/2026/11/22") {
@@ -267,4 +286,46 @@ test("a symlinked date directory is not followed", async (t) => {
   const result = await run(root, [snapshot("agent-a", a)]);
   assert.equal(result.covered, 0);
   assert.equal(result.missing, 1);
+});
+
+test("plugin codexHome must stay inside the daemon user's home", async (t) => {
+  const { base, home } = await makeHome(t);
+  const inside = await makeCodexRoot(home, "codex-real");
+  const insideLink = join(home, "codex-link");
+  await fs.symlink(inside, insideLink);
+  const outside = await makeCodexRoot(base, "outside");
+  const outsideLink = join(home, "codex-outside");
+  await fs.symlink(outside, outsideLink);
+
+  const accepted = await resolveCodexHome(settingsFor({ codexHome: insideLink }), { home, env: "" });
+  assert.equal(accepted.root, await fs.realpath(inside));
+  const rejected = await resolveCodexHome(settingsFor({ codexHome: outsideLink }), { home, env: "" });
+  assert.equal(rejected.root, null);
+});
+
+test("daemon CODEX_HOME keeps an external root and rejects a symlink escape", async (t) => {
+  const { base, home } = await makeHome(t);
+  const parent = join(base, "roots");
+  const external = await makeCodexRoot(parent, "codex");
+  const accepted = await resolveCodexHome(undefined, { home, env: external });
+  assert.equal(accepted.root, await fs.realpath(external));
+
+  const outside = await makeCodexRoot(base, "outside");
+  const escaping = join(parent, "escaping");
+  await fs.symlink(outside, escaping);
+  const rejected = await resolveCodexHome(undefined, { home, env: escaping });
+  assert.equal(rejected.root, null);
+
+  const inside = await makeCodexRoot(parent, "inside");
+  const linked = join(parent, "linked");
+  await fs.symlink(inside, linked);
+  const linkedAccepted = await resolveCodexHome(undefined, { home, env: linked });
+  assert.equal(linkedAccepted.root, await fs.realpath(inside));
+});
+
+test("the default Codex root remains under the daemon user's home", async (t) => {
+  const { home } = await makeHome(t);
+  const root = await makeCodexRoot(home, ".codex");
+  const result = await resolveCodexHome(settingsFor({}), { home, env: "" });
+  assert.equal(result.root, await fs.realpath(root));
 });
