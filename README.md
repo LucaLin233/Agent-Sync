@@ -159,14 +159,14 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 宿主端是 npm 安装并由 systemd 托管的 Paseo；Codex 作为 provider 进程在运行用户下启动。仓库不提供容器构建路径，也不假定部署目录、用户名或镜像布局。规则与流程按 `skills/luno-core/references/sync.md`〔分支 sync-host〕，各端机制见 `skills/luno-platform/references/runtime-host.md`、`runtime-codex.md`、`runtime-paseo.md`。下文 `<home>` 是核实后的受管安装根（安装器的 `--home`，不必然等于 Paseo data home 或 systemd 的工作目录），`<checkout>` 是受管检出，`<prefix>` 是隔离安装前缀；它们都是占位符，实际值按当次现场读取，不写进仓库。已核基线是活动 systemd 单元经 Node/mise 启动，`@getpaseo/cli` 与 `@getpaseo/server` 同为 0.17.1；具体用户、安装前缀、HOME 与 Paseo data home 以现场读取为准。除只读取证外，命令都以实际运行用户执行；需要提权或切换系统单元的动作另按授权进行。
 
 1. **核实实际入口**：只读核对活动 systemd 单元的实际用户、`ExecStart`、环境和工作目录，确认进程实际加载的 `@getpaseo/cli` 与 `@getpaseo/server` 来自同一安装前缀且版本一致，记录可恢复的旧程序入口、配置和登录态位置。不要只凭 `which`、全局 npm 清单或包目录推定实际加载。
-2. **隔离前缀验证补丁包**：在独立构建目录取固定上游提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`，用 `git apply --check` 后应用 [0.17.1 共享角色补丁](platforms/paseo/codex-role-verification-v0.17.1.patch)，按 Paseo 发布流程构建；把构建产物装进与现役前缀分离的 npm `<prefix>`（同版本 `@getpaseo/cli`、`@getpaseo/server`），用该前缀的版本回读和隔离启动验证补丁包，不原地改写现役前缀，也不在这步切换 systemd 单元。
+2. **隔离原版实例**：在独立 npm `<prefix>` 安装同版本 `@getpaseo/cli`、`@getpaseo/server`（0.17.1），回读两者版本一致；用独立 `PASEO_HOME`、回环端口和临时 HOME 启动隔离 daemon，不原地改写现役前缀，也不在这步切换 systemd。原版不需要补丁或插件。
 3. **受管检出**：以运行用户 `git clone https://github.com/LucaLin233/Agent-Sync.git <checkout>`；之后只快进到已合并的 main（升级失败时的回退见第 10 步），不在其中编辑。
 4. **GLOBAL 副本或 daemon 范围来源**：默认内嵌模式把 Minis `GLOBAL.md` 整份复制到 `<home>/.luno/memory/GLOBAL.md`（属主为运行用户，权限 600）；缺这个文件时安装器在预检阶段报错，不做任何写入。以后 GLOBAL 更新时，复制后再运行一次 `--apply` 与 `--check`，重新生成 Codex 常驻文件。已选 daemon 模式时改用单端选项（见下文〈Codex GLOBAL 来源〉），不再要求私人副本。宿主经验日志的创建、检索和共享见 [宿主端记忆入口](skills/luno-platform/references/runtime-host.md#记忆入口)。
-5. **安装与核对**：以运行用户运行 `python3 -B <checkout>/tools/link-install.py --checkout <checkout> --home <home>`。默认只列计划，确认后加 `--apply` 写入，用 `--check` 回读。安装器按 `tools/sync-targets.json` 的 `codex`、`paseo` 端登记，建立以下内容：技能软链；`~/.luno/generated/` 下的生成文件及其公开软链（`~/.codex/AGENTS.md`）；登记的角色家目录（包括 `~/.luno/homes/{lens,forge}-codex/`、`{lens,forge}-gdr/` 及配置示例的角色落点）。如果第 4 步选择 daemon 范围 GLOBAL，角色家目录仍需单独安装：分别以 `--ends codex --codex-global-source paseo-append-system-prompt` 和 `--ends paseo` 各做一次 plan、`--apply`、`--check`；前者只生成 Codex 主入口，后者建立角色家目录与技能链接。它不读取、不复制凭据和登录态，不改写已有的 settings 或 config；遇到非受管文件占位、经非受管软链的路径、没有对应公开软链的生成文件、角色家目录属主或权限（700）不符，或本次安装计划中的受管 `AGENTS.md` 旁存在 `AGENTS.override.md` 时，停止并报告，不覆盖这些文件。生成文件先在同一目录以本次运行独占的随机名排他创建暂存文件，再改名或链接成正式文件，所以中断时正式文件保持原样；暂存残留的归属无法证明，安装器不清理也不判断，只在报告 `residue` 里按前缀列出（含旧版固定名 `.<文件名>.link-install.tmp`），由用户核对后自行删除。`--apply` 成功时报告的 `created` 只列本次实际执行过的项及其 `state`（`create` 新建、`update` 覆盖），计划里没有执行的项不列入，已一致的重跑为空。
-6. **登录**：主会话以运行用户执行 `codex login`。使用登录态的角色家目录各登录一次；使用 `env_key` 的角色沿用当次获准注入，不要求另行登录。例如 `env CODEX_HOME="<home>/.luno/homes/forge-codex" codex login`。登录态留在该用户的持久目录中。
-7. **paseo 配置**：从 `platforms/paseo/config.example.json` 选择本次获准的 `daemon.mcp`、provider 与 Profile 条目，保全其他现值后合并进经核实的 `PASEO_HOME`/生效配置路径（按 systemd 单元环境和实际启动参数核对，不推定为运行用户 HOME 下的 `.paseo/config.json`）。示例中的 `/home/example` 只是可见占位根，实际替换为核实后的安装路径；`PASEO_CODEX_ROLE_SOURCE` 也要按实际 `<checkout>` 单独替换，不能只改 HOME 根。不要把示例整表覆盖现有配置。监听地址、systemd 环境和登录态保持现值，不在示例里改。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
-8. **隔离前缀角色验收**：在隔离前缀启动的 daemon 上，`--check` 一致后确认技能可以列出；逐一核对 CCHP、GDR 两套 LUNO/LENS/FORGE 六个 Profile，按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#派发通道) 回读实际 provider、启动解析模型、权限模式及同一活线程的 `codexRoleVerification`（`role`、`upstream`、`resolvedModel` 与三项标志）。六个 Profile 各发一次初始正式消息，证明校验在首个模型请求之前完成；异常绑定只允许零模型请求。草稿 Speed 只查能力。此步不动现役 systemd。
-9. **可恢复切换与新现役回读**：隔离前缀验收通过且规则安装 `--check` 一致后，在同一维护窗口暂停新会话，把 systemd 单元的实际程序入口切到已验证的补丁包；`daemon-reload` 与重启由获准的系统服务操作者执行，不假定能以单元运行用户直接操作 systemd。重启后对新的现役 daemon 回读实际加载的包版本、配置、工作目录及全部已授权接收端，再运行最小新会话验收；daemon 配置与生成文件须在同一受控维护窗口切换并回读。失败立即恢复记录的旧入口并重新回读。安装器不切换包、systemd 单元或登录态。
+5. **安装与核对**：以运行用户执行 `python3 -B <checkout>/tools/link-install.py --checkout <checkout> --home <home> --ends codex`。使用 daemon 范围 GLOBAL 时再加 `--codex-global-source paseo-append-system-prompt`。先用默认模式看计划，再加 `--apply` 应用，最后用 `--check` 回读。官方版六个 Profile 共用主 Codex 家目录。既有角色家目录中的会话和登录态由原安装保留。安装器只处理受管入口，遇到占位、非受管软链或 `AGENTS.override.md` 时会停止。中断残留见报告的 `residue`，需核对归属后再处理。
+6. **登录**：两个上游都在主 Codex 家目录中配置。使用 `env_key` 的上游沿用获准的环境注入，使用登录态时以运行用户执行 `codex login`。
+7. **paseo 配置**：按 [Paseo 官方原版部署](platforms/paseo/README.md) 合并 `platforms/paseo/config.example.json` 的 `daemon.mcp` 两项、`daemon.agentProfiles` 和 `agents.providers` 条目，`daemon.appendSystemPrompt` 追加到已有值末尾；替换 `/home/example/codex-home` 和 `<AGENT_SYNC_CHECKOUT>` 占位符。不要把示例整表覆盖现有配置；监听地址、systemd 环境、登录态和其他 MCP 设置保持现值。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
+8. **隔离实例验收**：在隔离实例上确认技能可以列出；逐一核对 CCHP、GDR 两套 LUNO/LENS/FORGE 六个 Profile，按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#派发通道) 回读实际 provider、模型和权限模式。六个 Profile 各发一次初始正式消息，首行写角色行；GDR 的 Ultrafast 按实际 Codex 模型目录声明回读，不能只看配置。草稿 Speed 只查能力。此步不动现役 systemd。
+9. **可恢复切换与回读**：隔离实例验收通过后，在同一维护窗口暂停新会话，把现役实例的 Paseo 配置切到已验证的官方配置；原版程序沿用，不替换成补丁包。reload/重启后回读实际加载的包版本、配置、工作目录及全部已授权接收端，再做最小新会话验收。失败时按 [Paseo 回退说明](platforms/paseo/README.md#隔离与前态) 恢复原配置，以及迁移时退役的原程序入口和共享插件，再重新回读。
 10. **升级与回退**：下文 `LI` 代表第 5 步的安装器命令，`CO` 代表以运行用户执行的 `git -C <checkout>`。安装器不 fetch、不切换 Git、包或 systemd 单元，旧版与新版都要已在本地。
    - 预检：`CO fetch origin`，记下当前 HEAD 为旧版、`origin/main` 为新版，运行 `LI --preflight <新版>`。只有检出干净、现有安装一致、新版登记无冲突时才返回就绪；输出列出旧版、新版与将退役的入口。
    - 升级：`CO merge --ff-only <新版>`，再运行 `LI --apply --previous <旧版>` 与 `LI --check`。只退役旧版独有的公开软链和受管生成文件，目录、设置和登录态不动。`--apply` 中断时，可用同样的参数重跑完成升级；中断留下的暂存残留不参与判断，也不被清掉，按 `residue` 报告交你核对。
@@ -198,7 +198,7 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 
 默认的 `codex-main` 仍生成 `prompt/LUNO.md` 原文、一个 LF 和私人 GLOBAL 副本；其他端不变。只选 Codex 单端时，可显式加 `--codex-global-source paseo-append-system-prompt`：`AGENTS.md` 恰为 `prompt/LUNO.md` 原文，GLOBAL 改由 Paseo daemon 的 `daemon.appendSystemPrompt` 提供（Paseo 设置 → Host → Orchestration → System Prompt）。该选项只接受 `--ends codex`；默认同时选择 `codex`、`paseo` 时，不接受此 GLOBAL 来源选项。安装器不读写这份私人配置；设置与生成文件须在同一受控维护窗口切换，先暂停新会话，切换或回滚后回读再恢复会话。
 
-该来源是 daemon 范围，不是单个 provider 的选项：Paseo 0.17.1（固定上游提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`）的 agent-manager 会把 `daemon.appendSystemPrompt` trim 后附加到该 manager 启动的所有会话配置，Codex 作为 developerInstructions 接收。因此同一 daemon 启动的 LUNO、LENS、FORGE 及其他 agent 都在适用范围内，写前授权须覆盖该 daemon 的全部接收端；不要另加 provider 级过滤或自研注入。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；选 daemon 来源时角色 home 仍按 `--ends paseo` 单独安装。回读时配置值按原始字节核对，实际交付按 trim 后口径理解；文件和配置匹配不等于实际加载，原生 CLI 不经该 daemon，不直接获得这段提示词。
+该来源是 daemon 范围，不是单个 provider 的选项：Paseo 0.17.1（固定上游提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`）的 agent-manager 会把 `daemon.appendSystemPrompt` trim 后附加到该 manager 启动的所有会话配置，Codex 作为 developerInstructions 接收。因此同一 daemon 启动的 LUNO、LENS、FORGE 及其他 agent 都在适用范围内，写前授权须覆盖该 daemon 的全部接收端；不要另加 provider 级过滤或自研注入。官方版六个 Profile 通过主 Codex 家目录启动，由首条消息和登记的角色原文确定任务角色。回读时配置值按原始字节核对，实际交付按 trim 后口径理解；文件和配置匹配不等于实际加载，原生 CLI 不经该 daemon，不直接获得这段提示词。
 
 首次接入时，安装器 blob 已变，旧的 `--preflight`/`--apply --previous` 跨 blob 尚未支持。现场已经改成 LUNO-only 且仍有旧 GLOBAL 副本时，用旧、新可信安装器对同一安装根和除来源选项外相同的入口参数只读 `--check`：旧安装器只把 `AGENTS.md` 列为 update，新安装器带 `--ends codex --codex-global-source paseo-append-system-prompt` 应全部 match；目标登记与 `prompt/LUNO.md` 均未变时，快进检出后只跑带选项的 `--check`，不运行 `--apply`。仍内嵌的现场沿用原版升级路径，但仅在该路径满足同布局前提（两版安装器 blob 相同、共有公开软链目标不变）时可用；从含 Claude Code 登记的旧版跨到退役版不满足该前提，按上文〈升级与回退〉的运行端退役条处理，不用作本次跨退役迁移。已迁移入口后续换版沿用同 blob 的 `--preflight`/`--apply --previous`（带同一来源选项），只重生成受管文件，不改安装器。
 
@@ -227,111 +227,19 @@ GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时�
 
 ## Paseo 共享角色体系
 
-`platforms/paseo/config.example.json` 只保留两个共享 Codex provider：`cchp`（CCHP）与 `gdr`（GDR），
-各承载 LUNO、LENS、FORGE 一个 Profile，共六个。Profile 用 `options.paseo_role` 与
-`options.paseo_upstream` 声明角色和上游，不再使用 `notes` 路由。示例中的模型、思考强度、模式和
-`service_tier` 是可编辑初值，不表示所有上游已验证支持；实例只合并获准条目，不能整表覆盖现有配置。
+`platforms/paseo/config.example.json` 是唯一 Paseo 配置示例，只启用 `cchp`（CCHP）和 `gdr`（GDR）两个自定义 Codex provider，各承载 LUNO、LENS、FORGE 一个 Profile，共六个。详细安装、迁移、Profile 表和限制见 [platforms/paseo/README.md](platforms/paseo/README.md)。
 
-- CCHP 的 LUNO、LENS 默认 Normal（`service_tier: "default"`），可在客户端选择 Fast/Ultrafast；
-  CCHP FORGE 使用 `deepseek-flash`，不写 `service_tier`，在 Normal/Flex 中选择；GDR 三个 Profile
-  默认 Ultrafast。
-- 两个 provider 的 `env` 固定主 Codex home、LUNO 角色原文和各自上游，并设置
-  `PASEO_CODEX_ROLE_SHARED=1`、`PASEO_CODEX_ROLE_REQUIRED=1`。缺少插件启动绑定时会话失败，
-  不会退回未核验的默认角色。
-- 角色家目录仍是登记里的 `lens-codex`、`forge-codex`、`lens-gdr`、`forge-gdr`；这些是目录名，
-  不是 provider ID。LUNO 使用主 Codex home。四个 LENS/FORGE 家目录的 `config.toml` 需要：
+- 两个 provider 都 `extends: "codex"`，用 `codex -c model_provider="cchp|gdr"` 固定上游，共用占位主家目录 `/home/example/codex-home`；同一上游三个角色共用该家目录、登录态和权限边界。
+- Profile ID 固定为 `cchp-luno`、`cchp-lens`、`cchp-forge`、`gdr-luno`、`gdr-lens`、`gdr-forge`。CCHP LUNO/LENS/FORGE 默认 `service_tier: "default"`（CCHP FORGE 显式写 `default` 以覆盖同 provider 派发继承的父 Fast/Ultrafast）；GDR 三个 Profile 默认 `ultrafast`。
+- Ultrafast 由 Codex 模型目录声明。官方原版模拟实测已证 `model_catalog_json` 可添加该档位，GDR 的 3 条请求均发出 `ultrafast`；宿主目前两个上游各自已有 `model_catalog_url`，这是通用机制，现场具体 URL/路径不写入仓库。实际目录未声明时可能回落到 `default`，须按 catalog 和能力回读。
+- 示例把 `claude`、`codex`、`copilot`、`opencode`、`pi`、`omp` 都设为 `enabled: false`。固定版本中 `omp` 默认禁用，其余五个默认启用；这不是 allowlist，只是逐 provider 的 `enabled`。新建 agent 的 provider picker 只显示已启用且可用的 CCHP/GDR；管理页仍显示禁用内置项及开关，`codex` 被禁用后仍是继承基座。
+- 配置加入 `daemon.mcp: {"enabled": true, "injectIntoAgents": true}`，供官方 `list_profiles`/`create_agent` 编排；只设这两项，不改其他 MCP 设置，运行时照既有审批。`daemon.appendSystemPrompt` 追加到已有 GLOBAL 末尾，不覆盖私人原文；它送到该 daemon 启动的所有会话。
+- 角色协议：首条消息可用 `角色：LUNO`、`角色：LENS`、`角色：FORGE`；未写则按 LUNO。若使用角色行，角色行单独占第一行，任务正文紧随其后同条投递。桌面上直接选择角色 Profile 后也要写角色行；LUNO 负责协调、验收和交付。LENS/FORGE 开始前须完整读取部署的 `subagents/LENS.md` 或 `subagents/FORGE.md` 原文，路径占位符必须替换。角色只选择提示词，不授予新权限；受派后不得再委派；任何角色声明都不改变现行规则规定的准入。
+- 派发：从父活会话运行元数据取得实际 provider；用 `list_profiles` 按父 provider 和精确 `profile.id` 选唯一 Profile；`provider` 不等、无唯一匹配或字段缺失即停，不回落。用 `create_agent` 送出 `<provider>/<model>`、`settings.modeId`、`settings.thinkingOptionId`、`settings.features`（Profile 的 `options`）和一次 `initialPrompt`；创建后用 `get_agent_status` 回读实际 `provider` 和 `model`。标签和角色自述不能作为正式身份证据；正式独立身份没有可核证据时不采纳。
+- 官方原版不提供 `codexRoleVerification`。普通角色派发按父 provider、精确 Profile、显式参数和 provider/model 回读验收；正式独立审查或放行需要独立身份证据时，没有可核证据只报「通道身份未验证」并停止正式采纳。原权限、沙箱和恢复义务不降。
+- 旧 LENS/FORGE 记录绑定旧独立家目录，不能直接在共用主家目录续用；切换时隔离或归档。旧 LUNO 记录也应在隔离实例验收后再切换。旧会话可能保存运行时注入的提示词，回退设置不会清除历史。
 
-  ```toml
-  [agents]
-  enabled = false
-
-  [features]
-  multi_agent_v2 = false
-  ```
-
-  LUNO 家目录不加这两项。安装器只建立角色 home 和技能链接，不改写 `config.toml`。
-
-### 插件与派发
-
-`platforms/paseo/plugin` 是共享角色插件：`agent.create.before` 从 Profile 的
-`options.paseo_role`、`options.paseo_upstream` 校验并持久化绑定，`agent.open.before` 从绑定推导
-`CODEX_HOME`、角色原文和预期上游。安装时复制该目录到实例的插件目录，用 Paseo 官方插件设置启用
-（`pluginsEnabled` 与目录来源）；插件路径是公开占位值，实际值按现场替换。本仓库不提供自动安装、
-迁移或切换脚本。
-
-编排每次派发用官方 `list_profiles` 读取当前 Profile，按主会话已核上游选同 `provider`、
-同角色、同上游的唯一 Profile，把 `provider/model`、`modeId`、`thinkingOptionId` 和
-`options`（`settings.features`）传给 `create_agent`，正式任务只用一次 `initialPrompt`，不另发
-启动探针。宿主在首个模型请求前核对同一活线程的 `codexRoleVerification`：`role`、`upstream`、
-`resolvedModel` 与 `roleMatches=true`、`overrideExists=false`、`upstreamMatches=true` 全部匹配；
-缺证、错配或异常时零模型请求。状态表里的配置模型和角色自述不能代替这份证据。
-
-桌面前台直接新建只有在未选 Profile 且两个路由字段都不存在时，由服务端默认当前上游 LUNO；
-显式选择 Profile 以 Profile 的角色为准；只给一个字段、两者错配或编排缺失仍拒绝。客户端路径由
-服务端默认补全，编排路径仍须显式选择 Profile，两条路径分别验收。
-
-协议边界：创建请求不携带 Profile ID；客户端把 Profile 展开成 draft 设置，服务端无法区分「未选
-Profile」与「所选 Profile 两个路由字段均缺失」。因此配置验收须逐一确认六个共享 Profile 都声明
-有效角色和与 provider 一致的上游，并确认两个字段随创建请求进入 `providerOptions`；不把服务端
-默认当成对坏 Profile 的拒绝。
-
-草稿 Speed 只使用 provider 已登记的固定启动信息查询能力，不启动线程、不投消息；回读六个 Profile
-的真实速度选项后，真实会话仍走上面的角色门禁。
-
-### 构建、切换与回退边界
-
-补丁基线是固定上游提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`（v0.17.1），修改服务端
-`session.ts`、`agent-manager.ts`、`agent-projections.ts`、`agent-sdk-types.ts`、
-`provider-registry.ts` 与 `agent/providers/codex-app-server-agent.ts`，包含共享角色校验、
-桌面前台默认、草稿 Speed 和调用方 env/metadata 隔离。来源、固定提交和许可核验登记见
-[skills-sources.md](skills-sources.md#paseo-服务端补丁)。
-
-先核基线、应用补丁并按官方入口构建：
-
-```sh
-set -eu
-SRC="/absolute/path/to/paseo-0.17.1-src"
-PATCH="/absolute/path/to/agent-sync/platforms/paseo/codex-role-verification-v0.17.1.patch"
-test "$(git -C "$SRC" rev-parse HEAD)" = 043f0995d4d7e91ab12f3eecef1afce055a81972
-git -C "$SRC" apply --check "$PATCH"
-git -C "$SRC" apply "$PATCH"
-(cd "$SRC" && set -eu && npm ci && npm run build:server)
-```
-
-在与现役前缀分离的 npm 前缀装入同版本包，回读版本后再覆盖构建产物：
-
-```sh
-set -eu
-SRC="/absolute/path/to/paseo-0.17.1-src"
-PREFIX="/absolute/path/to/isolated-prefix"
-npm install --prefix "$PREFIX" --no-audit --no-fund @getpaseo/cli@0.17.1 @getpaseo/server@0.17.1
-node -e "const [p]=process.argv.slice(1); for (const n of ['@getpaseo/cli','@getpaseo/server']) console.log(n, require(p+'/node_modules/'+n+'/package.json').version)" "$PREFIX"
-cp -a "$SRC/packages/server/dist/." "$PREFIX/node_modules/@getpaseo/server/dist/"
-cp -a "$SRC/packages/cli/dist/." "$PREFIX/node_modules/@getpaseo/cli/dist/"
-"$PREFIX/node_modules/.bin/paseo" --version
-```
-
-完整 monorepo 构建超出本端资源时，可用官方 TypeScript（本批为 5.9.3）按
-`packages/server/tsconfig.server.json` 的 `target: ES2020` 和 ESM 输出，配合 `esModuleInterop`、
-`isolatedModules` 对补丁触及的 TS 文件逐文件 `transpileModule`（单文件转译用 `module: ESNext`，
-`NodeNext` 在无包上下文的转译中会输出 CJS），按 `dist/server/server/...` 路径覆盖同一 0.17.1 npm
-前缀的 dist。该缩小路径只证明触及文件进入运行集；它不替代
-`npm run build:server`、`typecheck:server` 或真实角色验收。覆盖后须在隔离 `PASEO_HOME`、回环端口
-和临时 HOME 下用该前缀运行端到端 fixture，并回读 `@getpaseo/cli`、`@getpaseo/server` 的 `0.17.1`
-版本和构建产物里的共享角色标记。
-
-现役宿主是 npm 安装并由 systemd 托管：确认旧前缀、旧 `config.json` 和四个角色 home 的
-`config.toml` 都可恢复后，再切换 systemd 单元的程序入口并重启一次。`paseo reload` 只重读配置，
-不能加载本补丁的代码，不能当作代码切换。切换前暂停新会话；切换后回读新进程实际加载的包版本、
-配置和六个 Profile 的角色证据。
-
-回退与会话边界：早期宿主迁移把获准的旧 LUNO 记录的 `provider`、`runtimeProvider` 和
-`persistenceProvider` 映射到 `cchp`/`gdr`，保留原 agent ID 和 `sessionId`，并只对这笔无绑定的
-记录用 `PASEO_ROLE_LEGACY_AGENT_IDS` 精确配对。未完成该迁移时直接切入口会让旧 `luno-*` provider
-的 ID 失效。回退时把单元指回旧前缀、恢复旧 `config.json`、移除插件，并同时恢复受影响的旧记录到
-迁移前态；四个旧 worker 家目录按记录的原字节恢复 `config.toml`。切换后新建的共享角色记录在旧前缀
-接管前必须隔离或归档，避免旧 ID 把新绑定会话当 LUNO 打开。持久化会话可能保存运行时注入的提示词，
-回退设置不会清除历史。公开文档不提供迁移脚本、名单或现场路径。
+恢复：若已合并，恢复合并前的 `config.json` 并按同一维护窗口 `paseo reload`（或按报告重启），再让新会话按旧配置启动。
 
 ## 测试与历史
 

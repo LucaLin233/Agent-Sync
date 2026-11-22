@@ -757,50 +757,49 @@ module.main(sys.argv[2:])
         self.assertEqual(sorted(p.name for p in role.iterdir()), ["AGENTS.override.md"])
         self.assertFalse((self.home / ".luno/homes/forge-codex").exists())
 
-    def test_paseo_shared_provider_example_and_plugin(self):
+    def test_paseo_official_example_and_install(self):
         config = json.loads((ROOT / "platforms/paseo/config.example.json").read_text())
         self.assertNotIn("listen", config["daemon"])
-        self.assertIs(config["daemon"]["mcp"]["injectIntoAgents"], True)
+        self.assertEqual(config["daemon"]["mcp"],
+                         {"enabled": True, "injectIntoAgents": True})
         providers = config["agents"]["providers"]
-        self.assertEqual(sorted(providers), ["cchp", "gdr"])
+        enabled = sorted(name for name, entry in providers.items() if entry.get("enabled", True))
+        self.assertEqual(enabled, ["cchp", "gdr"])
         for upstream in ("cchp", "gdr"):
             fragment = providers[upstream]
-            env = fragment["env"]
             self.assertEqual(fragment["extends"], "codex")
             self.assertEqual(fragment["label"], upstream.upper())
             self.assertIn('model_provider="%s"' % upstream, fragment["command"])
-            self.assertEqual(env["CODEX_HOME"], "/home/example/codex-home")
-            self.assertEqual(env["PASEO_CODEX_ROLE_SOURCE"],
-                             "/home/example/.luno/agent-sync/prompt/LUNO.md")
-            self.assertEqual(env["PASEO_CODEX_ROLE_MODEL_PROVIDER"], upstream)
-            self.assertEqual(env["PASEO_CODEX_ROLE_SHARED"], "1")
-            self.assertEqual(env["PASEO_CODEX_ROLE_REQUIRED"], "1")
-        profiles = config["daemon"]["agentProfiles"]
-        self.assertEqual(len(profiles), 6)
-        expected = {(provider, role) for provider in ("cchp", "gdr")
-                    for role in ("LUNO", "LENS", "FORGE")}
-        seen = set()
-        for entry in profiles:
-            self.assertNotIn("notes", entry)
-            key = (entry["provider"], entry["options"]["paseo_role"])
-            self.assertNotIn(key, seen)
-            seen.add(key)
-            self.assertEqual(entry["options"]["paseo_upstream"], entry["provider"])
-            tier = None if key == ("cchp", "FORGE") else (
-                "default" if entry["provider"] == "cchp" else "ultrafast")
-            self.assertEqual(entry["options"].get("service_tier"), tier)
-            self.assertIsInstance(entry["modeId"], str)
-            self.assertIsInstance(entry["thinkingOptionId"], str)
-            if key == ("cchp", "FORGE"):
-                self.assertEqual(entry["model"], "deepseek-flash")
-        self.assertEqual(seen, expected)
+            self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/codex-home"})
+        for builtin in ("claude", "codex", "copilot", "opencode", "pi", "omp"):
+            self.assertEqual(providers[builtin], {"enabled": False})
 
-        plugin = ROOT / "platforms/paseo/plugin"
-        for relative in ("index.server.ts", "paseo-plugin.json", "server/roles.ts"):
-            self.assertTrue((plugin / relative).is_file(), relative)
-        manifest = json.loads((plugin / "paseo-plugin.json").read_text())
-        self.assertEqual(manifest["id"], "shared-role-providers")
-        self.assertTrue((ROOT / "platforms/paseo/codex-role-verification-v0.17.1.patch").is_file())
+        profiles = config["daemon"]["agentProfiles"]
+        self.assertEqual([entry["id"] for entry in profiles],
+                         ["cchp-luno", "cchp-lens", "cchp-forge",
+                          "gdr-luno", "gdr-lens", "gdr-forge"])
+        for entry in profiles:
+            upstream, role = entry["id"].split("-", 1)
+            self.assertEqual(entry["provider"], upstream)
+            self.assertEqual(entry["model"], "deepseek-flash" if (upstream, role) == ("cchp", "forge")
+                             else "gpt-6.2-sol")
+            self.assertEqual(entry["modeId"], "full-access")
+            self.assertEqual(entry["thinkingOptionId"], "high")
+            self.assertEqual(set(entry["options"]), {"service_tier"})
+            self.assertEqual(entry["options"]["service_tier"],
+                             "ultrafast" if upstream == "gdr" else "default")
+            self.assertNotIn("notes", entry)
+
+        prompt = config["daemon"]["appendSystemPrompt"]
+        for needle in ("角色：LUNO", "角色：LENS", "角色：FORGE",
+                       "<AGENT_SYNC_CHECKOUT>/subagents/LENS.md",
+                       "<AGENT_SYNC_CHECKOUT>/subagents/FORGE.md"):
+            self.assertIn(needle, prompt)
+        self.assertNotIn("paseo_role", json.dumps(config))
+        self.assertNotIn("paseo_upstream", json.dumps(config))
+        self.assertFalse((ROOT / "platforms/paseo/plugin").exists())
+        self.assertFalse((ROOT / "platforms/paseo/codex-role-verification-v0.17.1.patch").exists())
+        self.assertFalse((ROOT / "platforms/paseo/LICENSE.upstream.txt").exists())
         self.assertNotIn("/root/agent", str(config))
 
         self.assertEqual(self.call("--apply")[0], 0)

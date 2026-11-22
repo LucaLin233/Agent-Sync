@@ -208,12 +208,13 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 输出脱敏的历史保证边界和使用方契约见 `skills/luno-surge/references/SOURCE.md`〈luno-surge 输出脱敏的保证边界〉。
 
-## Paseo 服务端补丁
+## Paseo 官方原版配置
 
-`platforms/paseo/codex-role-verification-v0.17.1.patch` 基于 `getpaseo/paseo@043f0995d4d7e91ab12f3eecef1afce055a81972`（v0.17.1），取材范围为 `packages/server/src/server/` 下补丁列出的 `session.ts`、`agent/agent-manager.ts`、`agent/agent-projections.ts`、`agent/agent-sdk-types.ts`、`agent/provider-registry.ts`、`agent/providers/codex-app-server-agent.ts` 及其差分上下文。变更包括共享 Codex 角色绑定与启动门禁、`codexRoleVerification` 的 role/upstream 回读、桌面前台默认 LUNO、草稿 Speed 能力查询及调用方 env/metadata 隔离。2026-11-22 核实固定提交的许可可取：该提交根 `LICENSE`、`packages/server/LICENSE` 与随包 `platforms/paseo/LICENSE.upstream.txt` 的 SHA256 均为 `79d5aedce6aa0adc547336dc1bd34c5cc9308ba110fac7079ed97515ee573ad3`，逐字节一致。 [上游许可原文](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/LICENSE) · [随包许可](platforms/paseo/LICENSE.upstream.txt)
+`platforms/paseo/config.example.json` 与 `platforms/paseo/README.md` 只使用 Paseo v0.17.1 固定提交 `043f0995d4d7e91ab12f3eecef1afce055a81972` 的官方 Profile、provider、`daemon.appendSystemPrompt` 和 MCP 接口，不复制或分发上游代码，不包含服务端补丁、插件或 wrapper。Ultrafast 依 Codex 模型目录声明：官方原版模拟实测已证 `model_catalog_json` 可添加该档位，GDR 的 3 条请求均发出 `ultrafast`；宿主两个上游目前各自已有 `model_catalog_url`，这是通用机制，现场具体 URL/路径不写入仓库。
 
 ## 已移除与退役的来源
 
+- **Paseo 服务端补丁与插件**：`platforms/paseo/codex-role-verification-v0.17.1.patch`、`platforms/paseo/LICENSE.upstream.txt` 和 `platforms/paseo/plugin/` 已随官方原版方案退役；旧断言和旧来源段落同批移除，不改历史版本。
 - **luno-authoring 的 obra/superpowers**：删除 coding 的整个〈交付〉小节（原99 B 判据及标题），而非换同义词；该包通知、`LICENSE.obra-superpowers.txt` 及资源登记同批退役。公共交付义务仍由 core 的 execution 分支承载；core 的 obra 取材和通知不退役。
 - **luno-coding 原吸收上游**（2026-11-06 公开快照时移除）：原上游没有 LICENSE 文件和版权行（2026-10-20 实查全树及 30 次提交历史），许可材料不完整，不具备公开分发条件，因此不随仓库分发其原件，来源注释和登记一并移除。〈动手前〉〈改动〉两节改按可公开取用的 MIT 上游重写，见〈luno-authoring〉。原快照（2518 B）只作旧私有 `LucaLin233/Agent` 的历史溯源，不是本仓库的来源。重写时按句人工对照了该原文，重写后的两节没有与之同形的句子；这是逐句比对，不是工具全量判等，不作「零相似」这样更强的断言。
 - **linux-service-triage**（luno-ops，2026-11-06 公开快照时移除）：旧三文件已从 `02f82fb^` 找回，其中 `SKILL.md` 为 3209 B，sha256 `6029658dba3841a9503d18af2c80f448dd45795ae6b90f1aa7b23f96e7daece2`；没有 license 字段或许可证附件。元信息给出的完整提交为 `8d4113eba2202d4cbbbc66ff6c429d846fdcd800`，但原上游两个同名 skills 仓库（clawdbot 与 openclaw 名下）对该提交都返回 404。许可缺口保留，不得虚构。服务排障节已按官方文档独立重写（见〈luno-ops〉）；没有持有上游原文，所以没有做逐句比对；本仓库不再含该上游文件。
