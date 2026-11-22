@@ -2,20 +2,37 @@
 
 适用 Paseo 0.16.0 及以上。在插件已启用的 daemon 主机上安装源码，安装无需构建。
 
-本目录源码（本地开发路径）：
+首次安装，本地开发路径：
 
 ```sh
-PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID，或按本次部署选定}
+PLUGIN_ID=${PLUGIN_ID:?先按本次部署选定运行 ID}
 paseo plugin install "$PWD" --id "$PLUGIN_ID"
 ```
 
-正式部署只从已合并并通过验证的提交安装。现有安装的运行 ID 从目标 daemon 的 `paseo plugin ls` 读取后继续沿用；新部署按本次部署选定。两种来源共用同一个 `PLUGIN_ID`。`REF` 填已核对的提交：
+首次安装，正式部署（只从已合并并通过验证的提交）：
 
 ```sh
-PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID，或按本次部署选定}
+PLUGIN_ID=${PLUGIN_ID:?先按本次部署选定运行 ID}
 REF=${REF:?填已核对的已合并提交}
 paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --id "$PLUGIN_ID" --ref "$REF"
 ```
+
+已有 Git 安装：先用 `paseo plugin ls "$PLUGIN_ID"` 核对原仓库和子目录，一致后更新到已核 ref，不要重走安装：
+
+```sh
+PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID}
+REF=${REF:?填已核对的已合并提交}
+paseo plugin update "$PLUGIN_ID" --ref "$REF"
+```
+
+已有本地开发安装：源码更新后用运行 ID 重载：
+
+```sh
+PLUGIN_ID=${PLUGIN_ID:?先用 paseo plugin ls 读取现有安装的 ID}
+paseo plugin reload "$PLUGIN_ID"
+```
+
+现有安装的运行 ID 从目标 daemon 的 `paseo plugin ls` 读取后继续沿用；新部署按本次部署选定。安装来源不匹配时，先在授权范围内确定迁移方案，不直接按同一 ID 覆盖。
 
 安装后用 `paseo plugin ls "$PLUGIN_ID"` 回读运行 ID、安装源和已安装修订，再按目标现场核对设置与运行状态；该命令不联系远端，回读一致不证明远端已有更新。
 
