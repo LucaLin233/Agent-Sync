@@ -383,6 +383,28 @@ export async function resolveCodexHome(
     // A missing home can still be compared lexically.
   }
 
+  // An explicit plugin setting is the user's override. It must stay inside the
+  // daemon user's home and never silently fall through to another root.
+  if (values.codexHome) {
+    if (!isAbsolute(values.codexHome)) {
+      return { root: null, error: "手动配置的 Codex home 必须是绝对路径" };
+    }
+    let root: string;
+    try {
+      root = realpathSync(resolve(values.codexHome));
+    } catch {
+      return { root: null, error: "手动配置的 Codex home 不存在或不可读" };
+    }
+    const rel = relative(homeReal, root);
+    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
+      return { root: null, error: "手动配置的 Codex home 必须位于 daemon 用户家目录内" };
+    }
+    if (!await usableRoot(root)) {
+      return { root: null, error: "手动配置的 Codex home 下没有可用的 sessions/ 或 archived_sessions/ 目录" };
+    }
+    return { root, error: null };
+  }
+
   // CODEX_HOME is the daemon administrator's external root. Normalize it, then
   // require its resolved path to stay under the configured root's parent.
   const rawEnv = options.env === undefined ? process.env.CODEX_HOME : options.env;
@@ -407,19 +429,20 @@ export async function resolveCodexHome(
     }
   }
 
-  // Plugin settings are daemon-local configuration, but their root must stay
-  // inside the daemon user's home both lexically and after resolving symlinks.
-  for (const candidate of [values.codexHome, join(home, ".codex")]) {
-    if (!candidate || !isAbsolute(candidate)) continue;
+  // With no explicit setting, keep the daemon user's default Codex home.
+  const candidate = join(home, ".codex");
+  {
     const normalized = resolve(candidate);
     let root: string;
     try {
       root = realpathSync(normalized);
     } catch {
-      continue;
+      return { root: null, error: "未找到 Codex 会话目录；请设置 CODEX_HOME 或插件 codexHome" };
     }
     const rel = relative(homeReal, root);
-    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) continue;
+    if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
+      return { root: null, error: "默认 Codex home 不在 daemon 用户家目录内" };
+    }
     if (await usableRoot(root)) return { root, error: null };
   }
   return { root: null, error: "未找到 Codex 会话目录；请设置 CODEX_HOME 或插件 codexHome" };

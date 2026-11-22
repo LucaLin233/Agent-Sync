@@ -330,6 +330,26 @@ test("the default Codex root remains under the daemon user's home", async (t) =>
   assert.equal(result.root, await fs.realpath(root));
 });
 
+test("manual codexHome overrides CODEX_HOME and invalid manual values do not fall back", async (t) => {
+  const { base, home } = await makeHome(t);
+  const external = await makeCodexRoot(join(base, "roots"), "env-codex");
+  const manual = await makeCodexRoot(home, "manual-codex");
+  const preferred = await resolveCodexHome(settingsFor({ codexHome: manual }), { home, env: external });
+  assert.equal(preferred.root, await fs.realpath(manual));
+  assert.equal(preferred.error, null);
+
+  const missing = await resolveCodexHome(
+    settingsFor({ codexHome: join(home, "missing-codex") }),
+    { home, env: external },
+  );
+  assert.equal(missing.root, null);
+  assert.match(missing.error, /不存在或不可读/);
+
+  const relative = await resolveCodexHome(settingsFor({ codexHome: "codex" }), { home, env: external });
+  assert.equal(relative.root, null);
+  assert.match(relative.error, /绝对路径/);
+});
+
 test("settings default to the explicit allowlist and refuse other workspaces", async (t) => {
   clearCumulativeCaches();
   const root = await makeRoot(t);

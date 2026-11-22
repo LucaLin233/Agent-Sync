@@ -31,7 +31,7 @@ paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics 
 
 ## 累计数据来源与边界
 
-Codex 数据根依次尝试：daemon 进程的 `CODEX_HOME`、插件 host 设置 `codexHome`，最后才是 `~/.codex`。插件设置的 `codexHome` 必须解析到 daemon 用户家目录内；`CODEX_HOME` 作为管理员配置的外部根保留，规范化并解析软链后必须仍位于其配置根所在目录内。workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
+Codex 数据根：填写插件 host 设置 `codexHome` 时作为显式覆盖优先使用，必须解析到 daemon 用户家目录内；不存在、不是绝对路径或越界时返回明确错误，不会静默回退到其他根。留空时先用 daemon 进程的 `CODEX_HOME`（作为管理员配置的外部根，规范化并解析软链后必须仍位于其配置根所在目录内），最后才是 `~/.codex`。workspace 允许列表由 Paseo 的 host 设置提供，不写入发布源码。只会进入数据根下固定的 `sessions/` 和 `archived_sessions/`，不跟随软链，不允许解析结果逃出数据根。
 
 累计统计默认关闭，关闭时服务端不访问任何 cumulative 数据，即使设置里还留有旧 allowlist。显式打开后默认覆盖本机全部 workspace；高级设置可写入 `allWorkspaces: false` 和 `workspaceIds` 限制名单，空名单会报错而不会放开。旧版只含 `allWorkspaces: true` 或非空 `workspaceIds` 的设置继续按原含义启用；新设置用可选 `cumulativeEnabled` 统一表达开关。服务端仍逐一校验每个会话的 workspace、归档、后台、Codex 标记与 UUID，范围读取失败时前端不会声称该 workspace 不在白名单。服务端只接受 workspace ID 和会话 ID，不接受客户端路径；每个会话都用 Paseo 的 exact agent ref 刷新后校验，拒绝跨 workspace、归档、后台、非 Codex 或 `nativeHandle` 不是 UUID 的成员。rollout 文件名必须与该 UUID 精确匹配。每个 UUID 的日期目录或归档精确匹配结果最多缓存 30 秒；文件按 `dev/ino/size/mtime/ctime` 校验身份并只从上次偏移继续读取，不建立全局会话索引。单文件上限 256 MiB，单目录条目上限 5,000。
 
