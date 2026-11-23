@@ -123,7 +123,7 @@ test("a terminal transition re-reads after the rollout flush without new directo
   assert.equal(fake.pending.length, 1);
   fake.pending.shift().resolve(reply(0.25, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 10.0 t/s");
+  assert.equal(fake.pills.get("a").label, "25.0% · 10.0 t/s");
 
   // The turn reaches a terminal state; the rollout it describes is not written yet.
   fake.emitUpsert(agent("a", { status: "idle" }));
@@ -138,7 +138,7 @@ test("a terminal transition re-reads after the rollout flush without new directo
   await advance(t, 0);
 
   // No further directory event: the follow-up alone moved the label.
-  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 60.0 t/s");
+  assert.equal(fake.pills.get("a").label, "25.0% · 60.0 t/s");
   assert.match(fake.pills.get("a").title, /打开工作区用量/);
   assert.match(fake.pills.get("a").title, /缓存 25\.0%/);
   assert.match(fake.pills.get("a").title, /近轮 60\.0 t\/s/);
@@ -170,7 +170,7 @@ test("a second terminal turn during the chain restores the budget for its rollou
   // Its rollout is still old at that tick.
   fake.pending.shift().resolve(reply(0.25, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 10.0 t/s");
+  assert.equal(fake.pills.get("a").label, "25.0% · 10.0 t/s");
 
   // No further directory events; the restored budget alone picks up B.
   await advance(t, 1_200);
@@ -178,8 +178,8 @@ test("a second terminal turn during the chain restores the budget for its rollou
   assert.equal(fake.pending[0].input.refresh, true);
   fake.pending.shift().resolve(reply(0.25, 600, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 60.0 t/s");
-  assert.equal(fake.pills.get("b").label, "缓存 25.0% · 近轮 60.0 t/s");
+  assert.equal(fake.pills.get("a").label, "25.0% · 60.0 t/s");
+  assert.equal(fake.pills.get("b").label, "25.0% · 60.0 t/s");
 });
 
 test("a member change keeps an active chain and reads the current members", async (t) => {
@@ -211,7 +211,7 @@ test("a member change keeps an active chain and reads the current members", asyn
   assert.deepEqual(fake.pending[0].input, { workspaceId: WS, agentIds: ["a"], refresh: true });
   fake.pending.shift().resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
 });
 
 test("follow-up reads are bounded and stop", async (t) => {
@@ -247,7 +247,7 @@ test("a turn that ended between snapshots still triggers one bounded re-read", a
   await advance(t, 10_000);
   fake.pending.shift().resolve(reply(0.2, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 10.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 10.0 t/s");
 
   // Never observed as running: the new updatedAt is the only terminal signal.
   fake.emitUpsert(agent("a", { status: "idle", updatedAt: "2026-11-22T00:05:00Z" }));
@@ -255,7 +255,7 @@ test("a turn that ended between snapshots still triggers one bounded re-read", a
   assert.equal(fake.pending.length, 1);
   fake.pending.shift().resolve(reply(0.2, 500, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 50.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 50.0 t/s");
 });
 
 test("a routine read does not race the follow-up chain for the same workspace", async (t) => {
@@ -310,12 +310,12 @@ test("a late reply for archived members cannot overwrite the current workspace",
   assert.deepEqual(fresh.input.agentIds, ["a"]);
   fresh.resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
 
   // The older [A,B] reply lands last and must be discarded.
   stale.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
 });
 
 test("same-member concurrent replies keep only the newest request", async (t) => {
@@ -334,11 +334,34 @@ test("same-member concurrent replies keep only the newest request", async (t) =>
   const second = fake.pending.shift();
   second.resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
 
   first.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
+});
+
+test("a missing reading keeps the other one visible on the pill", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(null, 125, 10_000));
+  await advance(t, 0);
+  // No cache sample, but the turn speed is independently valid.
+  assert.equal(fake.pills.get("a").label, "12.5 t/s");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 缓存 — · 近轮 12.5 t/s");
+
+  // A later reply has a cache rate but no completed turn: the labelled cache text returns.
+  fake.emitUpsert(agent("a", { updatedAt: "2026-11-22T00:00:00Z" }));
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.982, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "缓存 98.2%");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 缓存 98.2% · 近轮 —");
 });
 
 test("failures from a superseded request are ignored too", async (t) => {
@@ -356,7 +379,7 @@ test("failures from a superseded request are ignored too", async (t) => {
   await advance(t, 0);
   stale.reject(new Error("late failure"));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+  assert.equal(fake.pills.get("a").label, "20.0% · 20.0 t/s");
 });
 
 test("workspace migration and background flag recompute membership", async (t) => {
@@ -379,7 +402,7 @@ test("workspace migration and background flag recompute membership", async (t) =
   assert.deepEqual(moved.input.agentIds, ["a"]);
   moved.resolve({ ...reply(0.4, 400, 10_000), workspaceId: "wks_other" });
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "缓存 40.0% · 近轮 40.0 t/s");
+  assert.equal(fake.pills.get("a").label, "40.0% · 40.0 t/s");
 
   fake.emitUpsert(agent("b", { background: true }));
   assert.equal(fake.pills.has("b"), false);

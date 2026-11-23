@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addTurn,
-  appendTurnSpeed,
   averageFirstTokenMs,
   emptyTurnTotals,
   formatCachePillLabel,
   formatCacheRate,
+  formatPillLabel,
   formatPillTitle,
+  formatRecentPillLabel,
+  formatTokenSpeedNumber,
+  formatTokenSpeedValue,
   formatTurnPillLabel,
   latestCompletedTurn,
   mergeTurnTotals,
@@ -108,12 +111,27 @@ const turn = (completedAt, outputTokens, elapsedMs, firstTokenMs = null) => ({
   completedAt, outputTokens, elapsedMs, firstTokenMs,
 });
 
-test("the pill appends only an existing speed and keeps the cache label otherwise", () => {
+test("cache and speed share the pill; missing values keep their own semantics", () => {
   assert.equal(formatTurnPillLabel(22.72), "近轮 22.7 t/s");
   assert.equal(formatTurnPillLabel(null), "近轮 —");
-  assert.equal(appendTurnSpeed("缓存 98.2%", 22.72), "缓存 98.2% · 近轮 22.7 t/s");
-  assert.equal(appendTurnSpeed("缓存 98.2%", null), "缓存 98.2%");
-  assert.equal(appendTurnSpeed("缓存 —", 0), "缓存 — · 近轮 0.0 t/s");
+  // Cache first, then the compact speed; shared words are omitted.
+  assert.equal(formatPillLabel(0.982, 12.53), "98.2% · 12.5 t/s");
+  assert.equal(formatPillLabel(0.982, 22.72), "98.2% · 22.7 t/s");
+  assert.equal(formatPillLabel(0.982, null), "缓存 98.2%");
+  assert.equal(formatPillLabel(0.982, undefined), "缓存 98.2%");
+  // Zero is a real measurement, not a missing value.
+  assert.equal(formatPillLabel(0, 0), "0.0% · 0.0 t/s");
+  assert.equal(formatPillLabel(0, null), "缓存 0.0%");
+  // A missing cache leaves only the independently valid speed on the line.
+  assert.equal(formatPillLabel(null, 12.53), "12.5 t/s");
+  assert.equal(formatPillLabel(undefined, 0), "0.0 t/s");
+  assert.equal(formatPillLabel(null, null), "缓存 —");
+  assert.equal(formatRecentPillLabel(undefined), "最近 —");
+  // Large values stay inside the same line.
+  assert.equal(formatPillLabel(0.99, 1_250), "99.0% · 1.3k t/s");
+  // Only the 160 px pill shortens; panel values keep the full one-decimal number.
+  assert.equal(formatTokenSpeedValue(12_500), "12.5k");
+  assert.equal(formatTokenSpeedNumber(12_500), "12,500.0");
   assert.equal(tokensPerSecond(400, 0), null);
   assert.equal(tokensPerSecond(null, 2_000), null);
 });
@@ -153,6 +171,7 @@ test("turns without an output delta or a positive duration keep separate denomin
 
 test("the pill title keeps the open action, cache rate and near-turn basis", () => {
   assert.equal(formatPillTitle(0.982, 22.72), "打开工作区用量 · 缓存 98.2% · 近轮 22.7 t/s");
-  assert.equal(formatPillTitle(0.982, null), "打开工作区用量");
+  assert.equal(formatPillTitle(0.982, null), "打开工作区用量 · 缓存 98.2% · 近轮 —");
   assert.equal(formatPillTitle(null, 12), "打开工作区用量 · 缓存 — · 近轮 12.0 t/s");
+  assert.equal(formatPillTitle(0.982, 22.72, "recent"), "打开工作区用量 · 最近 98.2% · 近轮 22.7 t/s");
 });
