@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 """CCHP 会话复用（session.reuse_enabled）核对与对齐工具。
 
-约定：仅优先级十位为 1（priority//10 == 1）的 provider key 在 provider_key 作用域
-设本级 session.reuse_enabled=true；其余 key 移除本级覆盖、继承上级，且生效值须为 false。
+约定：优先级 1–19 的 provider key 在 provider_key 作用域显式设本级
+session.reuse_enabled=true，其余 key 显式设本级 false；两类都写明确布尔值，不移除覆盖。
+本级已正确但生效值不符（被上级覆盖或锁定）时报需人工，不强行改写。
 
 用法：
   cchp-session-reuse.py              只读核对，输出对比表；全部一致退出码 0，有不一致 1
@@ -12,15 +13,16 @@
   cchp-session-reuse.py --self-test  用伪造数据验证判定逻辑（不联网、不写）
   cchp-session-reuse.py -h|--help    打印简短用法并退出，不读环境变量
 
-判定三类：一致；需写（本级覆盖与期望不符，本工具可改）；需人工（本级已符合但生效值
-不符，例如上级开启或锁定，本工具写入无效）。有需人工项时退出码 1。
+判定三类：一致；需写（本级缺失或值与期望不符，本工具可改）；需人工（本级已正确但生效值
+不符，或被上级阻断，本工具写入无效）。有需人工项时退出码 1。
 
 失败只输出固定诊断类别和整数退出码，不转发子进程 stderr 或服务 error.message 原文。
 读调用遇到非零退出码一律失败，即使 JSON 的 ok=true；写调用遇到非零、坏 JSON 或失败包
 时先回读实际状态，达到期望才继续，否则以退出码 3 停止。dry-run 的非零同样是失败。
 
 列表只取一页（--limit 100）：partial/preparing 为 true 或仍有 nextCursor 时报错退出，
-不在不完整列表上读写；已撤销（revoked_at 非空或 status=revoked）的 key 跳过并计数。
+不在不完整列表上读写；已撤销（revoked_at 非空或 status=revoked）的 key 跳过并计数，
+停用但未撤销的 key 照常处理。
 
 凭据：只从环境变量 CCHP_GATEWAY_URL / CCHP_TOKEN 取，经子进程环境传给 cchp，
       不进命令行、不读保存态或文件、不写临时文件（body 走 --body-file - 的 stdin）。
@@ -34,7 +36,7 @@ import contextlib
 import io
 
 KEY = "session.reuse_enabled"
-GROUP_TENS = 1
+WANT_ON_FIRST, WANT_ON_LAST = 1, 19
 ENV = {}
 
 HELP = """CCHP 会话复用工具：核对 provider key 的 session.reuse_enabled，按约定对齐。
@@ -54,8 +56,9 @@ HELP = """CCHP 会话复用工具：核对 provider key 的 session.reuse_enable
   和这两项，不复制整份环境）；本工具只按名读取，不要把值写进命令行——任何形式的
   命令参数都会进入 argv 和进程列表。
 
-约定：优先级十位为 1（priority//10 == 1，即 10–19）的 key 本级开启 session.reuse_enabled，
-其余移除本级覆盖、继承组织（关闭）；写入走 saveSystemConfig，须用户明确授权。"""
+约定：优先级 1–19 的 key 本级开启 session.reuse_enabled（true），其余 key 本级关闭（false）；
+两类都写明确布尔值，不移除覆盖。写入走 saveSystemConfig 的 values，须用户明确授权；
+已撤销 key 跳过，停用未撤销的 key 照常处理。"""
 
 
 def diag(category, code, detail=""):
@@ -156,30 +159,36 @@ def read_state(scope):
                 "effective": f.get("effective_value"),
                 "source": f.get("source_scope_key"),
                 "draft_local": bool(f.get("has_draft_local_assignment")),
+                "blocked": bool(f.get("blocked")),
+                "blocked_by": f.get("blocked_by_scope_key") or None,
             }
     diag("field_missing", 3, "action=getConfigM2Page cli_rc=0")
 
 
 def want_local(priority):
-    return priority // 10 == GROUP_TENS
+    return WANT_ON_FIRST <= priority <= WANT_ON_LAST
 
 
 def row(key, st):
     wl = want_local(key["priority"])
-    want_eff = True if wl else False
-    local_ok = (st["local"] == wl) and (not wl or st["local_value"] is True)
-    eff_ok = st["effective"] == want_eff
+    local_ok = st["local"] is True and st["local_value"] is wl
+    eff_ok = st["effective"] is wl
+    blocked = st.get("blocked") is True
     if local_ok and eff_ok:
         fix, note = "none", "一致"
+    elif blocked:
+        fix = "manual"
+        note = "需人工：本级被上级作用域阻断（%s），本工具写入无效" % (
+            st.get("blocked_by") or st["source"] or "未知")
     elif local_ok:
         fix = "manual"
-        if wl:
-            note = "需人工：本级已设 true，生效仍为 false（上级锁定或阻止）"
-        else:
-            note = "需人工：本级无覆盖，生效仍为 true（来源 %s）" % (st["source"] or "未知")
+        note = ("需人工：本级已设 true，生效仍为 false（上级覆盖或锁定，来源 %s）"
+                if wl else
+                "需人工：本级已设 false，生效仍为 true（上级覆盖或锁定，来源 %s）") % (
+                    st["source"] or "未知")
     else:
         fix = "local"
-        note = "需写：设本级 true" if wl else "需写：移除本级覆盖"
+        note = "需写：设本级 true" if wl else "需写：设本级 false"
     return {
         "id": key["id"],
         "priority": key["priority"],
@@ -190,8 +199,9 @@ def row(key, st):
         "effective": st["effective"],
         "source": st["source"],
         "draft_local": st["draft_local"],
+        "blocked": blocked,
         "want_local": wl,
-        "want_eff": want_eff,
+        "want_eff": wl,
         "ok": fix == "none",
         "fix": fix,
         "note": note,
@@ -199,9 +209,8 @@ def row(key, st):
 
 
 def state_ok(cur, r):
-    local_ok = (cur["local"] == r["want_local"]) and (
-        not r["want_local"] or cur["local_value"] is True)
-    return local_ok and cur["effective"] == r["want_eff"]
+    local_ok = cur["local"] is True and cur["local_value"] is r["want_local"]
+    return local_ok and cur["effective"] is r["want_eff"]
 
 
 def fmt_bool(v):
@@ -217,9 +226,7 @@ def fmt_local(r):
 
 
 def fmt_want(r):
-    if r["want_local"]:
-        return "本级=true 生效=true"
-    return "无本级 生效=false"
+    return "本级=true 生效=true" if r["want_local"] else "本级=false 生效=false"
 
 
 def print_table(rows, title):
@@ -238,21 +245,18 @@ def print_table(rows, title):
 
 def collect():
     rows = [row(k, read_state("provider_key:" + k["id"])) for k in list_keys()]
-    org = sorted({"%s=%s" % (r["source"], fmt_bool(r["effective"]))
-                  for r in rows if not r["local"] and str(r["source"]).startswith("organization:")})
-    print("键=%s 分组=priority//10==%d 组织继承=%s" % (
-        KEY, GROUP_TENS, "，".join(org) or "（无，按 false 判定）"))
+    sources = sorted({"%s=%s" % (r["source"] or "未知", fmt_bool(r["effective"]))
+                      for r in rows if not r["local"]})
+    print("键=%s 约定=优先级 %d–%d 本级 true，其余本级 false；无本级项观测来源=%s" % (
+        KEY, WANT_ON_FIRST, WANT_ON_LAST,
+        "，".join(sources) or "（本次未观测到无本级项，不推断上级默认值）"))
     return rows
 
 
 def write_one(r, dry_run):
     scope = "provider_key:" + r["id"]
-    if r["want_local"]:
-        body = json.dumps({"values": {KEY: True}}, separators=(",", ":"))
-        action = "设本级 true"
-    else:
-        body = json.dumps({"removeKeys": [KEY]}, separators=(",", ":"))
-        action = "移除本级覆盖"
+    body = json.dumps({"values": {KEY: r["want_local"]}}, separators=(",", ":"))
+    action = "设本级 true" if r["want_local"] else "设本级 false"
     args = ["api", "saveSystemConfig", "--scope", scope, "--body-file", "-",
             "--allow-write", "--confirm", "saveSystemConfig"]
     if dry_run:
@@ -266,7 +270,7 @@ def apply_all(rows, dry_run):
     writable = [r for r in rows if r["fix"] == "local"]
     manual = [r for r in rows if r["fix"] == "manual"]
     if manual:
-        print("需人工 %d 项（本级已符合、生效值不符，本工具写入无效）：%s" % (
+        print("需人工 %d 项（本级已正确但生效值不符，或被上级阻断；本工具写入无效）：%s" % (
             len(manual), "、".join("%s(%s)" % (r["name"], r["priority"]) for r in manual)),
             file=sys.stderr)
     if not writable:
@@ -322,12 +326,15 @@ def apply_all(rows, dry_run):
 
 
 def self_test():
+    global read_state, write_one
+
     def k(i, p, n, s="active"):
         return {"id": i, "priority": p, "name": n, "status": s}
 
-    def st(local, val, eff, src, draft=False):
+    def st(local, val, eff, src, draft=False, blocked=False, blocked_by=None):
         return {"local": local, "local_value": val, "effective": eff,
-                "source": src, "draft_local": draft}
+                "source": src, "draft_local": draft,
+                "blocked": blocked, "blocked_by": blocked_by}
 
     def capture(fn):
         out, err = io.StringIO(), io.StringIO()
@@ -347,27 +354,77 @@ def self_test():
         print(("OK " if ok else "FAIL ") + label + ((" " + detail) if not ok and detail else ""))
 
     cases = [
-        ("十位为1 本级true 生效true", k("k1", 11, "A"),
+        ("优先级1 本级true 生效true", k("k1", 1, "A"),
          st(True, True, True, "provider_key:k1"), "none"),
-        ("其余 无本级 继承组织false", k("k2", 31, "B"),
-         st(False, None, False, "organization:o1"), "none"),
-        ("停用未撤销 无本级 生效false", k("k3", 43, "C", "disabled"),
-         st(False, None, False, "organization:o1"), "none"),
-        ("十位非1 留着本级true", k("k4", 23, "D"),
-         st(True, True, True, "provider_key:k4"), "local"),
-        ("十位为1 无本级", k("k5", 12, "E"),
+        ("优先级19 本级true 生效true", k("k19", 19, "B"),
+         st(True, True, True, "provider_key:k19"), "none"),
+        ("优先级0 本级false 生效false", k("k0", 0, "C"),
+         st(True, False, False, "provider_key:k0"), "none"),
+        ("优先级20 本级false 生效false", k("k20", 20, "D"),
+         st(True, False, False, "provider_key:k20"), "none"),
+        ("继承迁移 优先级15 无本级 继承false", k("k15", 15, "E"),
          st(False, None, False, "organization:o1"), "local"),
-        ("本级有覆盖但值为false", k("k6", 14, "F"),
-         st(True, False, False, "provider_key:k6"), "local"),
-        ("无本级 组织改成true", k("k7", 21, "G"),
-         st(False, None, True, "organization:o1"), "manual"),
-        ("本级true 被上级锁成false", k("k8", 15, "H"),
-         st(True, True, False, "provider_key:k8"), "manual"),
+        ("继承迁移 优先级21 无本级 继承false", k("k21", 21, "F"),
+         st(False, None, False, "organization:o1"), "local"),
+        ("停用未撤销 优先级43 无本级 生效false", k("k3", 43, "G", "disabled"),
+         st(False, None, False, "organization:o1"), "local"),
+        ("旧策略误留本级true 优先级23", k("k4", 23, "H"),
+         st(True, True, True, "provider_key:k4"), "local"),
+        ("优先级14 本级false 需改true", k("k14", 14, "I"),
+         st(True, False, False, "provider_key:k14"), "local"),
+        ("优先级24 本级true 需改false", k("k24", 24, "J"),
+         st(True, True, True, "provider_key:k24"), "local"),
+        ("无本级 上级true 仍按本级false 对齐", k("k7", 31, "K"),
+         st(False, None, True, "organization:o1"), "local"),
+        ("本级false 生效被上级改成true", k("k8", 32, "L"),
+         st(True, False, True, "organization:o1"), "manual"),
+        ("本级true 被上级锁成false", k("k9", 15, "M"),
+         st(True, True, False, "organization:o1"), "manual"),
+        ("本级缺失 被上级阻断", k("k10", 21, "N"),
+         st(False, None, False, "organization:o1", blocked=True,
+            blocked_by="organization:o1"), "manual"),
+        ("blocked 但本级与生效均正确", k("k11", 20, "O"),
+         st(True, False, False, "provider_key:k11", blocked=True,
+            blocked_by="organization:o1"), "none"),
     ]
     for title, key, state, want in cases:
         r = row(key, state)
         check("%s priority=%s 判定=%s 期望=%s（%s）" % (
             title, key["priority"], r["fix"], want, r["note"]), r["fix"] == want)
+    blocked_row = row(k("k10", 21, "N"), st(False, None, False, "organization:o1",
+                                            blocked=True, blocked_by="organization:o1"))
+    check("blocked 提示含阻断且不留需写", "阻断" in blocked_row["note"]
+          and blocked_row["fix"] == "manual")
+
+    global cchp
+    old_cchp = cchp
+    seen = {}
+
+    def fake_cchp(args, body=None, run=subprocess.run):
+        seen["args"], seen["body"] = list(args), body
+        return {"ok": True}, 0
+
+    cchp = fake_cchp
+    try:
+        r_true = row(k("b1", 15, "P"), st(False, None, False, "organization:o1"))
+        _o, _rc, body, action, scope = write_one(r_true, False)
+        check("写 true：values 明确布尔且不移除覆盖",
+              body == '{"values":{"session.reuse_enabled":true}}'
+              and action == "设本级 true" and "removeKeys" not in body
+              and seen["body"] == body and "--allow-write" in seen["args"]
+              and "--body-file" in seen["args"] and scope == "provider_key:b1")
+        r_false = row(k("b2", 20, "Q"), st(False, None, False, "organization:o1"))
+        _o, _rc, body, action, scope = write_one(r_false, False)
+        check("写 false：values 明确布尔且不移除覆盖",
+              body == '{"values":{"session.reuse_enabled":false}}'
+              and action == "设本级 false" and "removeKeys" not in body
+              and seen["body"] == body and scope == "provider_key:b2")
+        seen.clear()
+        write_one(r_false, True)
+        check("dry-run 传 --dry-run 且仍走 values", "--dry-run" in seen["args"]
+              and '"session.reuse_enabled":false' in seen["body"])
+    finally:
+        cchp = old_cchp
     kept, skipped = skip_revoked([
         {"id": "r1", "priority": 51, "name": "R", "status": "active",
          "revoked_at": "2026-11-01T00:00:00Z"},
@@ -413,7 +470,6 @@ def self_test():
           and "synthetic-boom" not in out + err)
 
     # 写：非零、坏 JSON、失败包都先回读，达到期望才继续；未达期望以 3 停止。
-    global read_state, write_one
     old_read, old_write = read_state, write_one
     r = row(k("w1", 11, "W"), st(False, None, False, "organization:o1"))
     good = {"local": True, "local_value": True, "effective": True,

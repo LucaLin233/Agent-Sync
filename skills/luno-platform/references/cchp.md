@@ -24,6 +24,10 @@ CCHP 任务先完整读取 `references/cchp-upstream/ENTRY.md`；其相对引用
 
 CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作仍须取得可用的当前契约，不支持或契约不明就停止该项。管理 API 直连只用于已有具体 CLI 契约的同实例 HTTP 编排，须落实同等安全、权限及结果核验，不绕过人工或浏览器要求。
 
+## 部署与升级
+
+Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installation/docker-compose)执行，属主与运行角色保持隔离：`migrate` 是独立的一次性服务（`entrypoint=/usr/local/bin/migrate`、`command=apply`），用数据库属主密码执行迁移并重设受限运行角色的密码；`cchp` 只用该受限角色连接数据库，不把迁移写进 `cchp` 的启动命令。升级前先备份数据库和部署目录的 `.env`（含密钥，放受控位置、不展示内容），记下当前版本；更新 `compose.yml` 时只向 `.env` 补新增变量，不用新样例覆盖原文件，随后 `docker compose pull && docker compose stop cchp && docker compose up -d`，确认 `migrate` 为 `Exited (0)`、`cchp` 为 `healthy`。迁移只向前执行，不能回退。
+
 ## 本组织写入约定
 
 以下不是平台约束，用户当次的明确要求优先。
@@ -32,7 +36,8 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 
 - **名称与优先级**：key 名称用 `厂家-服务商`，不带数字；优先级 = 用户确定的名次 × 10 + 厂家位（DeepSeek=1、OpenAI=2、Claude=3、Gemini=4，名次从 1 开始）。增减服务商导致名次变化时，在授权内整体重排。这不证明调度行为。
 - **倍率**：新建 provider 的 `cost_multiplier_ppm` 设为 1000000（1.0），不回改已有 provider；人工倍率只在 key 层调整。固定 key 手设倍率时保留现行 `upstream_probe.ratio.key_denylist` 防覆盖策略；其他方式及名单优先关系按当次契约核实，不推定唯一办法。
-- **会话复用**：按实时优先级，仅优先级十位为 1 的 key 设置本级开启；其余 key（含停用但未撤销的 key）移除本级覆盖、继承上级，并核实实际关闭；不把无本级覆盖当作已关闭。先核 provider × key 的组合，不假定下级 true 能抵消上级 false。
+- **会话复用**：按实时优先级，优先级 1–19 的 key 在 `provider_key` 作用域显式设本级 `session.reuse_enabled=true`，其余 key（含停用但未撤销的 key）显式设本级 `false`；撤销的 key 跳过。两类都写明确布尔值，不移除覆盖，不把无本级覆盖当作已关闭。写后回读本级值与生效值：本级已正确但生效值被上级作用域或锁改变时报人工处理，不强行改写；先核 provider × key 的组合，不假定下级 true 能抵消上级 false。
+- **密钥管理入口**：控制台在供应商密钥的新增/编辑对话框设置会话复用（新增时展开 **更多设置** → **会话复用**，编辑时在 **会话复用** 分区，可选 **开启 / 关闭 / 继承上层** [v1.0.16+]），见[供应商密钥](https://cch-plus.com/zh-CN/docs/providers/keys#manage)。CLI 0.2.1（内置规范 v1.0.16）的 `updateProviderKey` 请求体没有会话复用字段；该项用 `saveSystemConfig` 的配置 scope 接口核对和写入（scope=`provider_key:<id>`，body 的 `values` 写明确布尔），动手前按当次 `cchp schema` 复核 `saveSystemConfig` 与 `getConfigM2Page` 契约。
 - **测活**：provider 有启用 key 后先查既有任务，没有才建一条，已有就维护。每小时一次（`0 * * * *`）、enabled、不通知；只含其下已启用且符合接口状态的 key。模型取 `getProviderKeyLivenessContexts` 派生默认值，不自行指定模型或 endpoint；契约或派生结果不给模型就停止该项。占位 key 替换真实秘密并启用后才加入；key 增减、启停或撤销后同步 targets，回读任务及调度。
 - **撤销删除的引用清理**：只移除本次 key 在 `upstream_probe.ratio.key_denylist` 的 ID，或本次 provider 在 ratio/balance 的 `provider_denylist` 中的 ID，不清理历史失效项。两类名单不混用。
 
@@ -52,6 +57,7 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 
 - 请求排障不能只筛 failed：还要覆盖网关拒绝。429 本身不能区分额度/策略、上游限流或鉴权，缺尝试链也不证明本地拒绝。
 - 占位 key 只用用户明确要求的可辨认非秘密串；创建后立即 disable 并回读，披露创建到停用间可能被调度。真实秘密替换完成前不启用、不测活、不验证链路。
+- 会话复用的本级值与生效值分开记录：本级 `false` 只表示本作用域设置，不等于生效关闭；`blocked` 或 `blocked_by_scope_key` 表示本级被上级阻断，不能当作已对齐。
 - 请求覆写只改自有规则，不把继承规则复制成本级或绕过上级锁。CLI 0.1.3 历史样本允许不存在 ID 通过 validate，当前未复测；验证成功不能证明 ID 存在或锁行为正确。历史修订恢复是写入新版本，不是回退指针，须另核授权。
 - 服务端 1.0.15+build.56（2026-11-21，CLI 0.1.4）：直接改全局余额与倍率探测任务 `upstream_probe` 的调度曾返回 422 `30111`（由 owner page 决定）；改系统设置 `upstream_probe.interval_minutes` 后，`global:*` 生效 60 分钟、任务重算为 `@every 1h`。仅在当次契约与现场证据支持、且明确授权写该全局设置并发现生效值与目标不符时才写，回读设置和调度；不写固定延迟，不改供应商模型测活任务。
 - 判读账单与路由前核生效值及其来源，不凭版本推断升级结果；不凭倍率配置或单次探测推断排序、计费或全部 key 的测活行为。
