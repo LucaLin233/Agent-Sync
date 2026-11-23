@@ -1,4 +1,4 @@
-import { promises as fs, realpathSync } from "node:fs";
+import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -24,10 +24,7 @@ export interface ChineseTitlesState {
 function pluginRoot(): string {
   const configured = process.env.PASEO_HOME?.trim();
   if (configured && !isAbsolute(configured)) throw new Error("PASEO_HOME must be absolute");
-  const home = resolve(configured || join(homedir(), ".paseo"));
-  let realHome = home;
-  try { realHome = realpathSync(home); } catch { /* first run: the home may not exist yet */ }
-  return resolve(realHome, "plugin-data", "paseo-chinese-titles");
+  return resolve(configured || join(homedir(), ".paseo"), "plugin-data", "paseo-chinese-titles");
 }
 
 /** Resolve a path and prove it stays inside this plugin's data directory. */
@@ -77,9 +74,6 @@ export function newState(): ChineseTitlesState {
 export async function loadState(): Promise<ChineseTitlesState> {
   const file = safePluginPath("state.json");
   try {
-    const root = pluginDataDir();
-    if (file !== root && !file.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin state path");
-    // codeql[js/path-injection]
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<ChineseTitlesState>;
     if (parsed?.version !== 1) return newState();
@@ -102,18 +96,10 @@ export function saveState(state: ChineseTitlesState): Promise<void> {
   const snapshot = JSON.stringify(state, null, 2);
   writeChain = writeChain.then(async () => {
     const dir = pluginDataDir();
-    const root = pluginDataDir();
-    if (dir !== root && !dir.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin data directory");
-    // codeql[js/path-injection]
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const file = safePluginPath("state.json");
     const temp = safePluginPath(`.state-${process.pid}-${Date.now()}.tmp`);
-    if ((file !== dir && !file.startsWith(`${dir}${sep}`)) || (temp !== dir && !temp.startsWith(`${dir}${sep}`))) {
-      throw new Error("Invalid plugin state path");
-    }
-    // codeql[js/path-injection]
     await fs.writeFile(temp, snapshot, { encoding: "utf8", mode: 0o600 });
-    // codeql[js/path-injection]
     await fs.rename(temp, file);
   });
   return writeChain;

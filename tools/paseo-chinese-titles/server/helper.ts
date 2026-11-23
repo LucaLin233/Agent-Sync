@@ -1,9 +1,8 @@
 import { promises as fs } from "node:fs";
-import { sep } from "node:path";
 import type { PaseoAgentHandle, PaseoApi, PaseoWorkspaceHandle } from "./paseo-types";
 import type { ChineseTitlesSettings } from "../shared/settings";
 import { fallbackProjectTitle, fallbackTaskTitle, sanitizeModelTitle } from "../shared/title";
-import { helperDirectory, assertPluginPath, pluginDataDir } from "./state";
+import { helperDirectory, assertPluginPath } from "./state";
 import { resolveTitleProvider } from "./provider";
 
 const HELPER_LABEL = "paseo-chinese-titles.helper";
@@ -84,9 +83,6 @@ export async function generateTitle(
   try {
     resolved = await resolveTitleProvider(paseo, settings);
     const directory = assertPluginPath(helperDirectory());
-    const root = pluginDataDir();
-    if (directory !== root && !directory.startsWith(`${root}${sep}`)) throw new Error("Invalid helper directory");
-    // codeql[js/path-injection]
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const source = { kind: "directory" as const, path: directory, ...(request.projectId ? { projectId: request.projectId } : {}) };
     try {
