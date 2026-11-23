@@ -215,8 +215,14 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
   // Bounded, non-periodic: only a terminal transition starts this sequence.
   const scheduleFollowUp = (workspaceId: string) => {
     if (disposed) return;
-    // A trigger during an active chain never extends it.
-    if (followUpTimers.has(workspaceId)) return;
+    if (followUpTimers.has(workspaceId)) {
+      // Another turn finished while the chain is still running. Keep the one
+      // in-flight timer, but restore the budget so the newer turn's rollout
+      // still gets a read after it lands. The event count bounds this, not a
+      // poll: a chain only continues while real terminal transitions arrive.
+      followUpsLeft.set(workspaceId, FOLLOW_UP_LIMIT);
+      return;
+    }
     followUpsLeft.set(workspaceId, FOLLOW_UP_LIMIT);
     const tick = () => {
       followUpTimers.delete(workspaceId);
@@ -296,7 +302,10 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       changed.add(workspaceId);
       memberVersions.set(workspaceId, (memberVersions.get(workspaceId) ?? 0) + 1);
       cumulative.delete(workspaceId);
-      clearFollowUps(workspaceId);
+      // A changed but still visible member set keeps its chain: in-flight
+      // responses are already voided by the member version, and each tick
+      // reads the members that exist then. Only an empty workspace stops it.
+      if (after === undefined) clearFollowUps(workspaceId);
       if (after === undefined) members.delete(workspaceId);
       else members.set(workspaceId, after);
     }
@@ -319,9 +328,11 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
   const noteStatus = (
     workspaceId: string | null,
     previous: { status: string | null; updatedAt: string | null } | undefined,
-    next: { status: string | null; updatedAt: string | null },
+    next: DirectoryAgent,
   ) => {
     if (!workspaceId || next.status === null || !TERMINAL_STATUSES.has(next.status)) return;
+    // Only a visible, in-scope conversation can contribute to the label.
+    if (!inScope(workspaceId) || pillTargetFor(next) === null) return;
     if (previous === undefined) return;
     const leftRunning = previous.status === "running";
     const terminalRefresh = previous.status !== null &&

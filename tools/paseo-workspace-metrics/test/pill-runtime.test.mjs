@@ -144,6 +144,76 @@ test("a terminal transition re-reads after the rollout flush without new directo
   assert.match(fake.pills.get("a").title, /近轮 60\.0 t\/s/);
 });
 
+test("a second terminal turn during the chain restores the budget for its rollout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a", { status: "running" }), agent("b", { status: "running" })]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.25, 100, 10_000));
+  await advance(t, 0);
+
+  // A finishes first; its chain starts.
+  fake.emitUpsert(agent("a", { status: "idle" }));
+  await advance(t, 1_200);
+  fake.pending.shift().resolve(reply(0.25, 100, 10_000));
+  await advance(t, 1_200);
+  fake.pending.shift().resolve(reply(0.25, 100, 10_000));
+  await advance(t, 1_100);
+
+  // B finishes 3.5 s after A, 0.2 s before that chain's last scheduled tick.
+  fake.emitUpsert(agent("b", { status: "idle" }));
+  await advance(t, 100);
+  assert.equal(fake.pending.length, 1);
+  // Its rollout is still old at that tick.
+  fake.pending.shift().resolve(reply(0.25, 100, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 10.0 t/s");
+
+  // No further directory events; the restored budget alone picks up B.
+  await advance(t, 1_200);
+  assert.equal(fake.pending.length, 1);
+  assert.equal(fake.pending[0].input.refresh, true);
+  fake.pending.shift().resolve(reply(0.25, 600, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "缓存 25.0% · 近轮 60.0 t/s");
+  assert.equal(fake.pills.get("b").label, "缓存 25.0% · 近轮 60.0 t/s");
+});
+
+test("a member change keeps an active chain and reads the current members", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a", { status: "running" }), agent("b", { status: "running" })]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.25, 100, 10_000));
+  await advance(t, 0);
+
+  fake.emitUpsert(agent("a", { status: "idle" }));
+  await advance(t, 1_200);
+  const first = fake.pending.shift();
+  assert.deepEqual(first.input.agentIds, ["a", "b"]);
+
+  // B leaves while the read is in flight; A remains visible.
+  fake.emitRemove("b");
+  assert.equal(fake.pills.has("b"), false);
+  first.resolve(reply(0.8, 800, 10_000));
+  await advance(t, 0);
+  // The stale [A,B] success is voided, and the chain is still alive.
+  assert.equal(fake.pills.get("a").label, "缓存 …");
+
+  await advance(t, 1_200);
+  assert.equal(fake.pending.length, 1);
+  assert.deepEqual(fake.pending[0].input, { workspaceId: WS, agentIds: ["a"], refresh: true });
+  fake.pending.shift().resolve(reply(0.2, 200, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "缓存 20.0% · 近轮 20.0 t/s");
+});
+
 test("follow-up reads are bounded and stop", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
