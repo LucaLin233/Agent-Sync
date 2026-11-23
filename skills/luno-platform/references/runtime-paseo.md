@@ -10,6 +10,8 @@
 <!-- BEGIN paseo-operations -->
 ## Paseo 操作
 
+产品用法和故障说明查官方 `paseo-help` 和当前文档。host、项目、工作区、agent、脚本和调度等通用操作查官方 `paseo`，命令及工具参数按目标端实际定义或 CLI 帮助核对。插件的开发、安装、管理和排障查官方 `paseo-plugin`。本分支规定本端的目标选择、授权、证据读取和回读；涉及本端角色派发时，另按本技能入口加载对应分支。
+
 Paseo 的查询、管理、配置或恢复，先按目标 daemon 和预期结果选官方入口：优先能覆盖所需作用范围的结构化工具，其次用 CLI。入口缺失、语义不明或存在版本兼容差异时，查官方文档索引和当前工具定义，在目标环境读实际 CLI、子命令的 `--help`，按需核对相关配置；仍有疑问再比对同一版本的官方实现。只有在已核实同一语义，或没有可比接口但已核对候选入口能实现预期效果，且当前授权覆盖该入口时，才改走可用的 CLI 或另一种官方入口；不默认切换到另一 daemon，不绕过权限策略补齐操作，并从目标同一 daemon 回读实际对象和效果。CLI 与 daemon 的版本、权限和宿主选择按现场读取。
 
 - **会话与工作区范围。**项目、workspace ID 和 cwd 分属不同层级；会话还分活动、归档和后台，默认列表通常看不到后两类，按 ID 或显式包含参数才能投影出来。历史只在授权内按最小必要读取；活动摘要这类混合文本不是源头投影，不能当作权威清单，应改用能按需限定字段和范围的入口，找不到就停在安全可得的证据并说明覆盖缺口。回读时交代实际覆盖了哪些清单和对象，从历史消息读取内容不因此获得新的操作授权。
@@ -22,6 +24,8 @@ Paseo 的查询、管理、配置或恢复，先按目标 daemon 和预期结果
 <a id="branch-paseo-dispatch"></a>
 <!-- BEGIN paseo-dispatch -->
 ## 派发通道
+
+官方 `paseo` 技能中按 `notes` 选 Profile、复制 `featureValues` 和无匹配时发现 provider 的步骤适用于通用派发。本端 CCHP/GDR 共享 Codex 角色的 Profile 选取、参数传递和缺失时的处理，以下文规则为准。
 
 - Paseo 主会话和独立 Codex CLI 的所有委派（含通用兜底）按用户偏好默认使用已核验的 Paseo agent 通道。派发条件、角色归属和独立资格按 `luno-core/references/review.md`〔分支 delegation〕。只有用户明确指定才使用 Codex 原生 LENS/FORGE，按 `references/runtime-codex.md`〈派发通道〉核验。使用 Paseo 前按运行元数据核实会话归属、目标 daemon 和所需父子关系。归属不明或无已核通道时，只停依赖该派发的步骤并报告缺口。受派方不得再委派。
 - **角色入口。**共享 Codex 使用内部 ID 为 `cchp`、`gdr` 的两个 provider，显示名分别为 CCHP、GDR。每个 provider 各有 LUNO、LENS、FORGE 三个 Profile，六个 Profile ID 固定为 `cchp-luno`、`cchp-lens`、`cchp-forge`、`gdr-luno`、`gdr-lens`、`gdr-forge`。官方原版只使用主 `CODEX_HOME`，同一上游三个角色共用家目录、登录态、文件系统和权限边界；角色是提示词层软角色，不是独立身份或权限隔离。LENS/FORGE 开始前须完整读取部署的对应 `subagents/` 原文，项目指令及权限仍按实际加载核验。

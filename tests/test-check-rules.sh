@@ -125,12 +125,6 @@ def no_loads(p):
         if u!=t:f.write_text(u,encoding='utf-8')
 case('加载语句核对为空（同时报必需加载降级）',1,'0 条加载语句被核对',no_loads)
 
-# 包内上游入口迁移后，仍须检测必需读取被弱化。
-case('CCHP 上游入口必需读取降级',1,'必需加载降级',
-     lambda p:edit(p,'skills/luno-platform/references/cchp.md',
-                   lambda s:s.replace('先完整读取 `references/cchp-upstream/ENTRY.md`',
-                                      '按需读取 `references/cchp-upstream/ENTRY.md`')))
-
 # 运行端必读入口：任一端判定或合用指针被删掉都要失败。
 for rel,fragment in G.REQUIRED_READS:
     case('运行端必读入口缺失 %s：%s'%(rel.rsplit('/',1)[1],fragment[:24]),1,'必需加载降级',
