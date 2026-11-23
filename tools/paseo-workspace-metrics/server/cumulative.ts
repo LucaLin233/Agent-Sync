@@ -112,12 +112,15 @@ interface ProjectedEvent {
   input: number | null;
   cached: number | null;
   output: number | null;
+  /** False when the top-level object did not close; partial records are ignored. */
+  closed: boolean;
 }
 
 function emptyProjection(): ProjectedEvent {
   return {
     eventType: null, payloadType: null, timestamp: null, turnId: null,
     firstTokenMs: null, errorPresent: false, input: null, cached: null, output: null,
+    closed: false,
   };
 }
 
@@ -181,7 +184,7 @@ function readSmallString(raw: string, index: number, max = 256): { value: string
 }
 
 function readSafeNumber(raw: string, index: number): { value: number | null; end: number } {
-  const match = /^-?\d+(?:\.\d+)?/.exec(raw.slice(index, index + 32));
+  const match = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(raw.slice(index, index + 32));
   if (!match) return { value: null, end: index };
   const end = index + match[0].length;
   const value = Number(match[0]);
@@ -281,7 +284,7 @@ export function projectEventLine(raw: string): ProjectedEvent {
   index += 1;
   while (index < raw.length) {
     index = skipSpace(raw, index);
-    if (raw[index] === "}") break;
+    if (raw[index] === "}") { out.closed = true; break; }
     if (raw[index] === ",") { index += 1; continue; }
     if (raw[index] !== '"') return out;
     const key = readSmallString(raw, index, 64);
@@ -308,7 +311,7 @@ export function projectEventLine(raw: string): ProjectedEvent {
 function parseLine(line: string, state: FileState) {
   if (!line.includes("event_msg")) return;
   const event = projectEventLine(line);
-  if (event.eventType !== "event_msg") return;
+  if (!event.closed || event.eventType !== "event_msg") return;
   const at = event.timestamp === null ? NaN : Date.parse(event.timestamp);
   const type = event.payloadType;
 
@@ -365,7 +368,16 @@ function parseLine(line: string, state: FileState) {
     return;
   }
   const open = state.openTurn;
-  if (open) {
+  if (!open) {
+    // A valid count between turns means the last completed boundary is no
+    // longer the value the next turn starts from. Any change invalidates it,
+    // not only a smaller one.
+    if (state.trustedOutput !== null && output !== state.trustedOutput) {
+      state.trustedOutput = null;
+    }
+    return;
+  }
+  {
     if (at < open.startedAt || (open.finalAt !== null && at < open.finalAt)) {
       open.broken = true;
     } else if (
@@ -466,7 +478,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionRead
 
     let state = fileCache.get(file.path);
     if (state && sameState(state, stat)) {
-      return state.valid ? countsOf(state) : null;
+      return countsOf(state);
     }
     if (!state || !sameFile(state, stat) || stat.size < state.offset) {
       state = resetState(stat);
@@ -484,7 +496,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionRead
     state.mtimeMs = stat.mtimeMs;
     state.ctimeMs = stat.ctimeMs;
     fileCache.set(file.path, state);
-    return state.valid ? countsOf(state) : null;
+    return countsOf(state);
   } catch {
     forget(file.path);
     return null;
@@ -910,7 +922,7 @@ async function collectCumulativeUsageUncached(
     return empty(workspaceId, eligible.size, unavailable, STALE);
   }
 
-  const key = `${workspaceId}|${[...eligible.keys()].sort().join(",")}|${root.root}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
+  const key = `${workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${[...eligible.keys()].sort().join(",")}|${unavailable}|${root.root}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
   if (!refresh) {
     const cached = workspaceCache.get(key);
     if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return cached.value;

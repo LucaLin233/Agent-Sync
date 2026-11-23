@@ -977,6 +977,7 @@ test("structural projection ignores content and nested fields while keeping the 
     input: null,
     cached: null,
     output: null,
+    closed: true,
   });
   const notEvent = JSON.stringify({
     type: "response_item",
@@ -996,4 +997,80 @@ test("structural projection ignores content and nested fields while keeping the 
   assert.equal(usage.input, 12);
   assert.equal(usage.cached, 3);
   assert.equal(usage.output, 4);
+});
+
+test("a between-turn counter change invalidates the next baseline", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    tokenAt(4, 160, 80, 60),
+    turnStarted("turn-2", 5),
+    tokenAt(6, 220, 110, 80),
+    turnComplete("turn-2", 7),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.outputTokens, null);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.elapsedMs, 2_000);
+});
+
+test("boundaries alone return timing on first read and on the cache hit", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+  ]);
+  const first = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(first, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples" });
+  const cached = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(cached, first);
+});
+
+test("missing agents are part of the aggregation cache key", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [token(100, 50)]);
+  const paseo = paseoFor([snapshot("agent-a", a)]);
+  const first = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(first.covered, 1);
+  assert.equal(first.unavailable, 0);
+  const second = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a", "agent-missing"] },
+    paseo,
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(second.covered, 1);
+  assert.equal(second.unavailable, 1);
+});
+
+test("exponent numbers are consumed fully and truncated records are ignored", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const exponent = JSON.stringify({
+    timestamp: "2026-11-22T00:00:00Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: { input_tokens: 12e2, cached_input_tokens: 0, output_tokens: 4 } },
+    },
+  });
+  const truncated = '{"timestamp":"2026-11-22T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900';
+  assert.equal(projectEventLine(exponent).input, 1_200);
+  assert.equal(projectEventLine(truncated).closed, false);
+  await writeSession(root, a, [truncated, exponent]);
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.inputTokens, 1_200);
+  assert.equal(result.covered, 1);
 });
