@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, createScopeSubscriptionHandler, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
+import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -16,6 +16,36 @@ const token = (input, cached) => JSON.stringify({
   },
 });
 const other = JSON.stringify({ type: "response_item", payload: { type: "message", content: [] } });
+
+const at = (second) => `2026-11-22T00:00:${String(second).padStart(2, "0")}Z`;
+const turnStarted = (id, second) => JSON.stringify({
+  timestamp: at(second), type: "event_msg", payload: { type: "task_started", turn_id: id },
+});
+// task_complete may carry assistant text upstream; the reader must ignore it.
+const turnComplete = (id, second, extra = {}) => JSON.stringify({
+  timestamp: at(second),
+  type: "event_msg",
+  payload: { type: "task_complete", turn_id: id, last_agent_message: "ignore me", ...extra },
+});
+const turnEvent = (type, second) => JSON.stringify({
+  timestamp: at(second), type: "event_msg", payload: { type },
+});
+const tokenAt = (second, input, cached, output) => JSON.stringify({
+  timestamp: at(second),
+  type: "event_msg",
+  payload: {
+    type: "token_count",
+    info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output } },
+  },
+});
+
+async function runTurn(root, snapshots, agentId = snapshots[0].agent.id) {
+  return collectTurnOutput(
+    { workspaceId: WS, agentId },
+    paseoFor(snapshots),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+}
 
 async function makeRoot(t) {
   const root = await fs.mkdtemp(join(tmpdir(), "workspace-metrics-cumulative-"));
@@ -546,4 +576,194 @@ test("an older in-flight result cannot repopulate the cache after a settings cha
   );
   assert.equal(cached.inputTokens, 200);
   assert.equal(cached.cachedInputTokens, 150);
+});
+
+test("the latest completed Codex turn uses its own native boundaries", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 1_000, 900, 120),
+    tokenAt(3, 1_200, 1_050, 400),
+    turnComplete("turn-1", 4),
+    turnStarted("turn-2", 5),
+    tokenAt(6, 1_500, 1_300, 650),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: 400, elapsedMs: 3_000, firstTokenMs: null, reason: null });
+});
+
+test("a first turn without an explicitly reported zero keeps timing but no delta", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 1_000, 900, 40),
+    turnComplete("turn-1", 3),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, {
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("a second completed turn uses the counter observed at its own start", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 650),
+    turnComplete("turn-2", 6),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null });
+});
+
+test("a turn without a completion boundary is not reported", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason: "missing-samples" });
+});
+
+test("a completion without a matching start is ignored", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(1, 100, 50, 40),
+    turnComplete("unknown", 2),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+});
+
+test("an in-turn regression is discarded even when the final value recovers", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 300),
+    tokenAt(6, 220, 110, 500),
+    turnComplete("turn-2", 7),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, {
+    outputTokens: null,
+    elapsedMs: 3_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("Codex's own time_to_first_token_ms is projected when present", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: 40, elapsedMs: 2_000, firstTokenMs: 850, reason: null });
+});
+
+test("a task_complete carrying an error is not a completed turn", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3, { error: "stream disconnected" }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.outputTokens, null);
+});
+
+test("turn_aborted and thread_rolled_back leave no measurement", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 80),
+    turnEvent("turn_aborted", 6),
+  ]);
+  assert.equal((await runTurn(root, [snapshot("agent-a", a)])).reason, "missing-samples");
+  clearCumulativeCaches();
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    turnEvent("thread_rolled_back", 4),
+  ]);
+  assert.equal((await runTurn(root, [snapshot("agent-a", a)])).reason, "missing-samples");
+});
+
+test("a later turn without an observed baseline is not a delta", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 100, 50, 40),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.outputTokens, null);
+  assert.equal(result.elapsedMs, 2_000);
+});
+
+test("turn output stays gated by the cumulative switch and Codex marker", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+  ]);
+  const disabled = await collectTurnOutput(
+    { workspaceId: WS, agentId: "agent-a" },
+    paseoFor([snapshot("agent-a", a)]),
+    { codexHome: root },
+  );
+  assert.equal(disabled.reason, "scope");
+  const claude = await runTurn(root, [snapshot("agent-claude", a, {
+    provider: "claude",
+    persistence: { nativeHandle: a, metadata: {} },
+  })]);
+  assert.equal(claude.reason, "not-codex");
+  const other = await runTurn(root, [snapshot("agent-a", a, { workspaceId: "wks_other" })]);
+  assert.equal(other.reason, "read-failed");
 });

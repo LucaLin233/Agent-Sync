@@ -12,6 +12,7 @@ import { formatCacheRate, summarizeLatestSamples, tokenCount } from "../shared/m
 import { workspaceInScope, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
 import { useCumulativeUsage } from "./use-cumulative";
 import { useLiveTurn } from "./use-turn";
+import { useTurnOutput } from "./use-turn-output";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
@@ -41,36 +42,107 @@ function Metric({ label, value, colors }: { label: string; value: string; colors
   );
 }
 
-function TurnDetails({ agentRef, colors }: { agentRef: AgentRef; colors: Colors }) {
+function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, colors }: {
+  agentRef: AgentRef;
+  workspaceId: string;
+  cumulativeEnabled: boolean;
+  scopeKey: string;
+  scopeRevision: number;
+  refreshRevision: number;
+  colors: Colors;
+}) {
   const { status, measurement, observingTurn } = useLiveTurn(agentRef);
+  const codexTurn = useTurnOutput(
+    agentRef,
+    workspaceId,
+    cumulativeEnabled,
+    scopeKey,
+    scopeRevision,
+    refreshRevision,
+    measurement?.turnId ?? null,
+  );
   const lastText = measurement ? "最近完整观测的轮次 · " + outcomes[measurement.outcome] : null;
   const statusText = status === "unavailable" ? "实时事件连接不可用，收起后可重新打开。"
     : status === "connecting" ? "正在连接实时事件…"
     : observingTurn ? "正在观测当前轮次。"
     : lastText ? null : "打开详情后开始观测，从下一次完整轮次起显示。";
+  const data = codexTurn.data;
+  const codexOutput = data?.outputTokens ?? null;
+  const codexElapsed = data?.elapsedMs ?? null;
+  const codexFirstToken = data?.firstTokenMs ?? null;
+  const hasCodexTurn = cumulativeEnabled && (codexElapsed !== null || codexFirstToken !== null);
+  const codexRate = codexOutput !== null && codexElapsed !== null && codexElapsed > 0
+    ? codexOutput * 1_000 / codexElapsed
+    : null;
+  const reason = data?.reason;
 
   return (
     <View style={{ gap: 8 }}>
       {statusText && <Text style={{ color: colors.foregroundMuted }}>{statusText}</Text>}
       {lastText && <Text style={{ color: colors.foregroundMuted }}>{lastText}</Text>}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        <Metric label="Paseo 首段观测" value={duration(measurement?.firstAssistantMs)} colors={colors} />
+        <Metric label="Paseo 首个可见文本" value={duration(measurement?.firstVisibleMs)} colors={colors} />
         <Metric label="Paseo 整轮耗时" value={duration(measurement?.elapsedMs)} colors={colors} />
         <Metric
-          label="整轮输出速率"
-          value={measurement?.outputPerSecond == null ? "—" : decimal.format(measurement.outputPerSecond) + " token/s"}
+          label="本轮输出速率"
+          value={measurement?.outputPerSecond == null
+            ? "—"
+            : decimal.format(measurement.outputPerSecond) + " token/s"}
           colors={colors}
         />
       </View>
       <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-        首段取首个助手消息事件。整轮速率适用于内置 Claude Code 提供输出计数的成功轮次，计时包含工具和等待。服务商首字延迟与生成 TPS 未上报。
+        首个可见文本取轮开始到首条非空白助手文本，不算工具或推理事件，也不是服务商 TTFT。整轮耗时含工具与等待；本轮输出速率仅在内置 Claude Code 提供计数时显示。
       </Text>
+      {codexTurn.isLoading && (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>正在读取最近 Codex 完成轮…</Text>
+      )}
+      {hasCodexTurn && (
+        <View style={{ gap: 4 }}>
+          <Text style={{ color: colors.foregroundMuted, fontWeight: "600" }}>最近 Codex 完成轮</Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <Metric label="累计输出差" value={codexOutput === null ? "—" : count(codexOutput) + " token"} colors={colors} />
+            <Metric label="轮次边界耗时" value={duration(codexElapsed)} colors={colors} />
+            {codexFirstToken !== null && (
+              <Metric label="Codex 首个模型 Token" value={duration(codexFirstToken)} colors={colors} />
+            )}
+            <Metric
+              label="整轮输出速率"
+              value={codexRate === null ? "—" : decimal.format(codexRate) + " token/s"}
+              colors={colors}
+            />
+          </View>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+            取自该会话完成轮的原生边界与累计输出差，含工具与等待，不与上方实时观测混合；首 token 为 Codex 自报。
+          </Text>
+          {codexOutput === null && (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+              该轮缺少有效输出计数，速率留空。
+            </Text>
+          )}
+        </View>
+      )}
+      {!hasCodexTurn && !codexTurn.isLoading && reason === "missing-samples" && cumulativeEnabled && (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          最近 Codex 完成轮缺少完整边界，输出与耗时留空。
+        </Text>
+      )}
+      {cumulativeEnabled && !codexTurn.isLoading && (codexTurn.isError || reason === "read-failed") && (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          最近 Codex 完成轮读取失败，留空。
+        </Text>
+      )}
     </View>
   );
 }
 
-function AgentRow({ agentRef, open, toggle, snapshot, colors }: {
+function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, open, toggle, snapshot, colors }: {
   agentRef: AgentRef;
+  workspaceId: string;
+  cumulativeEnabled: boolean;
+  scopeKey: string;
+  scopeRevision: number;
+  refreshRevision: number;
   open: boolean;
   toggle: () => void;
   snapshot: UsageSnapshot | undefined;
@@ -116,7 +188,15 @@ function AgentRow({ agentRef, open, toggle, snapshot, colors }: {
             <Metric label="上报输出 Token" value={count(tokenCount(usage?.outputTokens))} colors={colors} />
             <Metric label="上下文已用 / 上限" value={count(tokenCount(usage?.contextWindowUsedTokens)) + " / " + count(tokenCount(usage?.contextWindowMaxTokens))} colors={colors} />
           </View>
-          <TurnDetails agentRef={agentRef} colors={colors} />
+          <TurnDetails
+            agentRef={agentRef}
+            workspaceId={workspaceId}
+            cumulativeEnabled={cumulativeEnabled}
+            scopeKey={scopeKey}
+            scopeRevision={scopeRevision}
+            refreshRevision={refreshRevision}
+            colors={colors}
+          />
         </View>
       )}
     </View>
@@ -134,13 +214,23 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
   const queryClient = useQueryClient();
   const [scope, setScope] = useState<WorkspaceScope | null>(null);
   const [scopeRevision, setScopeRevision] = useState(0);
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const scopeSubscription = useSubscription(workspaceSettingsSubscription, {}, (event) => {
     setScope(event);
+    // Every settings event starts a fresh read: the scope projection can be
+    // identical (for example, a changed Codex home), so the revision is part of
+    // the keys. Clearing first also prevents a remount from reusing old data.
     setScopeRevision((revision) => revision + 1);
     queryClient.removeQueries({ queryKey: ["workspace-metrics-cumulative"] });
+    queryClient.removeQueries({ queryKey: ["workspace-metrics-turn"] });
   });
+  // Derived from the effective values, so a remount and a settings change that
+  // leaves the same values map to the same query.
+  const scopeKey = scope
+    ? [scope.enabled, scope.allWorkspaces, [...scope.workspaceIds].sort().join(","), scope.error ?? ""].join("|")
+    : "pending";
   const cumulativeEnabled = scope !== null && workspaceInScope(scope, workspaceId);
-  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled, scopeRevision);
+  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled, scopeKey, scopeRevision);
   const samples = refs.map(({ id }) => query.data?.get(id)?.cacheSample ?? null);
   const totals = summarizeLatestSamples(samples);
   const colors = theme.colors;
@@ -169,6 +259,7 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
   const refreshing = query.isFetching || (cumulativeEnabled && cumulative.isFetching);
 
   const refresh = () => {
+    setRefreshRevision((revision) => revision + 1);
     void query.refetch();
     if (cumulativeEnabled) void cumulative.refetch();
   };
@@ -262,6 +353,11 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
         <AgentRow
           key={agentRef.key}
           agentRef={agentRef}
+          workspaceId={workspaceId}
+          cumulativeEnabled={cumulativeEnabled}
+          scopeKey={scopeKey}
+          scopeRevision={scopeRevision}
+          refreshRevision={refreshRevision}
           open={selectedId === agentRef.id}
           toggle={() => setSelectedId((current) => current === agentRef.id ? null : agentRef.id)}
           snapshot={query.data?.get(agentRef.id)}

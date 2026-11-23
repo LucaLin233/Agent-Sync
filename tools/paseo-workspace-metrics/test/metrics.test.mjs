@@ -48,10 +48,10 @@ test("provider aliases use the Codex cache basis only with a Codex adapter marke
 
 const empty = { active: null, last: null };
 const start = { kind: "start", turnId: "a", timestamp: 1_000 };
-const assistant = { kind: "assistant", turnId: "a", timestamp: 1_120 };
+const assistant = { kind: "assistant", turnId: "a", timestamp: 1_120, visible: true };
 const complete = { kind: "completed", turnId: "a", timestamp: 3_000, outputTokens: 240 };
 
-test("timing uses the first assistant event and matching whole turn only", () => {
+test("timing uses the first visible assistant text and matching whole turn only", () => {
   const result = [
     start,
     { ...assistant, turnId: "other", timestamp: 1_050 },
@@ -63,7 +63,7 @@ test("timing uses the first assistant event and matching whole turn only", () =>
   ].reduce(observeTurn, empty);
   assert.deepEqual(result.last, {
     turnId: "a",
-    firstAssistantMs: 120,
+    firstVisibleMs: 120,
     elapsedMs: 2_000,
     outcome: "completed",
     outputPerSecond: 120,
@@ -76,9 +76,26 @@ test("observation gaps and missing output do not become measurements", () => {
   assert.deepEqual([start, assistant, complete, { kind: "replacement" }].reduce(observeTurn, empty), empty);
   assert.deepEqual([start, { ...complete, outputTokens: null }].reduce(observeTurn, empty).last, {
     turnId: "a",
-    firstAssistantMs: null,
+    firstVisibleMs: null,
     elapsedMs: 2_000,
     outcome: "completed",
     outputPerSecond: null,
   });
+});
+
+test("blank, whitespace-only, and non-assistant items are not the first visible text", () => {
+  const blanks = [
+    { kind: "assistant", turnId: "a", timestamp: 1_050, visible: false },
+    { kind: "assistant", turnId: "a", timestamp: 1_060, visible: false },
+    assistant,
+  ];
+  const result = [start, ...blanks].reduce(observeTurn, empty);
+  assert.equal(result.active.firstAssistantAt, 1_120);
+  assert.equal(result.last, null);
+});
+
+test("a completed turn keeps its rollout-independent timing only", () => {
+  const result = [start, assistant, complete].reduce(observeTurn, empty);
+  assert.equal("startedAt" in result.last, false);
+  assert.equal("endedAt" in result.last, false);
 });

@@ -50,8 +50,10 @@ paseo plugin reload "$PLUGIN_ID"
 | 累计覆盖 | `covered / eligible`：有有效累计快照的唯一 native 会话数 / 当前 workspace 可确认的 Codex 唯一 native 会话数。另有缺失和排除会话数用于说明失败原因。 |
 | 最近样本缓存率 | 每个可确认使用 Codex 的会话取当前 `lastUsage` 一次。汇总缓存读取后除以汇总输入，Codex 输入已包含缓存读取。缺字段或分母无效时排除该样本，明确上报零缓存命中会纳入计算。覆盖分母是当前面板可见会话数。 |
 | 输入框缓存按钮 | 累计开启且可用时与「累计缓存率」同口径、同格式；累计关闭或不可用时显示「最近」样本口径。加载中「缓存 …」，无有效样本「缓存 —」或「最近 —」。不会把缺失当 0，也不会把两种口径混成一个数。 |
-| Paseo 首段观测 | 打开会话详情后，仅用同一轮的 daemon 时间戳，取 `turn_started` 到首个 `assistant_message` 事件。首个事件可能是工具操作后的文本或一条合成消息。服务商 TTFT 和纯生成 TPS 未上报。 |
-| Paseo 整轮耗时与整轮输出速率 | 耗时从轮开始到终态。内置 Claude Code 成功轮次另用该轮主循环输出 token 除以整轮耗时，包含工具与等待。计数缺失、轮次不完整或断线时段留空。 |
+| Paseo 首个可见文本 | 打开会话详情后，仅用同一轮的 daemon 时间戳，取 `turn_started` 到首个含非空白助手文本的 `assistant_message` 事件；空或纯空白消息、工具和推理事件不算。它可能出现在工具操作之后，也不是服务商 TTFT。 |
+| Paseo 整轮耗时与本轮输出速率 | 耗时从轮开始到终态。内置 Claude Code 成功轮次另用该轮主循环输出 token 除以整轮耗时，包含工具与等待。计数缺失、轮次不完整或断线时段留空。 |
+| 最近 Codex 完成轮 | 仅累计统计开启且能确认 Codex（含 CCHP/GDR 等别名标记）时显示。只用该会话同一 rollout 内同一 native `turn_id` 的 `task_started`/`task_complete` 边界，以及两边界之间最后一笔累计 `total_token_usage.output_tokens` 相对 `task_started` 时累计值的差；耗时同样取这两个原生边界。它与上方 Paseo 实时观测独立展示，不按客户端时间窗切分。起点基线只接受 rollout 已观测并明确上报的累计输出值（上报 0 才算零）；从文件起点读取本身不证明前态为零。`task_complete` 带非空 `error`、`turn_aborted`、`thread_rolled_back` 时不出该轮数据；轮内计数回退、无效或缺失、终点早于最后计数时输出速率留空。回滚后清空已观测基线，等待新的有效快照。完成轮有原生边界时，耗时可独立显示；`time_to_first_token_ms` 可独立显示；两者都不依赖输出计数。 |
+| Codex 首个模型 Token | 同一完成轮 `task_complete.time_to_first_token_ms` 有非负整数时显示，即使该轮缺少有效输出基线也照常显示。它是 Codex 自报的模型首 token 时间，与 Paseo 首个可见文本口径不同，也不冒充服务商 TTFT。 |
 
 ## 累计数据来源与边界
 
@@ -59,7 +61,7 @@ Codex 数据根：填写插件 host 设置 `codexHome` 时作为显式覆盖优�
 
 累计统计默认关闭，关闭时服务端不访问任何 cumulative 数据，即使设置里还留有旧 allowlist。显式打开后默认覆盖本机全部 workspace；高级设置可写入 `allWorkspaces: false` 和 `workspaceIds` 限制名单，空名单会报错而不会放开。旧版只含 `allWorkspaces: true` 或非空 `workspaceIds` 的设置继续按原含义启用；新设置用可选 `cumulativeEnabled` 统一表达开关。服务端仍逐一校验每个会话的 workspace、归档、后台、Codex 标记与 UUID，范围读取失败时前端不会声称该 workspace 不在白名单。服务端只接受 workspace ID 和会话 ID，不接受客户端路径；每个会话都用 Paseo 的 exact agent ref 刷新后校验，拒绝跨 workspace、归档、后台、非 Codex 或 `nativeHandle` 不是 UUID 的成员。rollout 文件名必须与该 UUID 精确匹配。每个 UUID 的日期目录或归档精确匹配结果最多缓存 30 秒；文件按 `dev/ino/size/mtime/ctime` 校验身份并只从上次偏移继续读取，不建立全局会话索引。单文件上限 256 MiB，单目录条目上限 5,000。
 
-JSONL 每行先看前 240 字节是否同时含 `event_msg` 与 `token_count` 标记，命中后才 `JSON.parse` 并复核 `type` 和 `payload.type`。只读取 `payload.info.total_token_usage.input_tokens` 与 `cached_input_tokens`，要求非负安全整数且缓存不超过输入；同一会话较新的累计快照覆盖旧值，不累加。RPC 只返回计数、覆盖和错误说明，不返回会话路径、native 会话 ID 或消息内容。
+JSONL 每行先看前 240 字节是否含 `event_msg` 标记，再看是否含 `token_count` 或 `task_started`/`task_complete`，命中后才 `JSON.parse` 并复核 `type` 和 `payload.type`。累计只读取 `payload.info.total_token_usage` 的 `input_tokens`、`cached_input_tokens` 与 `output_tokens`，要求非负安全整数且缓存不超过输入；同一会话较新的累计快照覆盖旧值，不累加。轮次边界只读取 `payload.turn_id`、`payload.error` 是否非空、`time_to_first_token_ms` 和行时间戳，`task_complete` 里的助手正文一律不读取、不保留，也不会进入客户端状态。时间戳缺失只影响轮次级指标，累计输入/缓存仍按原口径解析。RPC 只返回计数、覆盖和错误说明，不返回会话路径、native 会话 ID、turn ID 或消息内容。
 
 详情中的「上报」计数沿用 provider 的口径。客户端会话目录订阅只取公开 ID、`workspaceId`、归档与后台标志、`lastUsage` 用量数值，以及 `persistence.metadata.provider` 这一个非秘密 Codex 标记；读取后只保留按会话算出的样本，不保留完整快照。累计接口在 daemon 侧读取授权的 Codex rollout 计数，不读取或传出正文。插件停止或重载时撤销按钮、定时器和面板注册。
 

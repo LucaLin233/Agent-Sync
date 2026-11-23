@@ -74,16 +74,19 @@ export function summarizeLatestSamples(samples: readonly (CacheSample | null)[])
 }
 
 export type TurnSignal =
-  | { kind: "start" | "assistant" | "failed" | "canceled"; turnId: string; timestamp: number }
+  | { kind: "start" | "failed" | "canceled"; turnId: string; timestamp: number }
+  | { kind: "assistant"; turnId: string; timestamp: number; visible: boolean }
   | { kind: "completed"; turnId: string; timestamp: number; outputTokens: number | null }
   | { kind: "gap" }
   | { kind: "replacement" };
 
 export interface TurnMeasurement {
   turnId: string;
-  firstAssistantMs: number | null;
+  /** First assistant event with non-blank visible text; never a provider TTFT. */
+  firstVisibleMs: number | null;
   elapsedMs: number;
   outcome: "completed" | "failed" | "canceled";
+  /** Only when that same turn reported a usable output count (Claude). */
   outputPerSecond: number | null;
 }
 
@@ -111,6 +114,9 @@ export function observeTurn(state: TurnObservation, signal: TurnSignal): TurnObs
   if (active?.id !== signal.turnId) return state;
   if (signal.kind === "assistant") {
     if (active.firstAssistantAt !== null || signal.timestamp < active.startedAt) return state;
+    // Only a boolean projection of the item text is kept; the message text
+    // itself never enters observation state.
+    if (!signal.visible) return state;
     return { ...state, active: { ...active, firstAssistantAt: signal.timestamp } };
   }
   if (signal.timestamp < (active.firstAssistantAt ?? active.startedAt)) {
@@ -124,7 +130,7 @@ export function observeTurn(state: TurnObservation, signal: TurnSignal): TurnObs
     active: null,
     last: {
       turnId: signal.turnId,
-      firstAssistantMs: active.firstAssistantAt === null
+      firstVisibleMs: active.firstAssistantAt === null
         ? null
         : active.firstAssistantAt - active.startedAt,
       elapsedMs,

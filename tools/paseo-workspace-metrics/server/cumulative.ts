@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import type { cumulativeUsageRpc } from "../shared/cumulative.ts";
+import type { cumulativeUsageRpc, turnOutputRpc } from "../shared/cumulative.ts";
 import { summarizeLatestSamples } from "../shared/metrics.ts";
 import { effectiveWorkspaceScope, type WorkspaceSettingsValues } from "../shared/scope.ts";
 
@@ -24,9 +24,20 @@ interface SessionFile {
   ctimeMs: number;
 }
 
+export interface CompletedTurn {
+  /** Cumulative output rose by this much between the turn's native boundaries. */
+  outputTokens: number | null;
+  /** Both boundaries come from the same rollout, never from client events. */
+  elapsedMs: number | null;
+  /** Codex's own time_to_first_token_ms for that completed turn, if reported. */
+  firstTokenMs: number | null;
+}
+
 interface SessionCounts {
   input: number;
   cached: number;
+  output: number;
+  lastTurn: CompletedTurn | null;
 }
 
 interface FileState extends SessionCounts {
@@ -37,6 +48,15 @@ interface FileState extends SessionCounts {
   ctimeMs: number;
   offset: number;
   valid: boolean;
+  outputSeen: boolean;
+  openTurn: {
+    id: string;
+    startedAt: number;
+    baseline: number | null;
+    finalAt: number | null;
+    finalOutput: number | null;
+    broken: boolean;
+  } | null;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -76,9 +96,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 }
 
-function parseTokenLine(line: string, state: FileState) {
+function parseLine(line: string, state: FileState) {
   const head = line.slice(0, 240);
-  if (!head.includes("event_msg") || !head.includes("token_count")) return;
+  if (!head.includes("event_msg")) return;
+  if (
+    !head.includes("token_count") &&
+    !head.includes("task_started") &&
+    !head.includes("task_complete") &&
+    !head.includes("turn_aborted") &&
+    !head.includes("thread_rolled_back")
+  ) return;
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -88,16 +115,93 @@ function parseTokenLine(line: string, state: FileState) {
   const record = asRecord(parsed);
   if (!record || record.type !== "event_msg") return;
   const payload = asRecord(record.payload);
-  if (!payload || payload.type !== "token_count") return;
+  if (!payload) return;
+  const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
+
+  if (payload.type === "task_started") {
+    const id = typeof payload.turn_id === "string" ? payload.turn_id : null;
+    if (!id || !Number.isFinite(at)) return;
+    // Only a cumulative value actually reported by the rollout can be a
+    // baseline. Reading from byte zero does not prove an earlier zero: old,
+    // partial, or forked files may lack the marker. An unobserved baseline stays
+    // null and never becomes a delta.
+    const baseline = state.outputSeen ? state.output : null;
+    state.openTurn = { id, startedAt: at, baseline, finalAt: null, finalOutput: null, broken: false };
+    return;
+  }
+
+  if (payload.type === "task_complete") {
+    const id = typeof payload.turn_id === "string" ? payload.turn_id : null;
+    const open = state.openTurn;
+    if (!id || !open || open.id !== id || !Number.isFinite(at)) return;
+    state.openTurn = null;
+    // A non-empty error means the turn did not complete successfully. Only the
+    // scalar time-to-first-token field is projected; assistant text is ignored.
+    const error = payload.error;
+    const failed = typeof error === "string"
+      ? error.trim().length > 0
+      : error !== null && error !== undefined;
+    const firstTokenMs = isToken(payload.time_to_first_token_ms) ? payload.time_to_first_token_ms : null;
+    if (failed) {
+      // A non-empty error is not a successful completion; show nothing for it.
+      state.lastTurn = { outputTokens: null, elapsedMs: null, firstTokenMs: null };
+      return;
+    }
+    // Boundary timing and the first-token measurement stand on their own. The
+    // output delta additionally needs an observed baseline, an in-turn counter,
+    // no regression, and a final count no later than the completion boundary.
+    const outputValid = !open.broken && open.baseline !== null &&
+      open.finalOutput !== null && open.finalAt !== null &&
+      open.finalAt >= open.startedAt && open.finalAt <= at &&
+      open.finalOutput >= open.baseline;
+    state.lastTurn = {
+      outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
+      elapsedMs: at >= open.startedAt ? at - open.startedAt : null,
+      firstTokenMs,
+    };
+    return;
+  }
+
+  if (payload.type === "turn_aborted" || payload.type === "thread_rolled_back") {
+    // An abort or rollback leaves no completed turn to measure. Drop the open
+    // turn and the previous measurement instead of reusing an older snapshot.
+    // A rollback also invalidates the observed counter, so the next turn waits
+    // for a fresh snapshot before it can form a baseline.
+    state.openTurn = null;
+    state.lastTurn = null;
+    if (payload.type === "thread_rolled_back") state.outputSeen = false;
+    return;
+  }
+
+  if (payload.type !== "token_count") return;
   const info = asRecord(payload.info);
   const total = asRecord(info?.total_token_usage);
   if (!total) return;
   const input = total.input_tokens;
   const cached = total.cached_input_tokens;
-  if (!isToken(input) || !isToken(cached) || cached > input) return;
+  const output = total.output_tokens;
+  if (!isToken(input) || !isToken(cached) || cached > input) {
+    // Cache basis stays unchanged; an unusable counter inside an open turn
+    // still disqualifies that turn's output delta.
+    if (state.openTurn) state.openTurn.broken = true;
+    return;
+  }
   state.input = input;
   state.cached = cached;
   state.valid = true;
+  if (!isToken(output) || !Number.isFinite(at)) {
+    if (state.openTurn) state.openTurn.broken = true;
+    return;
+  }
+  // Any in-turn regression disqualifies this turn's delta even if the final
+  // value recovers.
+  if (state.openTurn && state.outputSeen && output < state.output) state.openTurn.broken = true;
+  state.output = output;
+  state.outputSeen = true;
+  if (state.openTurn) {
+    state.openTurn.finalAt = at;
+    state.openTurn.finalOutput = output;
+  }
 }
 
 function resetState(file: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): FileState {
@@ -110,7 +214,11 @@ function resetState(file: { dev: number; ino: number; size: number; mtimeMs: num
     offset: 0,
     input: 0,
     cached: 0,
+    output: 0,
+    lastTurn: null,
     valid: false,
+    outputSeen: false,
+    openTurn: null,
   };
 }
 
@@ -121,6 +229,15 @@ function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number
 function sameState(a: FileState, b: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }) {
   return a.dev === b.dev && a.ino === b.ino && a.size === b.size &&
     a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
+
+function countsOf(state: FileState): SessionCounts {
+  return {
+    input: state.input,
+    cached: state.cached,
+    output: state.output,
+    lastTurn: state.lastTurn,
+  };
 }
 
 async function appendFromHandle(handle: FileHandle, state: FileState, end: number) {
@@ -135,7 +252,7 @@ async function appendFromHandle(handle: FileHandle, state: FileState, end: numbe
     pending = pending.length === 0 ? buffer.subarray(0, bytesRead) : Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
     let newline = pending.indexOf(0x0a);
     while (newline !== -1) {
-      parseTokenLine(pending.subarray(0, newline).toString("utf8"), state);
+      parseLine(pending.subarray(0, newline).toString("utf8"), state);
       pending = pending.subarray(newline + 1);
       newline = pending.indexOf(0x0a);
     }
@@ -176,7 +293,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionCoun
 
     let state = fileCache.get(file.path);
     if (state && sameState(state, stat)) {
-      return state.valid ? { input: state.input, cached: state.cached } : null;
+      return state.valid ? countsOf(state) : null;
     }
     if (!state || !sameFile(state, stat) || stat.size < state.offset) {
       state = resetState(stat);
@@ -194,7 +311,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionCoun
     state.mtimeMs = stat.mtimeMs;
     state.ctimeMs = stat.ctimeMs;
     fileCache.set(file.path, state);
-    return state.valid ? { input: state.input, cached: state.cached } : null;
+    return state.valid ? countsOf(state) : null;
   } catch {
     forget(file.path);
     return null;
@@ -583,6 +700,78 @@ async function resolveWorkspaceValues(options: {
     };
   }
   return readSettings(options.settings);
+}
+
+function emptyTurn(reason: "not-codex" | "scope" | "missing-samples" | "read-failed"): RpcOutput<typeof turnOutputRpc> {
+  return { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason };
+}
+
+/**
+ * Same-turn output for one Codex-backed agent. It reads exactly the rollout the
+ * cumulative feature already gates (workspace, archive state, Codex marker, and
+ * UUID native handle) and only needs the cumulative output counter plus rollout
+ * timestamps. Everything else stays out of the response.
+ */
+export async function collectTurnOutput(
+  input: RpcInput<typeof turnOutputRpc>,
+  paseo: PluginHandlerContext["paseo"],
+  options: {
+    settings?: CodexHomeSettings;
+    codexHome?: string;
+    cumulativeEnabled?: boolean;
+    workspaceIds?: string[];
+    allWorkspaces?: boolean;
+  } = {},
+): Promise<RpcOutput<typeof turnOutputRpc>> {
+  const scope = effectiveWorkspaceScope(await resolveWorkspaceValues(options));
+  if (!scope.enabled || scope.error) return emptyTurn("scope");
+  if (!scope.allWorkspaces && !scope.workspaceIds.includes(input.workspaceId)) return emptyTurn("scope");
+
+  let result;
+  try {
+    result = await paseo.agents.ref(input.agentId).refresh();
+  } catch {
+    return emptyTurn("read-failed");
+  }
+  const agent = result?.agent;
+  if (!agent || agent.workspaceId !== input.workspaceId || agent.archivedAt || agent.background) {
+    return emptyTurn("read-failed");
+  }
+  const marker = agent.persistence?.metadata?.provider;
+  if (agent.provider !== "codex" && marker !== "codex") return emptyTurn("not-codex");
+  const nativeHandle = agent.persistence?.nativeHandle;
+  if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) return emptyTurn("not-codex");
+
+  const configured = options.codexHome
+    ? { root: options.codexHome, error: null }
+    : await resolveCodexHome(options.settings);
+  if (!configured.root) return emptyTurn("read-failed");
+  let root: string;
+  try {
+    root = await fs.realpath(configured.root);
+  } catch {
+    return emptyTurn("read-failed");
+  }
+
+  const created = typeof agent.createdAt === "string" ? Date.parse(agent.createdAt) : NaN;
+  const createdMs = Number.isFinite(created) ? created : null;
+  const file = await findSessionFile(root, nativeHandle.toLowerCase(), createdMs);
+  if (!file) return emptyTurn("missing-samples");
+  const counts = await readSessionCounts(file);
+  if (!counts?.lastTurn) return emptyTurn("missing-samples");
+  const { outputTokens, elapsedMs, firstTokenMs } = counts.lastTurn;
+  if (elapsedMs === null || elapsedMs <= 0) return emptyTurn("missing-samples");
+  return {
+    outputTokens,
+    elapsedMs,
+    firstTokenMs,
+    reason: outputTokens === null ? "missing-samples" : null,
+  };
+}
+
+export function createTurnOutputHandler(settings?: CodexHomeSettings) {
+  return (input: RpcInput<typeof turnOutputRpc>, context: PluginHandlerContext) =>
+    collectTurnOutput(input, context.paseo, { settings });
 }
 
 export function createCumulativeHandler(settings?: CodexHomeSettings) {

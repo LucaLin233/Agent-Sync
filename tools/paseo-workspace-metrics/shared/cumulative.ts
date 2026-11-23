@@ -25,3 +25,27 @@ export const cumulativeUsageRpc = defineRpc({
 });
 
 export type CumulativeUsage = z.infer<typeof cumulativeUsageRpc.output>;
+
+/**
+ * One completed turn's output count for a Codex-backed agent, taken from the
+ * same rollout the cumulative reader is allowed to touch. Only a same-turn
+ * cumulative output delta is returned; no paths, IDs, or message text cross
+ * the RPC.
+ */
+export const turnOutputRpc = defineRpc({
+  name: "workspace-metrics.turn-output",
+  input: z.object({
+    workspaceId: z.string().min(1).max(128),
+    agentId: z.string().min(1).max(128),
+  }),
+  output: z.object({
+    outputTokens: z.number().int().nonnegative().nullable(),
+    /** From the rollout's own task_started -> task_complete timestamps. */
+    elapsedMs: z.number().int().nonnegative().nullable(),
+    /** Codex's reported time_to_first_token_ms; not the Paseo first-text time. */
+    firstTokenMs: z.number().int().nonnegative().nullable(),
+    reason: z.enum(["not-codex", "scope", "missing-samples", "read-failed"]).nullable(),
+  }),
+});
+
+export type TurnOutput = z.infer<typeof turnOutputRpc.output>;
