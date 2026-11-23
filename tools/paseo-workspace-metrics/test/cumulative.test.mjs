@@ -27,6 +27,7 @@ const turnComplete = (id, second, extra = {}) => JSON.stringify({
   type: "event_msg",
   payload: { type: "task_complete", turn_id: id, last_agent_message: "ignore me", ...extra },
 });
+const tokenEventAbort = (second) => turnEvent("turn_aborted", second);
 const turnEvent = (type, second) => JSON.stringify({
   timestamp: at(second), type: "event_msg", payload: { type },
 });
@@ -38,6 +39,11 @@ const tokenAt = (second, input, cached, output) => JSON.stringify({
     info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output } },
   },
 });
+
+const zeroTurns = {
+  sessions: 0, completed: 0, speedSamples: 0, firstTokenSamples: 0,
+  outputTokens: 0, elapsedMs: 0, firstTokenTotalMs: 0,
+};
 
 async function runTurn(root, snapshots, agentId = snapshots[0].agent.id) {
   return collectTurnOutput(
@@ -142,6 +148,8 @@ test("uses each session's latest cumulative snapshot and weights the total", asy
     unavailable: 0,
     rate: 1_150 / 1_500,
     error: null,
+    recentTurn: null,
+    turns: zeroTurns,
   });
 });
 
@@ -420,6 +428,8 @@ test("allWorkspaces totals two workspaces separately and never mixes them", asyn
     unavailable: 0,
     rate: 0.9,
     error: null,
+    recentTurn: null,
+    turns: zeroTurns,
   });
   assert.deepEqual(second, {
     workspaceId: "wks_two",
@@ -431,6 +441,8 @@ test("allWorkspaces totals two workspaces separately and never mixes them", asyn
     unavailable: 0,
     rate: 0.25,
     error: null,
+    recentTurn: null,
+    turns: zeroTurns,
   });
 });
 
@@ -1073,4 +1085,314 @@ test("exponent numbers are consumed fully and truncated records are ignored", as
   const result = await run(root, [snapshot("agent-a", a)]);
   assert.equal(result.inputTokens, 1_200);
   assert.equal(result.covered, 1);
+});
+
+test("the recent turn is chosen by completion time, not by having a speed", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 100),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 900),
+    turnComplete("turn-2", 6, { time_to_first_token_ms: 700 }),
+  ]);
+  // A second session completed earlier with a usable speed.
+  await writeSession(root, b, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 1_000),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 200, 100, 1_300),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a), snapshot("agent-b", b)]);
+  // The newer turn wins even though it has no output baseline of its own.
+  assert.deepEqual(result.recentTurn, {
+    completedAt: Date.parse(at(6)),
+    outputTokens: 800,
+    elapsedMs: 2_000,
+    firstTokenMs: 700,
+  });
+  assert.equal(result.turns.sessions, 2);
+  assert.equal(result.turns.completed, 4);
+  assert.equal(result.turns.speedSamples, 2);
+});
+
+test("a newer turn without a usable speed is kept over an older fast turn", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  // Session A completes newer but reports no output counter for that turn.
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    turnComplete("turn-2", 6),
+  ]);
+  // Session B completed earlier with a usable speed.
+  await writeSession(root, b, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 1_000),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 200, 100, 1_300),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a), snapshot("agent-b", b)]);
+  assert.deepEqual(result.recentTurn, {
+    completedAt: Date.parse(at(6)),
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+  });
+  assert.equal(result.turns.completed, 4);
+  assert.equal(result.turns.speedSamples, 1);
+});
+
+test("cumulative turns are weighted by each whole-turn duration", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  // Long turn: 1,000 output over 10 s. Short turn: 600 over 2 s.
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 2, { time_to_first_token_ms: 500 }),
+    turnStarted("turn-2", 3),
+    tokenAt(5, 0, 0, 1_000),
+    turnComplete("turn-2", 13, { time_to_first_token_ms: 900 }),
+  ]);
+  await writeSession(root, b, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 0, 0, 600),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a), snapshot("agent-b", b)]);
+  assert.equal(result.turns.speedSamples, 2);
+  assert.equal(result.turns.outputTokens, 1_600);
+  assert.equal(result.turns.elapsedMs, 12_000);
+  assert.equal(result.turns.firstTokenSamples, 2);
+  assert.equal(result.turns.firstTokenTotalMs, 1_400);
+  // 1,600 / 12 s = 133.3 t/s, not the unweighted mean of 100 and 300 t/s.
+  const speed = result.turns.outputTokens * 1_000 / result.turns.elapsedMs;
+  assert.equal(Math.round(speed * 10) / 10, 133.3);
+});
+
+test("failed, baseline-less, and out-of-scope turns never join the totals", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const failed = uuid(1);
+  const noBaseline = uuid(2);
+  await writeSession(root, failed, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3, { error: "stream disconnected" }),
+    turnStarted("turn-2", 4),
+    tokenEventAbort(5),
+  ]);
+  await writeSession(root, noBaseline, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 900),
+    turnComplete("turn-2", 6),
+  ]);
+  const result = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-failed", "agent-nobase", "agent-other"] },
+    paseoFor([
+      snapshot("agent-failed", failed),
+      snapshot("agent-nobase", noBaseline),
+      snapshot("agent-other", uuid(3), { workspaceId: "wks_other" }),
+    ]),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  // The failed session contributes no turn. The no-baseline session counts
+  // both completions, but only the second has an output delta and a speed.
+  assert.equal(result.turns.sessions, 1);
+  assert.equal(result.turns.completed, 2);
+  assert.equal(result.turns.speedSamples, 1);
+  assert.equal(result.turns.outputTokens, 500);
+  assert.notEqual(result.unavailable, 0);
+});
+
+test("a completed turn replayed after a rollback is not counted twice", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 900),
+    turnComplete("turn-2", 6),
+    turnEvent("thread_rolled_back", 7),
+    turnStarted("turn-2", 8),
+    tokenAt(9, 200, 100, 900),
+    turnComplete("turn-2", 10),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a)]);
+  // The rollback drops the visible latest turn, but the already-observed
+  // successful turn is not a second observation when replayed.
+  assert.equal(result.turns.completed, 2);
+  assert.equal(result.turns.speedSamples, 1);
+  assert.equal(result.recentTurn, null);
+  // The detail follows file order, so the replayed turn re-describes it: its
+  // own boundaries are back, while the cleared baseline keeps the delta empty.
+  const detail = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(detail, {
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("the session's latest success keeps the greatest completion time", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(5, 0, 0, 500),
+    turnComplete("turn-2", 9),
+  ]);
+  // B finishes at second 7, between A's two turns.
+  await writeSession(root, b, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-b1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-b1", 2),
+    turnStarted("turn-b2", 3),
+    tokenAt(5, 0, 0, 300),
+    turnComplete("turn-b2", 7),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a), snapshot("agent-b", b)]);
+  // A's second turn (second 9) is newest even though B is read second.
+  assert.equal(result.recentTurn.completedAt, Date.parse(at(9)));
+  assert.equal(result.recentTurn.outputTokens, 500);
+});
+
+test("a replayed turn refreshes the detail with its own duration, still counted once", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 3),
+    turnEvent("thread_rolled_back", 4),
+    turnStarted("turn-1", 7),
+    tokenAt(7, 0, 0, 0),
+    turnComplete("turn-1", 8),
+  ]);
+  const detail = await runTurn(root, [snapshot("agent-a", a)]);
+  // The replayed turn is the detail's terminal measurement: 1 s, not the
+  // pre-rollback 2 s it replaced.
+  assert.deepEqual(detail, {
+    outputTokens: null,
+    elapsedMs: 1_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.turns.completed, 1);
+  assert.equal(result.recentTurn, null);
+});
+
+test("manual refresh recomputes turns from the same incremental read", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const file = await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 0, 0, 300),
+    turnComplete("turn-2", 5),
+  ]);
+  const first = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(first.turns.completed, 2);
+  await fs.appendFile(file, [
+    turnStarted("turn-3", 6),
+    tokenAt(8, 0, 0, 700),
+    turnComplete("turn-3", 10),
+    "",
+  ].join("\n"));
+  const refreshed = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"], refresh: true },
+    paseoFor([snapshot("agent-a", a)]),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(refreshed.turns.completed, 3);
+  assert.equal(refreshed.turns.outputTokens, 700);
+  // turn-2 spans 2 s and turn-3 spans 4 s; the first completion has no baseline.
+  assert.equal(refreshed.turns.elapsedMs, 6_000);
+});
+
+test("a successful turn survives a later failed or canceled turn for the top card", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 900),
+    turnComplete("turn-2", 6),
+    turnStarted("turn-3", 7),
+    tokenEventAbort(8),
+  ]);
+  const aborted = await run(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(aborted.recentTurn, {
+    completedAt: Date.parse(at(6)),
+    outputTokens: 500,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+  });
+  assert.equal(aborted.turns.completed, 2);
+
+  clearCumulativeCaches();
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 900),
+    turnComplete("turn-2", 6),
+    turnStarted("turn-3", 7),
+    turnComplete("turn-3", 8, { error: "stream disconnected" }),
+  ]);
+  const failed = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(failed.recentTurn.completedAt, Date.parse(at(6)));
+  assert.equal(failed.recentTurn.outputTokens, 500);
 });

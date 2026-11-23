@@ -5,7 +5,14 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { cumulativeUsageRpc, turnOutputRpc } from "../shared/cumulative.ts";
-import { summarizeLatestSamples } from "../shared/metrics.ts";
+import {
+  addTurn,
+  emptyTurnTotals,
+  latestCompletedTurn,
+  mergeTurnTotals,
+  summarizeLatestSamples,
+  type TurnTotals,
+} from "../shared/metrics.ts";
 import { effectiveWorkspaceScope, type WorkspaceSettingsValues } from "../shared/scope.ts";
 
 export interface CodexHomeSettings {
@@ -25,6 +32,8 @@ interface SessionFile {
 }
 
 export interface CompletedTurn {
+  /** The successful task_complete timestamp; the only ordering key for "latest". */
+  completedAt: number;
   /** Cumulative output rose by this much between the turn's native boundaries. */
   outputTokens: number | null;
   /** Both boundaries come from the same rollout, never from client events. */
@@ -40,7 +49,15 @@ interface CacheCounts {
 
 interface SessionRead {
   sample: CacheCounts | null;
+  /** Detail semantics: a failed or aborted turn clears this. */
   lastTurn: CompletedTurn | null;
+  /** Latest successful turn; a later failure does not erase it. */
+  lastSuccessful: CompletedTurn | null;
+  /**
+   * Completed turns read from this rollout, accumulated as observed. A later
+   * rollback clears the visible latest turn and baseline, not this history.
+   */
+  turns: TurnTotals;
 }
 
 interface FileState {
@@ -55,6 +72,10 @@ interface FileState {
   cached: number;
   trustedOutput: number | null;
   lastTurn: CompletedTurn | null;
+  lastSuccessful: CompletedTurn | null;
+  turns: TurnTotals;
+  /** Bounded ids of turns already added; a replayed rollback turn stays out. */
+  countedTurnIds: Set<string>;
   openTurn: {
     id: string;
     startedAt: number;
@@ -331,24 +352,51 @@ function parseLine(line: string, state: FileState) {
     const firstTokenMs = event.firstTokenMs;
     if (event.errorPresent) {
       state.trustedOutput = null;
-      state.lastTurn = { outputTokens: null, elapsedMs: null, firstTokenMs: null };
+      state.lastTurn = null;
       return;
     }
     const finalTrusted = !open.broken && open.finalOutput !== null &&
       open.finalAt !== null && open.finalAt >= open.startedAt && open.finalAt <= at;
     const outputValid = finalTrusted && open.baseline !== null && open.finalOutput! >= open.baseline;
     state.trustedOutput = finalTrusted ? open.finalOutput : null;
-    state.lastTurn = {
+    const turn: CompletedTurn = {
+      completedAt: at,
       outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
       elapsedMs: at >= open.startedAt ? at - open.startedAt : null,
       firstTokenMs,
     };
+    // The detail follows the file's event order, so a replayed turn replaces
+    // the terminal measurement it re-describes.
+    state.lastTurn = turn;
+    // A turn replayed after a rollback is not a second observation: it neither
+    // adds to the cumulative sums nor restores the overview's success turn.
+    if (state.countedTurnIds.has(event.turnId)) return;
+    state.countedTurnIds.add(event.turnId);
+    if (state.countedTurnIds.size > 64) {
+      const oldest = state.countedTurnIds.values().next().value;
+      if (oldest !== undefined) state.countedTurnIds.delete(oldest);
+    }
+    if (state.lastSuccessful === null || turn.completedAt > state.lastSuccessful.completedAt) {
+      state.lastSuccessful = turn;
+    }
+    state.turns = addTurn(state.turns, turn);
     return;
   }
 
-  if (type === "turn_aborted" || type === "thread_rolled_back") {
+  if (type === "turn_aborted") {
+    // Canceled work clears the detail's terminal turn but is not a completed
+    // observation: the overview keeps the last successful turn.
     state.openTurn = null;
     state.lastTurn = null;
+    state.trustedOutput = null;
+    return;
+  }
+
+  if (type === "thread_rolled_back") {
+    // A rollback erases the turn it rewinds, including the successful result.
+    state.openTurn = null;
+    state.lastTurn = null;
+    state.lastSuccessful = null;
     state.trustedOutput = null;
     return;
   }
@@ -403,6 +451,9 @@ function resetState(file: { dev: number; ino: number; size: number; mtimeMs: num
     input: 0,
     cached: 0,
     lastTurn: null,
+    lastSuccessful: null,
+    turns: emptyTurnTotals(),
+    countedTurnIds: new Set(),
     valid: false,
     trustedOutput: null,
     openTurn: null,
@@ -422,6 +473,8 @@ function countsOf(state: FileState): SessionRead {
   return {
     sample: state.valid ? { input: state.input, cached: state.cached } : null,
     lastTurn: state.lastTurn,
+    lastSuccessful: state.lastSuccessful,
+    turns: state.turns,
   };
 }
 
@@ -796,6 +849,16 @@ function empty(
     unavailable,
     rate: null,
     error,
+    recentTurn: null,
+    turns: {
+      sessions: 0,
+      completed: 0,
+      speedSamples: 0,
+      firstTokenSamples: 0,
+      outputTokens: 0,
+      elapsedMs: 0,
+      firstTokenTotalMs: 0,
+    },
   };
 }
 
@@ -952,6 +1015,17 @@ async function collectCumulativeUsageUncached(
       .map((read) => read?.sample ?? null)
       .filter((sample): sample is CacheCounts => sample !== null);
     const totals = summarizeLatestSamples(samples);
+    // One successful turn per rollout is already folded into constant-space
+    // sums while reading; newest wins by completion time, never by speed.
+    let turns = emptyTurnTotals();
+    let recentTurn: CompletedTurn | null = null;
+    let turnSessions = 0;
+    for (const read of reads) {
+      if (!read) continue;
+      turns = mergeTurnTotals(turns, read.turns);
+      if (read.turns.completed > 0) turnSessions += 1;
+      if (read.lastSuccessful) recentTurn = latestCompletedTurn(recentTurn, read.lastSuccessful);
+    }
     return {
       workspaceId,
       inputTokens: totals.input,
@@ -962,6 +1036,21 @@ async function collectCumulativeUsageUncached(
       unavailable,
       rate: totals.rate,
       error: null,
+      recentTurn: recentTurn === null ? null : {
+        completedAt: recentTurn.completedAt,
+        outputTokens: recentTurn.outputTokens,
+        elapsedMs: recentTurn.elapsedMs,
+        firstTokenMs: recentTurn.firstTokenMs,
+      },
+      turns: {
+        sessions: turnSessions,
+        completed: turns.completed,
+        speedSamples: turns.speedSamples,
+        firstTokenSamples: turns.firstTokenSamples,
+        outputTokens: turns.outputTokens,
+        elapsedMs: turns.elapsedMs,
+        firstTokenTotalMs: turns.firstTokenTotalMs,
+      },
     };
   })().then((value) => {
     if (!refresh && generation === cacheGeneration) {

@@ -6,9 +6,19 @@ import {
   useAgents,
 } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { formatCacheRate, summarizeLatestSamples, tokenCount } from "../shared/metrics";
+import {
+  averageFirstTokenMs,
+  formatCacheRate,
+  formatDurationMs,
+  formatTokenCount,
+  formatTokenSpeed,
+  summarizeLatestSamples,
+  tokenCount,
+  tokensPerSecond,
+  weightedTurnSpeed,
+} from "../shared/metrics";
 import { workspaceInScope, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
 import { useCumulativeUsage } from "./use-cumulative";
 import { useLiveTurn } from "./use-turn";
@@ -16,28 +26,45 @@ import { useTurnOutput } from "./use-turn-output";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
-const counts = new Intl.NumberFormat("zh-CN");
-const decimal = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
 const dates = new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" });
 const statuses = {
   initializing: "初始化", idle: "空闲", running: "运行中", error: "出错", closed: "已关闭",
 };
 const outcomes = { completed: "完成", failed: "失败", canceled: "取消" };
 
-function count(value: number | null) {
-  return value === null ? "—" : counts.format(value);
-}
-
-function duration(ms: number | null | undefined) {
-  if (ms === null || ms === undefined) return "—";
-  return ms < 1_000 ? counts.format(ms) + " ms" : decimal.format(ms / 1_000) + " 秒";
-}
+const count = formatTokenCount;
+const duration = formatDurationMs;
 
 function Metric({ label, value, colors }: { label: string; value: string; colors: Colors }) {
   return (
-    <View style={{ flexGrow: 1, flexBasis: 125, gap: 4 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>{label}</Text>
-      <Text style={{ color: colors.foreground, fontSize: 18, fontWeight: "600" }}>{value}</Text>
+    <View style={{ flexGrow: 1, flexBasis: 120, gap: 2 }}>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{label}</Text>
+      <Text style={{ color: colors.foreground, fontSize: 17, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{value}</Text>
+    </View>
+  );
+}
+
+/** The number is the subject: one headline value, then a quiet supporting row. */
+function Headline({ label, value, note, colors }: {
+  label: string;
+  value: string;
+  note?: string;
+  colors: Colors;
+}) {
+  return (
+    <View style={{ gap: 2 }}>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12, letterSpacing: 0.4 }}>{label}</Text>
+      <Text style={{ color: colors.foreground, fontSize: 30, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{value}</Text>
+      {note ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{note}</Text> : null}
+    </View>
+  );
+}
+
+function Card({ title, children, colors }: { title: string; children: ReactNode; colors: Colors }) {
+  return (
+    <View style={{ gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface1 }}>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12, fontWeight: "600", letterSpacing: 0.6 }}>{title}</Text>
+      {children}
     </View>
   );
 }
@@ -71,9 +98,7 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
   const codexElapsed = data?.elapsedMs ?? null;
   const codexFirstToken = data?.firstTokenMs ?? null;
   const hasCodexTurn = cumulativeEnabled && (codexElapsed !== null || codexFirstToken !== null);
-  const codexRate = codexOutput !== null && codexElapsed !== null && codexElapsed > 0
-    ? codexOutput * 1_000 / codexElapsed
-    : null;
+  const codexRate = tokensPerSecond(codexOutput, codexElapsed);
   const reason = data?.reason;
 
   return (
@@ -85,9 +110,7 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
         <Metric label="Paseo 整轮耗时" value={duration(measurement?.elapsedMs)} colors={colors} />
         <Metric
           label="本轮输出速率"
-          value={measurement?.outputPerSecond == null
-            ? "—"
-            : decimal.format(measurement.outputPerSecond) + " token/s"}
+          value={formatTokenSpeed(measurement?.outputPerSecond, "full")}
           colors={colors}
         />
       </View>
@@ -108,7 +131,7 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
             )}
             <Metric
               label="整轮输出速率"
-              value={codexRate === null ? "—" : decimal.format(codexRate) + " token/s"}
+              value={formatTokenSpeed(codexRate, "full")}
               colors={colors}
             />
           </View>
@@ -246,7 +269,6 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
   const scopePending = scope === null && scopeSubscription.status === "connecting";
   const scopeRequestFailed = scope === null &&
     (scopeSubscription.status === "error" || scopeSubscription.status === "closed");
-  const scopeError = scopeRequestFailed ? "设置订阅不可用" : scope?.error ?? null;
   const scopeBlocked = scopeRequestFailed
     ? "累计范围读取失败"
     : scope?.error
@@ -257,13 +279,31 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
   const cumulativePending = cumulativeEnabled && refs.length > 0 && cumulative.isPending;
   const cumulativeError = cumulativeEnabled && cumulative.error ? "RPC 读取失败" : cumulative.data?.error ?? null;
   const hasCumulative = cumulativeEnabled && Boolean(cumulative.data) && !cumulativeError;
-  const cumulativeValue = (value: string) => {
-    if (scopePending) return "读取中…";
-    if (scopeError || !cumulativeEnabled) return "未启用";
-    if (cumulativePending) return "读取中…";
-    return value;
-  };
   const refreshing = query.isFetching || (cumulativeEnabled && cumulative.isFetching);
+  const recentTurn = cumulative.data?.recentTurn ?? null;
+  const turns = cumulative.data?.turns ?? null;
+  const recentSpeed = recentTurn ? tokensPerSecond(recentTurn.outputTokens, recentTurn.elapsedMs) : null;
+  const cumulativeSpeed = turns ? weightedTurnSpeed(turns) : null;
+  const cumulativeFirstToken = turns ? averageFirstTokenMs(turns) : null;
+  const blockedNote = scopePending
+    ? "正在读取本机累计范围…"
+    : !cumulativeEnabled
+      ? scopeBlocked + "，未读取"
+      : cumulativeError
+        ? "读取失败：" + cumulativeError + "，未按 0 计入"
+        : null;
+  const recentValue = hasCumulative && recentTurn && !cumulativePending ? formatTokenSpeed(recentSpeed, "full") : "—";
+  const cumulativeValue = hasCumulative && turns && !cumulativePending ? formatTokenSpeed(cumulativeSpeed, "full") : "—";
+  // The scope or read state is stated once, under both cards.
+  const recentNote = blockedNote || cumulativePending ? undefined
+    : recentTurn
+      ? "完成于 " + (Number.isFinite(recentTurn.completedAt) ? dates.format(recentTurn.completedAt) : "—")
+      : "尚无可信完成轮";
+  const cumulativeNote = blockedNote || cumulativePending ? undefined
+    : !turns || turns.completed === 0
+      ? "尚无有效完成轮"
+      : "按整轮耗时加权 · 速率样本 " + turns.speedSamples + " 轮";
+  const detail = (text: string) => hasCumulative && !cumulativePending ? text : "—";
 
   const refresh = () => {
     setRefreshRevision((revision) => revision + 1);
@@ -276,71 +316,94 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
       style={{ flex: 1, backgroundColor: colors.surface0 }}
       contentContainerStyle={{ padding: layout.compact ? 12 : 20, gap: 12 }}
     >
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        <View style={{ flexGrow: 1, flexBasis: 260, minWidth: 240 }}>
+          <Card title="最近完成" colors={colors}>
+            <Headline
+              label="整轮输出速率"
+              value={recentValue}
+              note={recentNote}
+              colors={colors}
+            />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              <Metric label="首 Token" value={detail(formatDurationMs(recentTurn?.firstTokenMs ?? null))} colors={colors} />
+              <Metric label="整轮耗时" value={detail(formatDurationMs(recentTurn?.elapsedMs ?? null))} colors={colors} />
+              <Metric label="输出" value={detail(formatTokenCount(recentTurn?.outputTokens ?? null))} colors={colors} />
+            </View>
+            {cumulativeEnabled && hasCumulative && recentTurn && recentSpeed === null && (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+                该轮缺少有效输出计数或正向耗时，速率留空。
+              </Text>
+            )}
+          </Card>
+        </View>
+        <View style={{ flexGrow: 1, flexBasis: 260, minWidth: 240 }}>
+          <Card title="累计统计" colors={colors}>
+            <Headline label="累计整轮输出速率" value={cumulativeValue} note={cumulativeNote} colors={colors} />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+              <Metric label="平均首 Token" value={detail(formatDurationMs(cumulativeFirstToken))} colors={colors} />
+              <Metric label="缓存率" value={formatCacheRate(hasCumulative ? cumulative.data?.rate ?? null : null)} colors={colors} />
+              <Metric
+                label="会话覆盖"
+                value={hasCumulative ? cumulative.data?.covered + " / " + cumulative.data?.eligible : "—"}
+                colors={colors}
+              />
+            </View>
+            {hasCumulative && turns && turns.completed > 0 && (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+                {turns.sessions} 个会话 · {turns.completed} 个完成轮 · 首 Token 样本 {turns.firstTokenSamples}
+              </Text>
+            )}
+          </Card>
+        </View>
+      </View>
+      {(blockedNote || cumulativePending) && (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          {blockedNote ?? "正在读取 Codex 累计用量…"}
+        </Text>
+      )}
       <View style={{ gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.surface1 }}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-          <Metric
-            label="累计缓存率"
-            value={cumulativeValue(formatCacheRate(hasCumulative ? cumulative.data?.rate ?? null : null))}
-            colors={colors}
-          />
-          <Metric
-            label="累计覆盖"
-            value={cumulativeValue(hasCumulative ? cumulative.data?.covered + " / " + cumulative.data?.eligible : "—")}
-            colors={colors}
-          />
           <Metric label="最近样本缓存率" value={formatCacheRate(totals.rate)} colors={colors} />
           <Metric
             label="最近覆盖"
             value={recentPending ? "读取中…" : totals.covered + " / " + refs.length}
             colors={colors}
           />
+          <Metric
+            label="累计缓存读取"
+            value={hasCumulative ? formatTokenCount(cumulative.data?.cachedInputTokens ?? null) : "—"}
+            colors={colors}
+          />
+          <Metric
+            label="累计总输入"
+            value={hasCumulative ? formatTokenCount(cumulative.data?.inputTokens ?? null) : "—"}
+            colors={colors}
+          />
         </View>
-        {scopePending && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>正在读取本机累计范围…</Text>
-        )}
-        {!scopePending && (scopeError || !cumulativeEnabled) && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            {scopeBlocked}，以下仅显示最近样本。
+        {hasCumulative && (cumulative.data?.missing ?? 0) > 0 && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+            {cumulative.data?.missing} 个 Codex 会话缺少累计快照，未按 0 计入。
           </Text>
         )}
-        {cumulativeEnabled && cumulativeError && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            累计缓存率不可用：{cumulativeError}。不会按 0 计入。
+        {hasCumulative && (cumulative.data?.unavailable ?? 0) > 0 && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+            {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
           </Text>
         )}
-        {cumulativePending && !cumulativeError && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>正在读取 Codex 累计用量…</Text>
-        )}
-        {hasCumulative && (
-          <>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-              累计缓存读取 {count(cumulative.data?.cachedInputTokens ?? null)} / 总输入 {count(cumulative.data?.inputTokens ?? null)} token
-            </Text>
-            {(cumulative.data?.missing ?? 0) > 0 && (
-              <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-                {cumulative.data?.missing} 个 Codex 会话缺少累计快照，未按 0 计入。
-              </Text>
-            )}
-            {(cumulative.data?.unavailable ?? 0) > 0 && (
-              <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-                {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
-              </Text>
-            )}
-          </>
-        )}
-        <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-          累计取每个唯一 native Codex 会话最后一笔 total_token_usage；最近样本另取各会话当前 lastUsage，两者时点可能不同。
-        </Text>
         {totals.rate !== null && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
-            最近缓存读取 {count(totals.cached)} / 总输入 {count(totals.input)} token
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+            最近缓存读取 {formatTokenCount(totals.cached)} / 总输入 {formatTokenCount(totals.input)} token
           </Text>
         )}
         {!recentPending && recentUnavailable > 0 && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
             {recentUnavailable} 个会话当前无法读取最近用量快照。
           </Text>
         )}
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          累计取每个唯一 native Codex 会话已观测到的成功完成轮，整轮耗时含工具与等待；最近样本缓存率另取各会话当前 lastUsage。
+        </Text>
         {refs.length > 0 && (
           <Pressable
             accessibilityRole="button"

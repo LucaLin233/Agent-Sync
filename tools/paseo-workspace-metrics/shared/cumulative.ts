@@ -23,6 +23,27 @@ export const cumulativeUsageRpc = defineRpc({
     unavailable: z.number().int().nonnegative(),
     rate: z.number().min(0).max(1).nullable(),
     error: z.string().nullable(),
+    /**
+     * Latest successful Codex turn across the matched sessions, ordered by its
+     * own completion time. Numbers are passed through as read; the client
+     * derives the speed with the same formula as the panel.
+     */
+    recentTurn: z.object({
+      completedAt: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative().nullable(),
+      elapsedMs: z.number().int().nonnegative().nullable(),
+      firstTokenMs: z.number().int().nonnegative().nullable(),
+    }).nullable(),
+    /** Constant-space turn observations, summed over matched sessions. */
+    turns: z.object({
+      sessions: z.number().int().nonnegative(),
+      completed: z.number().int().nonnegative(),
+      speedSamples: z.number().int().nonnegative(),
+      firstTokenSamples: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      elapsedMs: z.number().int().nonnegative(),
+      firstTokenTotalMs: z.number().int().nonnegative(),
+    }),
   }),
 });
 

@@ -139,3 +139,129 @@ export function observeTurn(state: TurnObservation, signal: TurnSignal): TurnObs
     },
   };
 }
+
+/** Tokens per second from one turn's output count and whole-turn duration. */
+export function tokensPerSecond(
+  outputTokens: number | null | undefined,
+  elapsedMs: number | null | undefined,
+): number | null {
+  if (outputTokens === null || outputTokens === undefined || !Number.isSafeInteger(outputTokens) || outputTokens < 0) return null;
+  if (elapsedMs === null || elapsedMs === undefined || !Number.isFinite(elapsedMs) || elapsedMs <= 0) return null;
+  return outputTokens * 1_000 / elapsedMs;
+}
+
+const speedFormat = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** One decimal, shared by the panel and the composer pill. */
+export function formatTokenSpeed(value: number | null | undefined, unit: "short" | "full" = "short"): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? "—"
+    : speedFormat.format(value) + (unit === "full" ? " token/s" : " t/s");
+}
+
+export function formatTurnPillLabel(value: number | null | undefined): string {
+  return "近轮 " + formatTokenSpeed(value);
+}
+
+/** Pill title: keeps the open action, cache rate and near-turn basis. */
+export function formatPillTitle(rate: number | null | undefined, speed: number | null | undefined): string {
+  if (speed === null || speed === undefined || !Number.isFinite(speed)) return "打开工作区用量";
+  return "打开工作区用量 · " + formatCachePillLabel(rate) + " · " + formatTurnPillLabel(speed);
+}
+
+/** Appends the suffix only when a reliable same-turn speed exists. */
+export function appendTurnSpeed(label: string, speed: number | null | undefined): string {
+  return speed === null || speed === undefined || !Number.isFinite(speed) ? label : label + " · " + formatTurnPillLabel(speed);
+}
+
+const countFormat = new Intl.NumberFormat("zh-CN");
+const secondsFormat = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
+
+export function formatTokenCount(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isSafeInteger(value) ? "—" : countFormat.format(value);
+}
+
+export function formatDurationMs(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return "—";
+  return value < 1_000 ? countFormat.format(value) + " ms" : secondsFormat.format(value / 1_000) + " 秒";
+}
+
+/** A completed turn selected only by its own completion time. */
+export interface CompletedTurnSample {
+  completedAt: number;
+  outputTokens: number | null;
+  elapsedMs: number | null;
+  firstTokenMs: number | null;
+}
+
+/** Newer wins even without a speed; an older faster turn never displaces it. */
+export function latestCompletedTurn(
+  current: CompletedTurnSample | null,
+  candidate: CompletedTurnSample | null,
+): CompletedTurnSample | null {
+  if (!candidate) return current;
+  if (!current || candidate.completedAt > current.completedAt) return candidate;
+  return current;
+}
+
+/** Constant-space sums with independent denominators for speed and first token. */
+export interface TurnTotals {
+  /** Successful turns with a sane start and completion boundary. */
+  completed: number;
+  /** Turns contributing to the weighted speed (output delta and a positive duration). */
+  speedSamples: number;
+  outputTokens: number;
+  elapsedMs: number;
+  /** Turns with a reported first-token time, independent of output availability. */
+  firstTokenSamples: number;
+  firstTokenTotalMs: number;
+}
+
+export function emptyTurnTotals(): TurnTotals {
+  return {
+    completed: 0,
+    speedSamples: 0,
+    outputTokens: 0,
+    elapsedMs: 0,
+    firstTokenSamples: 0,
+    firstTokenTotalMs: 0,
+  };
+}
+
+export function addTurn(totals: TurnTotals, turn: CompletedTurnSample): TurnTotals {
+  const output = turn.outputTokens;
+  const elapsed = turn.elapsedMs;
+  const canWeight = output !== null && elapsed !== null && elapsed > 0;
+  return {
+    completed: totals.completed + 1,
+    speedSamples: totals.speedSamples + (canWeight ? 1 : 0),
+    outputTokens: totals.outputTokens + (canWeight ? output : 0),
+    elapsedMs: totals.elapsedMs + (canWeight ? elapsed : 0),
+    firstTokenSamples: totals.firstTokenSamples + (turn.firstTokenMs !== null ? 1 : 0),
+    firstTokenTotalMs: totals.firstTokenTotalMs + (turn.firstTokenMs ?? 0),
+  };
+}
+
+export function mergeTurnTotals(left: TurnTotals, right: TurnTotals): TurnTotals {
+  return {
+    completed: left.completed + right.completed,
+    speedSamples: left.speedSamples + right.speedSamples,
+    outputTokens: left.outputTokens + right.outputTokens,
+    elapsedMs: left.elapsedMs + right.elapsedMs,
+    firstTokenSamples: left.firstTokenSamples + right.firstTokenSamples,
+    firstTokenTotalMs: left.firstTokenTotalMs + right.firstTokenTotalMs,
+  };
+}
+
+/** Weighted by whole-turn duration, never an average of per-turn rates. */
+export function weightedTurnSpeed(totals: Pick<TurnTotals, "speedSamples" | "outputTokens" | "elapsedMs">): number | null {
+  return totals.speedSamples > 0 && totals.elapsedMs > 0
+    ? totals.outputTokens * 1_000 / totals.elapsedMs
+    : null;
+}
+
+export function averageFirstTokenMs(
+  totals: Pick<TurnTotals, "firstTokenSamples" | "firstTokenTotalMs">,
+): number | null {
+  return totals.firstTokenSamples > 0 ? totals.firstTokenTotalMs / totals.firstTokenSamples : null;
+}

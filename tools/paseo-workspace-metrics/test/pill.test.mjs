@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { formatCachePillLabel, formatCacheRate } from "../shared/metrics.ts";
+import {
+  addTurn,
+  appendTurnSpeed,
+  averageFirstTokenMs,
+  emptyTurnTotals,
+  formatCachePillLabel,
+  formatCacheRate,
+  formatPillTitle,
+  formatTurnPillLabel,
+  latestCompletedTurn,
+  mergeTurnTotals,
+  tokensPerSecond,
+  weightedTurnSpeed,
+} from "../shared/metrics.ts";
 import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries } from "../shared/agents.ts";
 import { workspaceInScope } from "../shared/scope.ts";
 
@@ -89,4 +102,57 @@ test("the panel and pill share one scope policy, closed unless opted in", () => 
   assert.equal(workspaceInScope({ enabled: true, workspaceIds: ["w1"], allWorkspaces: false }, "w2"), false);
   assert.equal(workspaceInScope({ enabled: true, workspaceIds: [], allWorkspaces: true }, "w2"), true);
   assert.equal(workspaceInScope({ enabled: false, workspaceIds: [], allWorkspaces: true }, "w2"), false);
+});
+
+const turn = (completedAt, outputTokens, elapsedMs, firstTokenMs = null) => ({
+  completedAt, outputTokens, elapsedMs, firstTokenMs,
+});
+
+test("the pill appends only an existing speed and keeps the cache label otherwise", () => {
+  assert.equal(formatTurnPillLabel(22.72), "近轮 22.7 t/s");
+  assert.equal(formatTurnPillLabel(null), "近轮 —");
+  assert.equal(appendTurnSpeed("缓存 98.2%", 22.72), "缓存 98.2% · 近轮 22.7 t/s");
+  assert.equal(appendTurnSpeed("缓存 98.2%", null), "缓存 98.2%");
+  assert.equal(appendTurnSpeed("缓存 —", 0), "缓存 — · 近轮 0.0 t/s");
+  assert.equal(tokensPerSecond(400, 0), null);
+  assert.equal(tokensPerSecond(null, 2_000), null);
+});
+
+test("the newest completed turn wins even when it has no speed", () => {
+  const fast = turn(1_000, 900, 1_000);
+  const newerMissing = turn(2_000, null, 1_500);
+  assert.equal(latestCompletedTurn(fast, newerMissing), newerMissing);
+  assert.equal(latestCompletedTurn(newerMissing, fast), newerMissing);
+  assert.equal(latestCompletedTurn(null, null), null);
+});
+
+test("cumulative speed is weighted by whole-turn duration, not averaged", () => {
+  let totals = emptyTurnTotals();
+  totals = addTurn(totals, turn(1_000, 1_000, 1_000, 200)); // 1000 t/s
+  totals = addTurn(totals, turn(2_000, 10, 10_000, null)); // 1 t/s
+  assert.equal(totals.completed, 2);
+  assert.equal(totals.speedSamples, 2);
+  assert.equal(weightedTurnSpeed(totals), 1_010_000 / 11_000);
+  assert.equal(averageFirstTokenMs(totals), 200);
+  assert.equal(totals.firstTokenSamples, 1);
+});
+
+test("turns without an output delta or a positive duration keep separate denominators", () => {
+  let totals = emptyTurnTotals();
+  totals = addTurn(totals, turn(1_000, 500, null, 300));
+  totals = addTurn(totals, turn(2_000, null, 4_000, null));
+  totals = addTurn(totals, turn(3_000, 100, 0, 100));
+  assert.equal(totals.completed, 3);
+  assert.equal(totals.speedSamples, 0);
+  assert.equal(weightedTurnSpeed(totals), null);
+  assert.equal(totals.elapsedMs, 0);
+  assert.equal(averageFirstTokenMs(totals), 200);
+  assert.equal(mergeTurnTotals(totals, totals).completed, 6);
+  assert.equal(mergeTurnTotals(totals, totals).firstTokenSamples, 4);
+});
+
+test("the pill title keeps the open action, cache rate and near-turn basis", () => {
+  assert.equal(formatPillTitle(0.982, 22.72), "打开工作区用量 · 缓存 98.2% · 近轮 22.7 t/s");
+  assert.equal(formatPillTitle(0.982, null), "打开工作区用量");
+  assert.equal(formatPillTitle(null, 12), "打开工作区用量 · 缓存 — · 近轮 12.0 t/s");
 });
