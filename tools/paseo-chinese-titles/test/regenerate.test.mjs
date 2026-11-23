@@ -27,6 +27,7 @@ function makeAgent(overrides = {}) {
   return {
     id: "a1",
     workspaceId: "w1",
+    title: "Extend workspace usage plugin",
     background: false,
     cwd: "/synthetic/workspace",
     labels: {},
@@ -38,12 +39,17 @@ function makeAgent(overrides = {}) {
   };
 }
 
+function makeState(workspace = {}) {
+  return { workspace: makeWorkspace(workspace), writes: [], sessionWrites: [] };
+}
+
 function makePaseo(state) {
   const handle = {
     refresh: async () => ({ ...state.workspace }),
     setTitle: async (title) => {
       state.writes.push(title);
       state.workspace.title = title;
+      if (state.onWorkspaceWrite) state.onWorkspaceWrite(title);
       return { title };
     },
   };
@@ -54,24 +60,41 @@ function makePaseo(state) {
         return handle;
       },
     },
+    agents: {
+      ref: (id) => ({
+        refresh: async () => {
+          const agent = state.agents?.find((entry) => entry.id === id);
+          return agent ? { agent: { ...agent } } : null;
+        },
+      }),
+    },
   };
 }
 
 function optionsFor(paseo, state, overrides = {}) {
+  state.agents ??= [makeAgent()];
   return {
     paseo,
     settings: settingsSchema.parse({}),
     workspaceId: state.workspace.id,
     claims: new Set(),
-    listAgents: async () => [makeAgent()],
+    agentClaims: new Set(),
+    listAgents: async () => state.agents,
     readConversation: async () => ({ text: "用户：修复登录问题\n\n助手：已修复。", turns: 1 }),
     generateConversation: async () => ({ title: "修复登录问题" }),
+    renameSession: async (agentId, title) => {
+      const agent = state.agents.find((entry) => entry.id === agentId);
+      if (!agent) return { ok: false, failure: "failed" };
+      state.sessionWrites.push(title);
+      agent.title = title;
+      return { ok: true };
+    },
     ...overrides,
   };
 }
 
 test("a single eligible session is used without an explicit choice and repeated clicks work", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const titles = ["修复登录问题", "登录流程排查"];
   let call = 0;
   const read = [];
@@ -82,14 +105,18 @@ test("a single eligible session is used without an explicit choice and repeated 
     },
     generateConversation: async () => ({ title: titles[call++] }),
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "done", title: "修复登录问题" });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "done", title: "登录流程排查" });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false, agentId: "a1",
+  });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "done", title: "登录流程排查", workspaceUpdated: true, sessionUpdated: false, agentId: "a1",
+  });
   assert.deepEqual(state.writes, titles);
   assert.deepEqual(read, ["a1", "a1"]);
 });
 
 test("two sessions need an explicit pick; only the chosen session is read", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const read = [];
   const agents = [
     makeAgent({ id: "first", lastUserMessageAt: "2026-11-23T00:00:00.000Z" }),
@@ -102,15 +129,19 @@ test("two sessions need an explicit pick; only the chosen session is read", asyn
       return { text: `用户：${agentId} 的会话`, turns: 1 };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "needs_selection", reason: "choose_session" });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "needs_selection", reason: "choose_session", workspaceUpdated: false, sessionUpdated: false,
+  });
   assert.deepEqual(read, []);
-  assert.deepEqual(await regenerateWorkspaceTitle({ ...options, agentId: "second" }), { status: "done", title: "修复登录问题" });
+  assert.deepEqual(await regenerateWorkspaceTitle({ ...options, agentId: "second" }), {
+    status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false, agentId: "second",
+  });
   assert.deepEqual(read, ["second"]);
   assert.deepEqual(state.writes, ["修复登录问题"]);
 });
 
 test("an agent from another workspace or a helper session is rejected, not silently substituted", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const read = [];
   const options = optionsFor(makePaseo(state), state, {
     listAgents: async () => [
@@ -125,22 +156,12 @@ test("an agent from another workspace or a helper session is rejected, not silen
       return { text: "用户：内容", turns: 1 };
     },
   });
-  assert.deepEqual(
-    await regenerateWorkspaceTitle({ ...options, agentId: "other" }),
-    { status: "skipped", reason: "session_not_selectable" },
-  );
-  assert.deepEqual(
-    await regenerateWorkspaceTitle({ ...options, agentId: "helper" }),
-    { status: "skipped", reason: "session_not_selectable" },
-  );
-  assert.deepEqual(
-    await regenerateWorkspaceTitle({ ...options, agentId: "sub" }),
-    { status: "skipped", reason: "session_not_selectable" },
-  );
-  assert.deepEqual(
-    await regenerateWorkspaceTitle({ ...options, agentId: "hidden" }),
-    { status: "skipped", reason: "session_not_selectable" },
-  );
+  for (const agentId of ["other", "helper", "sub", "hidden"]) {
+    assert.deepEqual(
+      await regenerateWorkspaceTitle({ ...options, agentId }),
+      { status: "skipped", reason: "session_not_selectable", workspaceUpdated: false, sessionUpdated: false },
+    );
+  }
   assert.deepEqual(read, []);
   assert.deepEqual(state.writes, []);
 });
@@ -152,7 +173,7 @@ test("a failed, invalid or timed-out model answer keeps the existing title", asy
     async () => ({ title: null, errorCode: "provider_unavailable" }),
     async () => null,
   ]) {
-    const state = { workspace: makeWorkspace(), writes: [] };
+    const state = makeState();
     const options = optionsFor(makePaseo(state), state, { generateConversation: run });
     const result = await regenerateWorkspaceTitle(options);
     assert.equal(result.status, "error");
@@ -162,7 +183,7 @@ test("a failed, invalid or timed-out model answer keeps the existing title", asy
 });
 
 test("a conversation read failure is reported, not replaced by a fallback title", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   let generated = 0;
   const options = optionsFor(makePaseo(state), state, {
     readConversation: async () => null,
@@ -171,13 +192,15 @@ test("a conversation read failure is reported, not replaced by a fallback title"
       return { title: "修复登录问题" };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "skipped", reason: "conversation_unavailable" });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "skipped", reason: "conversation_unavailable", workspaceUpdated: false, sessionUpdated: false, agentId: "a1",
+  });
   assert.equal(generated, 0);
   assert.deepEqual(state.writes, []);
 });
 
 test("an empty conversation or no eligible session is never written", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   let generated = 0;
   const empty = optionsFor(makePaseo(state), state, {
     readConversation: async () => ({ text: "   ", turns: 0 }),
@@ -186,7 +209,9 @@ test("an empty conversation or no eligible session is never written", async () =
       return { title: "修复登录问题" };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(empty), { status: "skipped", reason: "empty_conversation" });
+  assert.deepEqual(await regenerateWorkspaceTitle(empty), {
+    status: "skipped", reason: "empty_conversation", workspaceUpdated: false, sessionUpdated: false, agentId: "a1",
+  });
   const none = optionsFor(makePaseo(state), state, {
     listAgents: async () => [makeAgent({ background: true })],
     generateConversation: async () => {
@@ -194,26 +219,30 @@ test("an empty conversation or no eligible session is never written", async () =
       return { title: "修复登录问题" };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(none), { status: "needs_selection", reason: "no_session" });
+  assert.deepEqual(await regenerateWorkspaceTitle(none), {
+    status: "needs_selection", reason: "no_session", workspaceUpdated: false, sessionUpdated: false,
+  });
   assert.equal(generated, 0);
   assert.deepEqual(state.writes, []);
 });
 
 test("a manual rename during generation wins and is never overwritten", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const options = optionsFor(makePaseo(state), state, {
     generateConversation: async () => {
       state.workspace.title = "手工标题";
       return { title: "修复登录问题" };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "skipped", reason: "manual_change" });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "skipped", reason: "manual_change", workspaceUpdated: false, sessionUpdated: false, agentId: "a1",
+  });
   assert.deepEqual(state.writes, []);
   assert.equal(state.workspace.title, "手工标题");
 });
 
 test("a second click while generation runs is busy and can retry afterwards", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const options = optionsFor(makePaseo(state), state, {
@@ -223,7 +252,7 @@ test("a second click while generation runs is busy and can retry afterwards", as
     },
   });
   const first = regenerateWorkspaceTitle(options);
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "busy" });
+  assert.equal((await regenerateWorkspaceTitle(options)).status, "busy");
   release();
   assert.equal((await first).status, "done");
   assert.deepEqual(state.writes, ["修复登录问题"]);
@@ -231,7 +260,7 @@ test("a second click while generation runs is busy and can retry afterwards", as
 });
 
 test("a timed-out RPC never writes afterwards", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   let release;
   const generation = new Promise((resolve) => { release = resolve; });
   const options = optionsFor(makePaseo(state), state, {
@@ -239,14 +268,14 @@ test("a timed-out RPC never writes afterwards", async () => {
     deadlineAt: Date.now() + 60,
     generationTimeoutMs: 20,
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "error", reason: "timeout" });
+  assert.equal((await regenerateWorkspaceTitle(options)).reason, "timeout");
   release({ title: "修复登录问题" });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(state.writes, []);
 });
 
 test("manual generation ignores the automatic baseline and autoNameWorkspaces", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const options = optionsFor(makePaseo(state), state, {
     settings: settingsSchema.parse({ autoNameWorkspaces: false, autoNameSessions: false }),
   });
@@ -255,10 +284,10 @@ test("manual generation ignores the automatic baseline and autoNameWorkspaces", 
 });
 
 test("background and helper workspaces are skipped", async () => {
-  const state = { workspace: makeWorkspace({ background: true }), writes: [] };
+  const state = makeState({ background: true });
   assert.deepEqual(
     await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state)),
-    { status: "skipped", reason: "excluded" },
+    { status: "skipped", reason: "excluded", workspaceUpdated: false, sessionUpdated: false },
   );
   assert.deepEqual(state.writes, []);
 });
@@ -286,19 +315,21 @@ test("workspace creation seed is Chinese, distinct from the prompt title and mar
 });
 
 test("an archived workspace after generation is not written", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   const options = optionsFor(makePaseo(state), state, {
     generateConversation: async () => {
       state.workspace.archivingAt = "2026-11-23T00:00:01.000Z";
       return { title: "修复登录问题" };
     },
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "skipped", reason: "not_found" });
+  assert.deepEqual(await regenerateWorkspaceTitle(options), {
+    status: "skipped", reason: "not_found", workspaceUpdated: false, sessionUpdated: false, agentId: "a1",
+  });
   assert.deepEqual(state.writes, []);
 });
 
 test("deadline is checked again after the final refresh", async () => {
-  const state = { workspace: makeWorkspace(), writes: [] };
+  const state = makeState();
   let clock = 1_000_000;
   let refreshes = 0;
   const handle = {
@@ -317,6 +348,327 @@ test("deadline is checked again after the final refresh", async () => {
     now: () => clock,
     deadlineAt: 1_010_000,
   });
-  assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "error", reason: "timeout" });
+  assert.equal((await regenerateWorkspaceTitle(options)).reason, "timeout");
   assert.deepEqual(state.writes, []);
+});
+
+
+const SCOPES = ["both", "workspace", "session"];
+
+test("both writes the workspace and the chosen session from one model call", async () => {
+  const state = makeState();
+  let calls = 0;
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    generateConversation: async () => {
+      calls += 1;
+      return { title: "修复登录问题" };
+    },
+  }));
+  assert.equal(calls, 1, "one model call for two targets");
+  assert.deepEqual(result, {
+    status: "done",
+    title: "修复登录问题",
+    workspaceUpdated: true,
+    sessionUpdated: true,
+    agentId: "a1",
+  });
+  assert.deepEqual(state.writes, ["修复登录问题"]);
+  assert.deepEqual(state.sessionWrites, ["修复登录问题"]);
+  assert.equal(state.workspace.title, "修复登录问题");
+  assert.equal(state.agents[0].title, "修复登录问题");
+});
+
+test("workspace-only mode leaves the session title untouched", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, { scope: "workspace" }));
+  assert.equal(result.status, "done");
+  assert.equal(result.workspaceUpdated, true);
+  assert.equal(result.sessionUpdated, false);
+  assert.deepEqual(state.writes, ["修复登录问题"]);
+  assert.deepEqual(state.sessionWrites, []);
+  assert.equal(state.agents[0].title, "Extend workspace usage plugin");
+});
+
+test("session-only mode leaves the workspace title and its state untouched", async () => {
+  const state = makeState();
+  const claims = new Set();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "session",
+    claims,
+  }));
+  assert.equal(result.status, "done");
+  assert.equal(result.workspaceUpdated, false);
+  assert.equal(result.sessionUpdated, true);
+  assert.deepEqual(state.writes, []);
+  assert.deepEqual(state.sessionWrites, ["修复登录问题"]);
+  assert.equal(state.workspace.title, "Extend workspace usage plugin");
+  assert.equal(claims.has("w1"), false, "session-only does not claim or block the workspace");
+});
+
+test("omitting scope keeps the previous workspace-only behaviour", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state));
+  assert.equal(result.status, "done");
+  assert.equal(result.workspaceUpdated, true);
+  assert.equal(result.sessionUpdated, false);
+  assert.deepEqual(state.sessionWrites, []);
+});
+
+test("multiple sessions still require an explicit pick in every scope", async () => {
+  for (const scope of SCOPES) {
+    const state = makeState();
+    state.agents = [makeAgent({ id: "first" }), makeAgent({ id: "second" })];
+    let calls = 0;
+    const options = optionsFor(makePaseo(state), state, {
+      scope,
+      generateConversation: async () => {
+        calls += 1;
+        return { title: "修复登录问题" };
+      },
+    });
+    assert.deepEqual(await regenerateWorkspaceTitle(options), { status: "needs_selection", reason: "choose_session", workspaceUpdated: false, sessionUpdated: false });
+    const chosen = await regenerateWorkspaceTitle({ ...options, agentId: "second" });
+    assert.equal(chosen.status, "done");
+    assert.equal(chosen.agentId, "second");
+    assert.equal(calls, 1);
+    assert.deepEqual(state.writes, scope === "session" ? [] : ["修复登录问题"]);
+    assert.deepEqual(state.sessionWrites, scope === "workspace" ? [] : ["修复登录问题"]);
+    const first = state.agents.find((agent) => agent.id === "first");
+    assert.equal(first.title, "Extend workspace usage plugin", "unselected sessions are never written");
+  }
+});
+
+test("the single session is preselected without touching other sessions", async () => {
+  const state = makeState();
+  state.agents = [makeAgent(), makeAgent({ id: "bg", background: true })];
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, { scope: "session" }));
+  assert.equal(result.agentId, "a1");
+  assert.deepEqual(state.sessionWrites, ["修复登录问题"]);
+  assert.equal(state.agents.find((agent) => agent.id === "bg").title, "Extend workspace usage plugin");
+});
+
+test("a model failure writes neither target", async () => {
+  for (const scope of SCOPES) {
+    const state = makeState();
+    const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+      scope,
+      generateConversation: async () => ({ title: null, errorCode: "invalid_title" }),
+    }));
+    assert.equal(result.status, "error");
+    assert.equal(result.reason, "invalid_title");
+    assert.equal(result.workspaceUpdated, false);
+    assert.equal(result.sessionUpdated, false);
+    assert.deepEqual(state.writes, []);
+    assert.deepEqual(state.sessionWrites, []);
+  }
+});
+
+test("a manual workspace rename during generation protects both targets", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    generateConversation: async () => {
+      state.workspace.title = "手工标题";
+      return { title: "修复登录问题" };
+    },
+  }));
+  assert.deepEqual(result, { status: "skipped", reason: "manual_change", workspaceUpdated: false, sessionUpdated: false, agentId: "a1" });
+  assert.deepEqual(state.writes, []);
+  assert.deepEqual(state.sessionWrites, []);
+  assert.equal(state.workspace.title, "手工标题");
+  assert.equal(state.agents[0].title, "Extend workspace usage plugin");
+});
+
+test("a manual session rename during generation protects both targets", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    generateConversation: async () => {
+      state.agents[0].title = "手工会话标题";
+      return { title: "修复登录问题" };
+    },
+  }));
+  assert.deepEqual(result, { status: "skipped", reason: "session_manual_change", workspaceUpdated: false, sessionUpdated: false, agentId: "a1" });
+  assert.deepEqual(state.writes, []);
+  assert.deepEqual(state.sessionWrites, []);
+  assert.equal(state.agents[0].title, "手工会话标题");
+});
+
+test("a session renamed between the workspace write and the CLI is not overwritten", async () => {
+  // The first setTitle is the moment between the joint precheck and the CLI
+  // re-read; mutating the session there must leave the session untouched.
+  const cases = [
+    { change: { title: "手工会话标题" }, reason: "session_manual_change", expectedTitle: "手工会话标题" },
+    { change: { archivedAt: "2026-11-23T00:00:02.000Z" }, reason: "session_archived", expectedTitle: "Extend workspace usage plugin" },
+    { change: { workspaceId: "w2" }, reason: "session_moved", expectedTitle: "Extend workspace usage plugin" },
+  ];
+  for (const { change, reason, expectedTitle } of cases) {
+    const state = makeState();
+    state.onWorkspaceWrite = () => Object.assign(state.agents[0], change);
+    const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, { scope: "both" }));
+    assert.equal(result.status, "partial", reason);
+    assert.equal(result.reason, reason);
+    assert.equal(result.workspaceUpdated, true);
+    assert.equal(result.sessionUpdated, false);
+    assert.deepEqual(state.writes, ["修复登录问题"]);
+    assert.deepEqual(state.sessionWrites, []);
+    assert.equal(state.workspace.title, "修复登录问题");
+    assert.equal(state.agents[0].title, expectedTitle);
+  }
+});
+
+test("a failed session rename after the workspace write is a retryable partial result", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    renameSession: async () => ({ ok: false, failure: "timeout" }),
+  }));
+  assert.equal(result.status, "partial");
+  assert.equal(result.reason, "session_write_failed");
+  assert.equal(result.workspaceUpdated, true);
+  assert.equal(result.sessionUpdated, false);
+  assert.deepEqual(state.writes, ["修复登录问题"]);
+  assert.equal(state.workspace.title, "修复登录问题");
+  assert.equal(state.agents[0].title, "Extend workspace usage plugin");
+
+  // A retry with a working CLI updates the session; the workspace write is
+  // simply repeated with the same value.
+  const retry = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, { scope: "both" }));
+  assert.equal(retry.status, "done");
+  assert.equal(state.agents[0].title, "修复登录问题");
+});
+
+test("a failed workspace write still renames the chosen session and reports partial", async () => {
+  const state = makeState();
+  const paseo = makePaseo(state);
+  const original = paseo.workspaces.ref;
+  paseo.workspaces.ref = (id) => {
+    const handle = original(id);
+    return { ...handle, setTitle: async () => { throw new Error("synthetic daemon failure"); } };
+  };
+  const result = await regenerateWorkspaceTitle(optionsFor(paseo, state, { scope: "both" }));
+  assert.equal(result.status, "partial");
+  assert.equal(result.reason, "workspace_write_failed");
+  assert.equal(result.workspaceUpdated, false);
+  assert.equal(result.sessionUpdated, true);
+  assert.equal(state.workspace.title, "Extend workspace usage plugin");
+  assert.equal(state.agents[0].title, "修复登录问题");
+});
+
+test("a second click is busy for the same workspace and the same session", async () => {
+  const state = makeState();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const options = optionsFor(makePaseo(state), state, {
+    scope: "both",
+    generateConversation: async () => {
+      await gate;
+      return { title: "修复登录问题" };
+    },
+  });
+  const first = regenerateWorkspaceTitle(options);
+  assert.equal((await regenerateWorkspaceTitle(options)).status, "busy");
+  release();
+  assert.equal((await first).status, "done");
+
+  // A concurrent automatic session naming holds the same agent claim.
+  const agentClaims = new Set(["a1"]);
+  const held = optionsFor(makePaseo(state), state, { scope: "session", agentClaims });
+  assert.equal((await regenerateWorkspaceTitle(held)).status, "busy");
+  assert.deepEqual(state.sessionWrites, ["修复登录问题"]);
+});
+
+test("a timeout before the writes leaves every title untouched", async () => {
+  const state = makeState();
+  let release;
+  const generation = new Promise((resolve) => { release = resolve; });
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    generateConversation: () => generation,
+    deadlineAt: Date.now() + 60,
+    generationTimeoutMs: 20,
+  }));
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "timeout");
+  release({ title: "修复登录问题" });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(state.writes, []);
+  assert.deepEqual(state.sessionWrites, []);
+});
+
+test("both writes the same truncated summary to each target", async () => {
+  const state = makeState();
+  const long = "修复登录问题并补充会话摘要的并发保护逻辑说明";
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "both",
+    settings: settingsSchema.parse({ titleMaxChars: 8 }),
+    generateConversation: async () => ({ title: long }),
+  }));
+  assert.equal(result.status, "done");
+  assert.equal(result.title, state.writes[0]);
+  assert.deepEqual(state.sessionWrites, [state.writes[0]]);
+  assert.ok(Array.from(state.writes[0]).length <= 8);
+  assert.equal(state.workspace.title, state.writes[0]);
+  assert.equal(state.agents[0].title, state.writes[0]);
+});
+
+test("session-only mode on an archived workspace writes nothing", async () => {
+  const state = makeState();
+  state.workspace.archivingAt = "2026-11-23T00:00:02.000Z";
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, { scope: "session" }));
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "not_found");
+  assert.deepEqual(state.sessionWrites, []);
+});
+
+test("the RPC contract accepts old requests without scope and the explicit three scopes", async () => {
+  const { regenerateWorkspaceTitleRpc } = await import("../shared/rpc.ts");
+  assert.deepEqual(regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1" }), { workspaceId: "w1" });
+  for (const scope of ["both", "workspace", "session"]) {
+    assert.equal(regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1", agentId: "a1", scope }).scope, scope);
+  }
+  assert.throws(() => regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1", scope: "all" }));
+  assert.deepEqual(
+    regenerateWorkspaceTitleRpc.output.parse({
+      status: "partial",
+      title: "修复登录问题",
+      reason: "session_write_failed",
+      workspaceUpdated: true,
+      sessionUpdated: false,
+    }),
+    {
+      status: "partial",
+      title: "修复登录问题",
+      reason: "session_write_failed",
+      workspaceUpdated: true,
+      sessionUpdated: false,
+    },
+  );
+  assert.throws(() => regenerateWorkspaceTitleRpc.output.parse({ status: "done", title: "修复登录问题" }));
+});
+
+test("a workspace write failure is not downgraded when the session then changes", async () => {
+  const state = makeState();
+  // The workspace write fails, and the session is renamed by a user right after.
+  state.onWorkspaceWrite = () => undefined;
+  const paseo = makePaseo(state);
+  const original = paseo.workspaces.ref;
+  paseo.workspaces.ref = (id) => {
+    const handle = original(id);
+    return {
+      ...handle,
+      setTitle: async () => {
+        state.agents[0].title = "手工会话标题";
+        throw new Error("synthetic daemon failure");
+      },
+    };
+  };
+  const result = await regenerateWorkspaceTitle(optionsFor(paseo, state, { scope: "both" }));
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "workspace_write_failed");
+  assert.equal(result.workspaceUpdated, false);
+  assert.equal(result.sessionUpdated, false);
+  assert.deepEqual(state.sessionWrites, []);
+  assert.equal(state.agents[0].title, "手工会话标题");
 });

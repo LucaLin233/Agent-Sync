@@ -19,7 +19,12 @@ import { readSessionConversation } from "./conversation";
 import { generateConversationTitle, generateTitle, HELPER_WORKSPACE_TITLE, isHelperAgent, type GenerationResult } from "./helper";
 import { planTitleGeneration } from "../shared/generation-plan";
 import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed";
-import { regenerateWorkspaceTitle as runWorkspaceRegeneration, RPC_DEADLINE_MS, type RegenerateResult } from "./regenerate";
+import {
+  regenerateWorkspaceTitle as runWorkspaceRegeneration,
+  RPC_DEADLINE_MS,
+  type RegenerateResult,
+  type RegenerateScope,
+} from "./regenerate";
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
@@ -160,33 +165,56 @@ export class ChineseTitlesEngine {
   }
 
   /**
-   * Manual per-workspace regeneration. It ignores automatic baseline states
-   * and autoNameWorkspaces, and shares the automatic claim set so the two paths
-   * cannot write the same workspace at once.
+   * Manual per-workspace and/or per-session regeneration. It ignores automatic
+   * baseline states and the auto-name switches, and shares the automatic claim
+   * sets so the two paths cannot write the same workspace or session at once.
    */
-  async regenerateWorkspaceTitle(workspaceId: string, paseo: PaseoApi, agentId?: string): Promise<RegenerateResult> {
+  async regenerateWorkspaceTitle(
+    workspaceId: string,
+    paseo: PaseoApi,
+    agentId?: string,
+    scope?: RegenerateScope,
+  ): Promise<RegenerateResult> {
     // Start the budget before any await: a slow state/settings read must not
     // let the RPC write after the daemon's transport timeout.
     const deadlineAt = Date.now() + RPC_DEADLINE_MS;
     await this.ready;
     const settings = await this.currentSettings();
-    if (!settings) return { status: "error", reason: "settings_unavailable" };
+    if (!settings) {
+      return { status: "error", reason: "settings_unavailable", workspaceUpdated: false, sessionUpdated: false };
+    }
     this.attach(paseo);
     const result = await runWorkspaceRegeneration({
       paseo,
       settings,
       workspaceId,
       ...(agentId ? { agentId } : {}),
+      ...(scope ? { scope } : {}),
       claims: this.processingWorkspaces,
+      agentClaims: this.processingAgents,
       deadlineAt,
       generateConversation: (request, timeoutMs, generateDeadlineAt) =>
         generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
       listAgents: () => this.listAgents(paseo),
       readConversation: (sessionId) => readSessionConversation(paseo, sessionId),
+      renameSession: async (sessionId, title, timeoutMs) => {
+        const renamed = await renameAgentViaCli(settings, sessionId, title, timeoutMs);
+        return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };
+      },
     });
-    if (this.state && result.status === "done" && result.title) {
-      this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
-      await saveState(this.state);
+    if (this.state) {
+      let changed = false;
+      if (result.status === "done" || result.status === "partial") {
+        if (result.workspaceUpdated && result.title) {
+          this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
+          changed = true;
+        }
+        if (result.sessionUpdated && result.agentId && result.title) {
+          this.state.agents[result.agentId] = { status: "done", at: now(), title: result.title };
+          changed = true;
+        }
+      }
+      if (changed) await saveState(this.state);
     }
     return result;
   }

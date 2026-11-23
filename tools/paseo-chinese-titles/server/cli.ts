@@ -98,8 +98,9 @@ export function renameAgentViaCli(
   settings: ChineseTitlesSettings,
   agentId: string,
   title: string,
+  timeoutMs = 20_000,
 ): Promise<CliResult> {
-  return runPaseo(["agent", "update", agentId, "--name", title, "--json"], settings);
+  return runPaseo(["agent", "update", agentId, "--name", title, "--json"], settings, timeoutMs);
 }
 
 function idsFrom(value: unknown, key: "projectId" | "id"): string[] | null {
