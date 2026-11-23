@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 export type TitleStatus = "legacy" | "pending" | "generating" | "done" | "skipped" | "error";
 
@@ -31,8 +31,7 @@ function pluginRoot(): string {
 export function assertPluginPath(candidate: string): string {
   const root = pluginRoot();
   const resolved = resolve(candidate);
-  const rel = relative(root, resolved);
-  if (rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) return resolved;
+  if (resolved === root || resolved.startsWith(`${root}${sep}`)) return resolved;
   throw new Error("Plugin path escapes its data directory");
 }
 
@@ -75,6 +74,8 @@ export function newState(): ChineseTitlesState {
 export async function loadState(): Promise<ChineseTitlesState> {
   const file = safePluginPath("state.json");
   try {
+    const root = pluginDataDir();
+    if (file !== root && !file.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin state path");
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<ChineseTitlesState>;
     if (parsed?.version !== 1) return newState();
@@ -97,9 +98,14 @@ export function saveState(state: ChineseTitlesState): Promise<void> {
   const snapshot = JSON.stringify(state, null, 2);
   writeChain = writeChain.then(async () => {
     const dir = pluginDataDir();
+    const root = pluginDataDir();
+    if (dir !== root && !dir.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin data directory");
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const file = safePluginPath("state.json");
     const temp = safePluginPath(`.state-${process.pid}-${Date.now()}.tmp`);
+    if ((file !== dir && !file.startsWith(`${dir}${sep}`)) || (temp !== dir && !temp.startsWith(`${dir}${sep}`))) {
+      throw new Error("Invalid plugin state path");
+    }
     await fs.writeFile(temp, snapshot, { encoding: "utf8", mode: 0o600 });
     await fs.rename(temp, file);
   });
