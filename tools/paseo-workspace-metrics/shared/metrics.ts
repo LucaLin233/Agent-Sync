@@ -152,26 +152,58 @@ export function tokensPerSecond(
 
 const speedFormat = new Intl.NumberFormat("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-/** One decimal, shared by the panel and the composer pill. */
+/** The exact one-decimal number used by panel headlines and tooltips. */
+export function formatTokenSpeedNumber(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value) ? "—" : speedFormat.format(value);
+}
+
+/**
+ * Compact number for the composer pill only: its single line is capped at
+ * 160 px, so four-digit values get a `k` suffix. Panel text never uses this.
+ */
+export function formatTokenSpeedValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return speedFormat.format(value / 1_000_000) + "M";
+  if (value >= 1_000) return speedFormat.format(value / 1_000) + "k";
+  return speedFormat.format(value);
+}
+
+/** One decimal, shared by the panel details, tooltip and composer pill. */
 export function formatTokenSpeed(value: number | null | undefined, unit: "short" | "full" = "short"): string {
-  return value === null || value === undefined || !Number.isFinite(value)
-    ? "—"
-    : speedFormat.format(value) + (unit === "full" ? " token/s" : " t/s");
+  const formatted = formatTokenSpeedNumber(value);
+  return formatted === "—" ? formatted : formatted + (unit === "full" ? " token/s" : " t/s");
 }
 
 export function formatTurnPillLabel(value: number | null | undefined): string {
   return "近轮 " + formatTokenSpeed(value);
 }
 
-/** Pill title: keeps the open action, cache rate and near-turn basis. */
-export function formatPillTitle(rate: number | null | undefined, speed: number | null | undefined): string {
-  if (speed === null || speed === undefined || !Number.isFinite(speed)) return "打开工作区用量";
-  return "打开工作区用量 · " + formatCachePillLabel(rate) + " · " + formatTurnPillLabel(speed);
+/**
+ * Visible composer-pill label. When both readings exist, the cache percentage
+ * comes first and the words "缓存"/"最近" and "近轮" are omitted to fit the
+ * protocol's single line. A missing speed keeps the existing labelled cache
+ * text. A missing cache keeps the speed alone; the tooltip still marks the
+ * cache as missing. Zero is a real value in either position.
+ */
+export function formatPillLabel(
+  rate: number | null | undefined,
+  speed: number | null | undefined,
+): string {
+  if (speed === null || speed === undefined || !Number.isFinite(speed)) return formatCachePillLabel(rate);
+  const formatted = formatTokenSpeedValue(speed);
+  if (formatted === "—") return formatCachePillLabel(rate);
+  if (rate === null || rate === undefined || !Number.isFinite(rate)) return formatted + " t/s";
+  return formatCacheRate(rate) + " · " + formatted + " t/s";
 }
 
-/** Appends the suffix only when a reliable same-turn speed exists. */
-export function appendTurnSpeed(label: string, speed: number | null | undefined): string {
-  return speed === null || speed === undefined || !Number.isFinite(speed) ? label : label + " · " + formatTurnPillLabel(speed);
+/** Full tooltip: open action, the displayed cache basis, and the near-turn basis. */
+export function formatPillTitle(
+  rate: number | null | undefined,
+  speed: number | null | undefined,
+  basis: "cache" | "recent" = "cache",
+): string {
+  const cache = basis === "recent" ? formatRecentPillLabel(rate) : formatCachePillLabel(rate);
+  return "打开工作区用量 · " + cache + " · " + formatTurnPillLabel(speed);
 }
 
 const countFormat = new Intl.NumberFormat("zh-CN");

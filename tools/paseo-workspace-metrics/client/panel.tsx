@@ -35,36 +35,136 @@ const outcomes = { completed: "完成", failed: "失败", canceled: "取消" };
 const count = formatTokenCount;
 const duration = formatDurationMs;
 
-function Metric({ label, value, colors }: { label: string; value: string; colors: Colors }) {
+/**
+ * Two accent hues borrowed from the Agent Observatory palette: teal for the
+ * cumulative cache reading, indigo for the latest sample. Light themes use
+ * the darker text shade so both stay readable on surface1.
+ */
+const accents = {
+  teal: { light: "#0D9488", lightText: "#0F766E", dark: "#2DD4BF" },
+  indigo: { light: "#6366F1", lightText: "#4F46E5", dark: "#818CF8" },
+} as const;
+type Accent = keyof typeof accents;
+
+/** Both cache headlines reserve the same block so their secondary metrics align. */
+const CACHE_HEADLINE_MIN_HEIGHT = 66;
+
+function darkTheme(colors: Colors): boolean {
+  const hex = colors.surface0.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return true;
+  const linear = (offset: number) => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  // Same rule as the Observatory palette: compare against white and black.
+  const luminance = 0.2126 * linear(0) + 0.7152 * linear(2) + 0.0722 * linear(4);
+  return (luminance + 0.05) / 0.05 < 1.05 / (luminance + 0.05);
+}
+
+function withAlpha(color: string, alpha: number): string {
+  return /^#[0-9a-f]{6}$/i.test(color)
+    ? color + Math.round(alpha * 255).toString(16).padStart(2, "0")
+    : color;
+}
+
+/** The percentage sign is its own type layer in the two cache headlines. */
+function cacheRateParts(rate: number | null | undefined): { value: string; unit: string } {
+  const text = formatCacheRate(rate);
+  return text.endsWith("%") ? { value: text.slice(0, -1), unit: "%" } : { value: text, unit: "" };
+}
+
+/** `text` for the headline, `mark` for chips, `line`/`soft` for the card edges. */
+function accent(colors: Colors, name: Accent, use: "mark" | "text" | "soft" | "line"): string {
+  const dark = darkTheme(colors);
+  const mark = dark ? accents[name].dark : accents[name].light;
+  if (use === "mark") return mark;
+  if (use === "text") return dark ? accents[name].dark : accents[name].lightText;
+  if (use === "line") return withAlpha(mark, dark ? 0.55 : 0.4);
+  return withAlpha(mark, dark ? 0.18 : 0.09);
+}
+
+/**
+ * Three compact indicators share one row down to a phone-width card. The
+ * basis is small enough for 3-up and still wraps instead of clipping.
+ */
+function Metric({ label, value, unit, colors, basis = 68, valueSize = 15 }: {
+  label: string;
+  value: string;
+  unit?: string;
+  colors: Colors;
+  basis?: number;
+  valueSize?: number;
+}) {
   return (
-    <View style={{ flexGrow: 1, flexBasis: 120, gap: 2 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{label}</Text>
-      <Text style={{ color: colors.foreground, fontSize: 17, fontWeight: "600", fontVariant: ["tabular-nums"] }}>{value}</Text>
+    <View style={{ flexGrow: 1, flexShrink: 1, flexBasis: basis, minWidth: 0, gap: 3 }}>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 14 }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: 3 }}>
+        <Text
+          numberOfLines={2}
+          style={{ color: colors.foreground, fontSize: valueSize, lineHeight: valueSize + 5, fontWeight: "600", fontVariant: ["tabular-nums"] }}
+        >
+          {value}
+        </Text>
+        {unit ? <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "500" }}>{unit}</Text> : null}
+      </View>
     </View>
   );
 }
 
-/** The number is the subject: one headline value, then a quiet supporting row. */
-function Headline({ label, value, note, colors }: {
+/** A headline value and its unit on separate type layers, never one long string. */
+function Headline({ label, value, unit, tone, emphasis = "primary", colors }: {
   label: string;
   value: string;
-  note?: string;
+  unit: string;
+  tone: string;
+  emphasis?: "primary" | "secondary";
+  colors: Colors;
+}) {
+  const hasValue = value !== "—";
+  const fontSize = emphasis === "primary" ? 44 : 34;
+  const lineHeight = emphasis === "primary" ? 48 : 39;
+  const unitSize = emphasis === "primary" ? 20 : 16;
+  return (
+    <View style={{ gap: 3 }}>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 11, letterSpacing: 0.3 }}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: 6 }}>
+        <Text style={{ color: hasValue ? tone : colors.foregroundMuted, fontSize, fontWeight: "700", lineHeight, fontVariant: ["tabular-nums"] }}>
+          {value}
+        </Text>
+        {hasValue ? <Text style={{ color: colors.foregroundMuted, fontSize: unitSize, fontWeight: "600" }}>{unit}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+/** One card component for both rows: an accent edge names the metric, the body keeps the theme surface. */
+function Card({ title, tone, children, colors }: {
+  title: string;
+  tone: Accent;
+  children: ReactNode;
   colors: Colors;
 }) {
   return (
-    <View style={{ gap: 2 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12, letterSpacing: 0.4 }}>{label}</Text>
-      <Text style={{ color: colors.foreground, fontSize: 30, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{value}</Text>
-      {note ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{note}</Text> : null}
-    </View>
-  );
-}
-
-function Card({ title, children, colors }: { title: string; children: ReactNode; colors: Colors }) {
-  return (
-    <View style={{ gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface1 }}>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12, fontWeight: "600", letterSpacing: 0.6 }}>{title}</Text>
-      {children}
+    <View
+      style={{
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: 260,
+        minWidth: 220,
+        alignSelf: "stretch",
+        gap: 12,
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: accent(colors, tone, "line"),
+        backgroundColor: colors.surface1,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: accent(colors, tone, "mark") }} />
+        <Text style={{ flexShrink: 1, color: accent(colors, tone, "text"), fontSize: 12, fontWeight: "700", letterSpacing: 0.4 }}>{title}</Text>
+      </View>
+      <View style={{ flexGrow: 1, gap: 12 }}>{children}</View>
     </View>
   );
 }
@@ -188,15 +288,21 @@ function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRev
         onPress={toggle}
         style={{ padding: 12, gap: 5 }}
       >
-        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
-          <Text style={{ flex: 1, color: colors.foreground, fontWeight: "600" }}>{agent.title || "会话 " + id.slice(0, 8)}</Text>
-          <Text style={{ color: colors.foregroundMuted }}>{open ? "收起" : "详情"}</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontWeight: "600" }}>
+            {agent.title || "会话 " + id.slice(0, 8)}
+          </Text>
+          {sample ? (
+            <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, backgroundColor: accent(colors, "teal", "soft") }}>
+              <Text style={{ color: accent(colors, "teal", "text"), fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+                缓存 {formatCacheRate(sample.cached / sample.input)}
+              </Text>
+            </View>
+          ) : null}
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{open ? "收起" : "详情"}</Text>
         </View>
-        <Text style={{ color: colors.foregroundMuted }}>
+        <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
           {[agent.provider, agent.model, statuses[agent.status]].filter(Boolean).join(" · ")}
-        </Text>
-        <Text style={{ color: colors.foreground }}>
-          {sample ? "最近缓存命中 " + formatCacheRate(sample.cached / sample.input) : "最近缓存命中 —"}
         </Text>
       </Pressable>
       {open && (
@@ -292,18 +398,67 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
       : cumulativeError
         ? "读取失败：" + cumulativeError + "，未按 0 计入"
         : null;
-  const recentValue = hasCumulative && recentTurn && !cumulativePending ? formatTokenSpeed(recentSpeed, "full") : "—";
-  const cumulativeValue = hasCumulative && turns && !cumulativePending ? formatTokenSpeed(cumulativeSpeed, "full") : "—";
-  // The scope or read state is stated once, under both cards.
-  const recentNote = blockedNote || cumulativePending ? undefined
-    : recentTurn
-      ? "完成于 " + (Number.isFinite(recentTurn.completedAt) ? dates.format(recentTurn.completedAt) : "—")
-      : "尚无可信完成轮";
-  const cumulativeNote = blockedNote || cumulativePending ? undefined
-    : !turns || turns.completed === 0
-      ? "尚无有效完成轮"
-      : "按整轮耗时加权 · 速率样本 " + turns.speedSamples + " 轮";
   const detail = (text: string) => hasCumulative && !cumulativePending ? text : "—";
+  // Cache is the headline. The cumulative reading only leads when it has a real
+  // rate; otherwise the recent sample becomes the first and largest card.
+  const cumulativeRate = hasCumulative && !cumulativePending ? cumulative.data?.rate ?? null : null;
+  const cumulativeReady = cumulativeRate !== null;
+  const recentRate = recentPending ? null : totals.rate;
+  const cumulativeParts = cacheRateParts(cumulativeRate);
+  const recentParts = cacheRateParts(recentRate);
+  const cumulativeStatusNote = cumulativePending
+    ? "正在读取累计缓存率…"
+    : blockedNote
+      ?? (refs.length === 0
+        ? "当前工作区暂无可见会话"
+        : hasCumulative
+          ? "尚无有效累计缓存快照，未按 0 计入"
+          : "累计数据尚未返回");
+  const recentStatusNote = recentPending
+    ? "正在读取最近缓存样本…"
+    : refs.length === 0
+      ? "当前工作区暂无可见会话"
+      : totals.covered === 0
+        ? "尚无有效最近缓存样本"
+        : "取各会话最近一次用量";
+  const recentCount = (value: number) =>
+    !recentPending && totals.covered > 0 ? formatTokenCount(value) : "—";
+  // Secondary speed figures drop the unit entirely when there is no reading.
+  const speedText = (value: number | null) => value === null ? "—" : formatTokenSpeed(value);
+  const splitSpeed = (value: number | null) => {
+    const [number, ...unit] = detail(speedText(value)).split(" ");
+    return { value: number, unit: unit.join(" ") };
+  };
+  const recentSpeedParts = splitSpeed(recentSpeed);
+  const cumulativeSpeedParts = splitSpeed(cumulativeSpeed);
+  // The cache cards already state the full reason; keep these footers short.
+  const outputBlockedNote = scopePending
+    ? "正在读取累计范围…"
+    : !cumulativeEnabled
+      ? scopeRequestFailed
+        ? "累计范围读取失败"
+        : scope?.error
+          ? "累计设置错误"
+          : scope && !scope.enabled
+            ? "累计已关闭"
+            : "不在累计范围"
+      : cumulativeError
+        ? "累计读取失败"
+        : null;
+  const recentCompletedNote = hasCumulative && !cumulativePending && recentTurn
+    ? "完成于 " + (Number.isFinite(recentTurn.completedAt) ? dates.format(recentTurn.completedAt) : "—")
+    : outputBlockedNote
+      ?? (refs.length === 0
+        ? "当前工作区暂无可见会话"
+        : cumulativePending
+          ? "正在读取完成轮…"
+          : "尚无可信完成轮");
+  const cumulativeOutputNote = outputBlockedNote
+    ?? (refs.length === 0
+      ? "当前工作区暂无可见会话"
+      : cumulativePending
+        ? "正在读取 Codex 累计用量…"
+        : "按整轮耗时加权，包含工具与等待。");
 
   const refresh = () => {
     setRefreshRevision((revision) => revision + 1);
@@ -311,112 +466,186 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     if (cumulativeEnabled) void cumulative.refetch();
   };
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.surface0 }}
-      contentContainerStyle={{ padding: layout.compact ? 12 : 20, gap: 12 }}
-    >
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-        <View style={{ flexGrow: 1, flexBasis: 260, minWidth: 240 }}>
-          <Card title="最近完成" colors={colors}>
-            <Headline
-              label="整轮输出速率"
-              value={recentValue}
-              note={recentNote}
-              colors={colors}
-            />
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-              <Metric label="首 Token" value={detail(formatDurationMs(recentTurn?.firstTokenMs ?? null))} colors={colors} />
-              <Metric label="整轮耗时" value={detail(formatDurationMs(recentTurn?.elapsedMs ?? null))} colors={colors} />
-              <Metric label="输出" value={detail(formatTokenCount(recentTurn?.outputTokens ?? null))} colors={colors} />
-            </View>
-            {cumulativeEnabled && hasCumulative && recentTurn && recentSpeed === null && (
-              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-                该轮缺少有效输出计数或正向耗时，速率留空。
-              </Text>
-            )}
-          </Card>
-        </View>
-        <View style={{ flexGrow: 1, flexBasis: 260, minWidth: 240 }}>
-          <Card title="累计统计" colors={colors}>
-            <Headline label="累计整轮输出速率" value={cumulativeValue} note={cumulativeNote} colors={colors} />
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-              <Metric label="平均首 Token" value={detail(formatDurationMs(cumulativeFirstToken))} colors={colors} />
-              <Metric label="缓存率" value={formatCacheRate(hasCumulative ? cumulative.data?.rate ?? null : null)} colors={colors} />
-              <Metric
-                label="会话覆盖"
-                value={hasCumulative ? cumulative.data?.covered + " / " + cumulative.data?.eligible : "—"}
-                colors={colors}
-              />
-            </View>
-            {hasCumulative && turns && turns.completed > 0 && (
-              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-                {turns.sessions} 个会话 · {turns.completed} 个完成轮 · 首 Token 样本 {turns.firstTokenSamples}
-              </Text>
-            )}
-          </Card>
-        </View>
+  const cumulativeCard = (
+    <Card title="累计缓存" tone="teal" colors={colors}>
+      <View style={{ minHeight: CACHE_HEADLINE_MIN_HEIGHT }}>
+        {cumulativeReady ? (
+          <Headline
+            label="累计缓存率"
+            value={cumulativeParts.value}
+            unit={cumulativeParts.unit}
+            tone={accent(colors, "teal", "text")}
+            emphasis="primary"
+            colors={colors}
+          />
+        ) : (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 13, lineHeight: 19 }}>
+            {cumulativeStatusNote}
+          </Text>
+        )}
       </View>
-      {(blockedNote || cumulativePending) && (
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          {blockedNote ?? "正在读取 Codex 累计用量…"}
-        </Text>
-      )}
-      <View style={{ gap: 8, padding: 12, borderRadius: 10, backgroundColor: colors.surface1 }}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
-          <Metric label="最近样本缓存率" value={formatCacheRate(totals.rate)} colors={colors} />
+      {hasCumulative && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+          <Metric label="缓存读取" value={detail(formatTokenCount(cumulative.data?.cachedInputTokens ?? null))} colors={colors} basis={90} />
+          <Metric label="总输入" value={detail(formatTokenCount(cumulative.data?.inputTokens ?? null))} colors={colors} basis={90} />
           <Metric
-            label="最近覆盖"
-            value={recentPending ? "读取中…" : totals.covered + " / " + refs.length}
+            label="会话覆盖"
+            value={hasCumulative ? cumulative.data?.covered + " / " + cumulative.data?.eligible : "—"}
             colors={colors}
-          />
-          <Metric
-            label="累计缓存读取"
-            value={hasCumulative ? formatTokenCount(cumulative.data?.cachedInputTokens ?? null) : "—"}
-            colors={colors}
-          />
-          <Metric
-            label="累计总输入"
-            value={hasCumulative ? formatTokenCount(cumulative.data?.inputTokens ?? null) : "—"}
-            colors={colors}
+            basis={90}
           />
         </View>
-        {hasCumulative && (cumulative.data?.missing ?? 0) > 0 && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            {cumulative.data?.missing} 个 Codex 会话缺少累计快照，未按 0 计入。
+      )}
+      {hasCumulative && ((cumulative.data?.missing ?? 0) > 0 || (cumulative.data?.unavailable ?? 0) > 0) && (
+        <View style={{ marginTop: "auto", gap: 4 }}>
+          {(cumulative.data?.missing ?? 0) > 0 && (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+              {cumulative.data?.missing} 个 Codex 会话缺少累计快照，未按 0 计入。
+            </Text>
+          )}
+          {(cumulative.data?.unavailable ?? 0) > 0 && (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+              {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
+            </Text>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+
+  const recentCard = (
+    <Card title="最近样本缓存" tone="indigo" colors={colors}>
+      <View style={{ minHeight: CACHE_HEADLINE_MIN_HEIGHT }}>
+        {recentRate !== null ? (
+          <Headline
+            label="最近样本缓存率"
+            value={recentParts.value}
+            unit={recentParts.unit}
+            tone={accent(colors, "indigo", "text")}
+            emphasis={cumulativeReady ? "secondary" : "primary"}
+            colors={colors}
+          />
+        ) : (
+          <Text style={{ color: colors.foreground, fontSize: 15, lineHeight: 21, fontWeight: "600" }}>
+            {recentParts.value}
           </Text>
         )}
-        {hasCumulative && (cumulative.data?.unavailable ?? 0) > 0 && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
-          </Text>
-        )}
-        {totals.rate !== null && (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            最近缓存读取 {formatTokenCount(totals.cached)} / 总输入 {formatTokenCount(totals.input)} token
-          </Text>
-        )}
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        <Metric label="缓存读取" value={recentCount(totals.cached)} colors={colors} basis={90} />
+        <Metric label="总输入" value={recentCount(totals.input)} colors={colors} basis={90} />
+        <Metric
+          label="会话覆盖"
+          value={refs.length === 0 ? "—" : recentPending ? "读取中…" : totals.covered + " / " + refs.length}
+          colors={colors}
+          basis={90}
+        />
+      </View>
+      <View style={{ marginTop: "auto", gap: 4 }}>
         {!recentPending && recentUnavailable > 0 && (
           <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
             {recentUnavailable} 个会话当前无法读取最近用量快照。
           </Text>
         )}
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          累计取每个唯一 native Codex 会话已观测到的成功完成轮，整轮耗时含工具与等待；最近样本缓存率另取各会话当前 lastUsage。
-        </Text>
-        {refs.length > 0 && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: refreshing }}
-            disabled={refreshing}
-            onPress={refresh}
-            style={{ alignSelf: "flex-start", paddingVertical: 8 }}
-          >
-            <Text style={{ color: refreshing ? colors.foregroundMuted : colors.accent, fontWeight: "600" }}>
-              {refreshing ? "正在读取…" : "刷新用量"}
-            </Text>
-          </Pressable>
+        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{recentStatusNote}</Text>
+      </View>
+    </Card>
+  );
+
+  const recentOutputCard = (
+    <Card title="最近完成轮" tone="indigo" colors={colors}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 6 }}>
+        <Metric
+          label="整轮输出速率"
+          value={recentSpeedParts.value}
+          unit={recentSpeedParts.unit}
+          valueSize={21}
+          colors={colors}
+          basis={92}
+        />
+        <Metric
+          label="首 Token"
+          value={detail(formatDurationMs(recentTurn?.firstTokenMs ?? null))}
+          colors={colors}
+          basis={82}
+        />
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 6 }}>
+        <Metric label="整轮耗时" value={detail(formatDurationMs(recentTurn?.elapsedMs ?? null))} colors={colors} basis={82} />
+        <Metric label="输出" value={detail(formatTokenCount(recentTurn?.outputTokens ?? null))} colors={colors} basis={82} />
+      </View>
+      <View style={{ marginTop: "auto", gap: 4 }}>
+        {cumulativeEnabled && hasCumulative && recentTurn && recentSpeed === null && (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 15 }}>
+            该轮缺少有效输出计数或正向耗时，速率留空。
+          </Text>
         )}
+        <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{recentCompletedNote}</Text>
+      </View>
+    </Card>
+  );
+
+  const cumulativeOutputCard = (
+    <Card title="累计整轮" tone="teal" colors={colors}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 6 }}>
+        <Metric
+          label="累计整轮速率"
+          value={cumulativeSpeedParts.value}
+          unit={cumulativeSpeedParts.unit}
+          valueSize={21}
+          colors={colors}
+          basis={92}
+        />
+        <Metric
+          label="平均首 Token"
+          value={detail(formatDurationMs(cumulativeFirstToken))}
+          colors={colors}
+          basis={82}
+        />
+      </View>
+      <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 15, fontVariant: ["tabular-nums"] }}>
+        {"完成轮 " + detail(formatTokenCount(turns?.completed ?? null))
+          + " · 速率样本 " + detail(formatTokenCount(turns?.speedSamples ?? null))
+          + " · 首 Token 样本 " + detail(formatTokenCount(turns?.firstTokenSamples ?? null))
+          + " · 会话 " + detail(formatTokenCount(turns?.sessions ?? null))}
+      </Text>
+      <Text style={{ marginTop: "auto", color: colors.foregroundMuted, fontSize: 11, lineHeight: 15 }}>{cumulativeOutputNote}</Text>
+    </Card>
+  );
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.surface0 }}
+      contentContainerStyle={{ padding: layout.compact ? 12 : 20, gap: 12 }}
+    >
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: 12 }}>
+        {cumulativeReady ? cumulativeCard : recentCard}
+        {cumulativeReady ? recentCard : cumulativeCard}
+      </View>
+      <View style={{ gap: 10 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border }} />
+            <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "700", letterSpacing: 0.4 }}>输出表现</Text>
+          </View>
+          {refs.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: refreshing }}
+              disabled={refreshing}
+              onPress={refresh}
+              style={{ paddingVertical: 4 }}
+            >
+              <Text style={{ color: refreshing ? colors.foregroundMuted : colors.accent, fontSize: 12, fontWeight: "600" }}>
+                {refreshing ? "正在读取…" : "刷新用量"}
+              </Text>
+            </Pressable>
+          )}
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "stretch", gap: 12 }}>
+          {cumulativeReady ? cumulativeOutputCard : recentOutputCard}
+          {cumulativeReady ? recentOutputCard : cumulativeOutputCard}
+        </View>
       </View>
       {refs.length === 0 && <Text style={{ color: colors.foregroundMuted }}>当前工作区暂无可见会话。</Text>}
       {refs.map((agentRef) => (

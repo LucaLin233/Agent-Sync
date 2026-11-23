@@ -1,8 +1,7 @@
 import type { CumulativeUsage } from "../shared/cumulative.ts";
 import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries, type DirectoryAgent, type DirectoryAgentSource } from "../shared/agents.ts";
 import {
-  appendTurnSpeed,
-  formatCachePillLabel,
+  formatPillLabel,
   formatPillTitle,
   formatRecentPillLabel,
   tokensPerSecond,
@@ -46,6 +45,7 @@ interface PillState {
   handle: PillHandle;
   workspaceId: string;
   label: string;
+  title: string;
 }
 
 interface CumulativeState {
@@ -115,14 +115,20 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     const state = cumulative.get(workspaceId);
     if (!state) return "缓存 …";
     if (state.error) return recentLabel();
-    return appendTurnSpeed(formatCachePillLabel(state.rate), state.turnSpeed);
+    // Both values share the one visible line; the full tooltip keeps the
+    // labelled cache basis and one-decimal speed.
+    return formatPillLabel(state.rate, state.turnSpeed);
   };
 
-  const titleFor = (workspaceId: string) => {
+  const titleFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) => {
+    const recentRate = recent.get(workspaceId)?.rate;
+    if (!scope) return "打开工作区用量";
+    if (!inScope(workspaceId)) return formatPillTitle(recentRate, null, "recent");
     const state = cumulative.get(workspaceId);
-    return state && !state.error
-      ? formatPillTitle(state.rate, state.turnSpeed)
-      : "打开工作区用量";
+    if (!state) return "打开工作区用量 · 缓存 … · 近轮 —";
+    return state.error
+      ? formatPillTitle(recentRate, null, "recent")
+      : formatPillTitle(state.rate, state.turnSpeed);
   };
 
   // Reuses live registrations; only a changed workspace, label, or title causes a write.
@@ -138,7 +144,7 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       const target = pillTargetFor(agent);
       if (!target) continue;
       const label = labelFor(target.workspaceId, recent);
-      const title = titleFor(target.workspaceId);
+      const title = titleFor(target.workspaceId, recent);
       const existing = pills.get(agent.id);
       if (!existing) {
         const handle = deps.addPill({
@@ -148,10 +154,11 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
           label,
           onPress: () => deps.openPanel(target.workspaceId, agent.id),
         });
-        pills.set(agent.id, { handle, workspaceId: target.workspaceId, label });
-      } else if (existing.label !== label) {
+        pills.set(agent.id, { handle, workspaceId: target.workspaceId, label, title });
+      } else if (existing.label !== label || existing.title !== title) {
         existing.handle.update({ label, title });
         existing.label = label;
+        existing.title = title;
       }
     }
   };
