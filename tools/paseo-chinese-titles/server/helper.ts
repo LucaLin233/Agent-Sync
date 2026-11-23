@@ -86,6 +86,7 @@ export async function generateTitle(
     const directory = assertPluginPath(helperDirectory());
     const root = pluginDataDir();
     if (directory !== root && !directory.startsWith(`${root}${sep}`)) throw new Error("Invalid helper directory");
+    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const source = { kind: "directory" as const, path: directory, ...(request.projectId ? { projectId: request.projectId } : {}) };
     try {

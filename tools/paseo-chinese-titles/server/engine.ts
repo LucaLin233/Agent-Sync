@@ -248,6 +248,7 @@ export class ChineseTitlesEngine {
     const directory = safePluginPath("helper", "bootstrap");
     const root = pluginDataDir();
     if (directory !== root && !directory.startsWith(`${root}${sep}`)) throw new Error("Invalid bootstrap directory");
+    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     this.bootstrapProjectId = target.projectId;
     const created = await createBootstrapWorkspaceViaCli(settings, target.projectId, directory, BOOTSTRAP_TITLE);
