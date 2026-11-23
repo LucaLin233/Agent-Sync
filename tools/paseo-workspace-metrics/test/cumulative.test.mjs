@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
+import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, projectEventLine, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -883,4 +883,117 @@ test("settings changing during agent.refresh discards the old request", async (t
     { settings },
   );
   assert.equal(next.error, "累计统计未启用");
+});
+
+test("disabled or out-of-scope requests never probe the configured root", async (t) => {
+  clearCumulativeCaches();
+  const missing = join(tmpdir(), `workspace-metrics-absent-${Date.now()}`);
+  const disabled = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { settings: settingsFor({ cumulativeEnabled: false, workspaceIds: [WS], codexHome: missing }) },
+  );
+  assert.equal(disabled.error, "累计统计未启用");
+  const outside = await collectCumulativeUsage(
+    { workspaceId: "wks_other", agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { settings: settingsFor({ cumulativeEnabled: true, workspaceIds: [WS], codexHome: missing }) },
+  );
+  assert.equal(outside.error, "当前 workspace 不在本机累计用量允许范围");
+});
+
+test("the aggregation cache is keyed by the usable root", async (t) => {
+  clearCumulativeCaches();
+  const rootA = await makeRoot(t);
+  const rootB = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(rootA, a, [token(100, 50)]);
+  await writeSession(rootB, a, [token(400, 200)]);
+  const paseo = paseoFor([snapshot("agent-a", a)]);
+  const first = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: rootA, workspaceIds: [WS] },
+  );
+  assert.equal(first.inputTokens, 100);
+  const second = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: rootB, workspaceIds: [WS] },
+  );
+  assert.equal(second.inputTokens, 400);
+});
+
+test("an invalid cache snapshot keeps the last valid sample", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    token(100, 50),
+    JSON.stringify({
+      timestamp: "2026-11-22T00:00:02Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: { input_tokens: 50, cached_input_tokens: 90, output_tokens: 10 } } },
+    }),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.inputTokens, 100);
+  assert.equal(result.cachedInputTokens, 50);
+});
+
+test("first-token timing survives a zero elapsed duration", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 2),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 2, { time_to_first_token_ms: 850 }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: 0, firstTokenMs: 850, reason: "missing-samples" });
+});
+
+test("structural projection ignores content and nested fields while keeping the envelope type", () => {
+  const line = JSON.stringify({
+    timestamp: "2026-11-22T00:00:03Z",
+    type: "event_msg",
+    payload: {
+      type: "task_complete",
+      turn_id: "turn-real",
+      last_agent_message: "text with \"turn_id\":\"fake\" and \"error\":{\"x\":1} and \"}\"",
+      error: { detail: "nested \"time_to_first_token_ms\": 1" },
+      extra: { deep: [1, { content: "\"turn_id\":\"fake2\"" }] },
+      time_to_first_token_ms: 850,
+    },
+  });
+  assert.deepEqual(projectEventLine(line), {
+    eventType: "event_msg",
+    payloadType: "task_complete",
+    timestamp: "2026-11-22T00:00:03Z",
+    turnId: "turn-real",
+    firstTokenMs: 850,
+    errorPresent: true,
+    input: null,
+    cached: null,
+    output: null,
+  });
+  const notEvent = JSON.stringify({
+    type: "response_item",
+    payload: { type: "task_complete", turn_id: "turn-fake", time_to_first_token_ms: 1 },
+  });
+  assert.equal(projectEventLine(notEvent).eventType, "response_item");
+  const nestedUsage = JSON.stringify({
+    timestamp: "2026-11-22T00:00:04Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: { input_tokens: 12, cached_input_tokens: 3, output_tokens: 4 }, extra: { output_tokens: 999 } },
+      text: "\"input_tokens\": 999",
+    },
+  });
+  const usage = projectEventLine(nestedUsage);
+  assert.equal(usage.input, 12);
+  assert.equal(usage.cached, 3);
+  assert.equal(usage.output, 4);
 });

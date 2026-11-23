@@ -19,13 +19,14 @@ export function useTurnOutput(
   revision: string | null,
 ) {
   const run = useRpc(turnOutputRpc);
-  // Paseo can report completion before Codex has flushed the rollout. A few
-  // bounded delayed re-reads cover that gap without turning the panel into a
-  // poller; the timer is cancelled whenever the observation changes or unmounts.
-  const [retries, setRetries] = useState(0);
+  // Paseo can report completion before Codex has flushed the rollout, so the
+  // first read may still return the previous completed turn. A few bounded
+  // refetches after each observed turn cover that gap; the timer is cancelled
+  // whenever the observation changes or the hook unmounts.
+  const [attempts, setAttempts] = useState(0);
   const turnKey = revision ?? "";
   useEffect(() => {
-    setRetries(0);
+    setAttempts(0);
   }, [turnKey, scopeKey, scopeRevision, refreshRevision]);
   const query = useQuery({
     // Workspace, effective settings, and an explicit refresh are part of the
@@ -39,7 +40,6 @@ export function useTurnOutput(
       scopeRevision,
       refreshRevision,
       revision ?? "",
-      retries,
     ],
     enabled,
     retry: false,
@@ -53,9 +53,12 @@ export function useTurnOutput(
     }),
   });
   useEffect(() => {
-    if (!enabled || retries >= 3 || query.data?.reason !== "missing-samples") return;
-    const timer = setTimeout(() => setRetries((count) => count + 1), 1_200);
+    if (!enabled || !turnKey || attempts >= 3) return;
+    const timer = setTimeout(() => {
+      setAttempts((count) => count + 1);
+      void query.refetch();
+    }, 1_200);
     return () => clearTimeout(timer);
-  }, [enabled, retries, query.data]);
+  }, [enabled, turnKey, attempts, query.refetch]);
   return query;
 }

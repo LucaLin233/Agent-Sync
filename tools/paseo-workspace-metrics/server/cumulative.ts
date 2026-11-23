@@ -102,115 +102,238 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 }
 
-/**
- * Replaces one known JSON value with `null` without materializing it. Only the
- * task_complete assistant text and nested error bodies use it, so the parsed
- * object never contains those contents. Returns whether a non-null value existed.
- */
-function stripJsonValue(line: string, key: string): { line: string; present: boolean } {
-  const marker = `"${key}":`;
-  const keyAt = line.indexOf(marker);
-  if (keyAt < 0) return { line, present: false };
-  let index = keyAt + marker.length;
-  while (line[index] === " ") index += 1;
-  const start = index;
-  const first = line[start];
-  if (first === "n") return { line, present: false };
-  if (first === '"' || first === "{" || first === "[") {
+interface ProjectedEvent {
+  eventType: string | null;
+  payloadType: string | null;
+  timestamp: string | null;
+  turnId: string | null;
+  firstTokenMs: number | null;
+  errorPresent: boolean;
+  input: number | null;
+  cached: number | null;
+  output: number | null;
+}
+
+function emptyProjection(): ProjectedEvent {
+  return {
+    eventType: null, payloadType: null, timestamp: null, turnId: null,
+    firstTokenMs: null, errorPresent: false, input: null, cached: null, output: null,
+  };
+}
+
+function skipSpace(raw: string, index: number): number {
+  while (index < raw.length && (raw[index] === " " || raw[index] === "\t" || raw[index] === "\n" || raw[index] === "\r")) {
+    index += 1;
+  }
+  return index;
+}
+
+function skipString(raw: string, index: number): number {
+  let escaped = false;
+  for (let cursor = index + 1; cursor < raw.length; cursor += 1) {
+    const char = raw[cursor];
+    if (escaped) escaped = false;
+    else if (char === "\\") escaped = true;
+    else if (char === '"') return cursor + 1;
+  }
+  return raw.length;
+}
+
+function skipValue(raw: string, index: number): number {
+  index = skipSpace(raw, index);
+  const first = raw[index];
+  if (first === '"') return skipString(raw, index);
+  if (first === "{" || first === "[") {
+    const close = first === "{" ? "}" : "]";
     let depth = 0;
     let inString = false;
     let escaped = false;
-    for (; index < line.length; index += 1) {
-      const char = line[index];
+    for (let cursor = index; cursor < raw.length; cursor += 1) {
+      const char = raw[cursor];
       if (inString) {
         if (escaped) escaped = false;
         else if (char === "\\") escaped = true;
-        else if (char === '"') {
-          inString = false;
-          if (depth === 0) { index += 1; break; }
-        }
+        else if (char === '"') inString = false;
         continue;
       }
-      if (char === '"') { inString = true; continue; }
-      if (char === "{" || char === "[") { depth += 1; continue; }
-      if (char === "}" || char === "]") {
+      if (char === '"') inString = true;
+      else if (char === first) depth += 1;
+      else if (char === close) {
         depth -= 1;
-        if (depth === 0) { index += 1; break; }
+        if (depth === 0) return cursor + 1;
       }
     }
-  } else {
-    while (index < line.length && line[index] !== "," && line[index] !== "}") index += 1;
+    return raw.length;
   }
-  if (index <= start) return { line, present: false };
-  return { line: line.slice(0, start) + "null" + line.slice(index), present: true };
+  while (index < raw.length && raw[index] !== "," && raw[index] !== "}" && raw[index] !== "]") index += 1;
+  return index;
+}
+
+/** Reads a short string value; longer values are skipped and return null. */
+function readSmallString(raw: string, index: number, max = 256): { value: string | null; end: number } {
+  const end = skipString(raw, index);
+  if (end - index - 2 > max) return { value: null, end };
+  try {
+    return { value: JSON.parse(raw.slice(index, end)) as string, end };
+  } catch {
+    return { value: null, end };
+  }
+}
+
+function readSafeNumber(raw: string, index: number): { value: number | null; end: number } {
+  const match = /^-?\d+(?:\.\d+)?/.exec(raw.slice(index, index + 32));
+  if (!match) return { value: null, end: index };
+  const end = index + match[0].length;
+  const value = Number(match[0]);
+  return { value: Number.isSafeInteger(value) && value >= 0 ? value : null, end };
+}
+
+function projectUsageFields(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "input_tokens") { const value = readSafeNumber(raw, index); out.input = value.value; index = value.end; }
+    else if (key.value === "cached_input_tokens") { const value = readSafeNumber(raw, index); out.cached = value.value; index = value.end; }
+    else if (key.value === "output_tokens") { const value = readSafeNumber(raw, index); out.output = value.value; index = value.end; }
+    else index = skipValue(raw, index);
+  }
+  return raw.length;
+}
+
+function projectInfo(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    index = key.value === "total_token_usage"
+      ? projectUsageFields(raw, index, out)
+      : skipValue(raw, index);
+  }
+  return raw.length;
+}
+
+function projectPayload(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "type") {
+      const value = readSmallString(raw, index, 64);
+      out.payloadType = value.value;
+      index = value.end;
+    } else if (key.value === "turn_id") {
+      const value = readSmallString(raw, index, 128);
+      out.turnId = value.value;
+      index = value.end;
+    } else if (key.value === "time_to_first_token_ms") {
+      const value = readSafeNumber(raw, index);
+      out.firstTokenMs = value.value;
+      index = value.end;
+    } else if (key.value === "error") {
+      // Only presence matters; the nested error body is skipped, never parsed.
+      const end = skipValue(raw, index);
+      out.errorPresent = raw.slice(index, end).trim() !== "null";
+      index = end;
+    } else if (key.value === "info") {
+      index = projectInfo(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return raw.length;
+}
+
+/**
+ * Structural projection of exactly the fields this reader uses. Strings and
+ * nested values that are not on the whitelist are skipped, not parsed, so
+ * assistant text and error bodies never enter the object graph. The top-level
+ * event type is taken from the real envelope, not from a substring.
+ */
+export function projectEventLine(raw: string): ProjectedEvent {
+  const out = emptyProjection();
+  let index = skipSpace(raw, 0);
+  if (raw[index] !== "{") return out;
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") break;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return out;
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return out;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "type") {
+      const value = readSmallString(raw, index, 32);
+      out.eventType = value.value ?? "";
+      index = value.end;
+    } else if (key.value === "timestamp") {
+      const value = readSmallString(raw, index, 64);
+      out.timestamp = value.value;
+      index = value.end;
+    } else if (key.value === "payload") {
+      index = projectPayload(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return out;
 }
 
 function parseLine(line: string, state: FileState) {
-  const head = line.slice(0, 240);
-  if (!head.includes("event_msg")) return;
-  const completionLine = head.includes("task_complete") || head.includes("turn_complete");
-  const abortLine = head.includes("turn_aborted");
-  const tokenLine = head.includes("token_count");
-  const startLine = head.includes("task_started");
-  const rollbackLine = head.includes("thread_rolled_back");
-  if (!completionLine && !abortLine && !tokenLine && !startLine && !rollbackLine) return;
+  if (!line.includes("event_msg")) return;
+  const event = projectEventLine(line);
+  if (event.eventType !== "event_msg") return;
+  const at = event.timestamp === null ? NaN : Date.parse(event.timestamp);
+  const type = event.payloadType;
 
-  // Content and nested error bodies are replaced with null before parsing, so
-  // only whitelisted scalar fields are deserialized.
-  let source = line;
-  let errorPresent = false;
-  if (completionLine) {
-    source = stripJsonValue(source, "last_agent_message").line;
-    const error = stripJsonValue(source, "error");
-    source = error.line;
-    errorPresent = error.present;
-  } else if (abortLine) {
-    source = stripJsonValue(source, "error").line;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source);
-  } catch {
-    return;
-  }
-  const record = asRecord(parsed);
-  if (!record || record.type !== "event_msg") return;
-  const payload = asRecord(record.payload);
-  if (!payload) return;
-  const at = typeof record.timestamp === "string" ? Date.parse(record.timestamp) : NaN;
-
-  if (payload.type === "task_started") {
-    const id = typeof payload.turn_id === "string" ? payload.turn_id : null;
-    if (!id || !Number.isFinite(at)) return;
-    // A baseline is trusted only when the previous turn ended with a valid
-    // final cumulative count. A missing or interrupted boundary invalidates it,
-    // so the next turn never folds the previous turn into its delta.
+  if (type === "task_started") {
+    if (!event.turnId || !Number.isFinite(at)) return;
     const abandoned = state.openTurn !== null;
     const baseline = abandoned ? null : state.trustedOutput;
     if (abandoned) state.trustedOutput = null;
-    state.openTurn = { id, startedAt: at, baseline, finalAt: null, finalOutput: null, broken: false };
+    state.openTurn = { id: event.turnId, startedAt: at, baseline, finalAt: null, finalOutput: null, broken: false };
     return;
   }
 
-  if (payload.type === "task_complete" || payload.type === "turn_complete") {
-    const id = typeof payload.turn_id === "string" ? payload.turn_id : null;
+  if (type === "task_complete" || type === "turn_complete") {
     const open = state.openTurn;
-    if (!id || !open || open.id !== id || !Number.isFinite(at)) return;
+    if (!event.turnId || !open || open.id !== event.turnId || !Number.isFinite(at)) return;
     state.openTurn = null;
-    const firstTokenMs = isToken(payload.time_to_first_token_ms) ? payload.time_to_first_token_ms : null;
-    if (errorPresent) {
+    const firstTokenMs = event.firstTokenMs;
+    if (event.errorPresent) {
       state.trustedOutput = null;
       state.lastTurn = { outputTokens: null, elapsedMs: null, firstTokenMs: null };
       return;
     }
-    // The final count itself is trusted when it was observed in this turn after
-    // its start and no regression occurred. That trust becomes the next turn's
-    // baseline; only the delta needs a trusted baseline of its own.
     const finalTrusted = !open.broken && open.finalOutput !== null &&
       open.finalAt !== null && open.finalAt >= open.startedAt && open.finalAt <= at;
-    const outputValid = finalTrusted && open.baseline !== null &&
-      open.finalOutput! >= open.baseline;
+    const outputValid = finalTrusted && open.baseline !== null && open.finalOutput! >= open.baseline;
     state.trustedOutput = finalTrusted ? open.finalOutput : null;
     state.lastTurn = {
       outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
@@ -220,37 +343,29 @@ function parseLine(line: string, state: FileState) {
     return;
   }
 
-  if (payload.type === "turn_aborted" || payload.type === "thread_rolled_back") {
-    // An abort or rollback leaves no completed turn and no trusted baseline.
+  if (type === "turn_aborted" || type === "thread_rolled_back") {
     state.openTurn = null;
     state.lastTurn = null;
     state.trustedOutput = null;
     return;
   }
 
-  if (payload.type !== "token_count") return;
-  const info = asRecord(payload.info);
-  const total = asRecord(info?.total_token_usage);
-  if (!total) return;
-  const input = total.input_tokens;
-  const cached = total.cached_input_tokens;
-  const output = total.output_tokens;
-  if (!isToken(input) || !isToken(cached) || cached > input) {
-    state.valid = false;
-    if (state.openTurn) state.openTurn.broken = true;
-    return;
+  if (type !== "token_count") return;
+  const input = event.input;
+  const cached = event.cached;
+  const output = event.output;
+  // A bad cache sample never discards the last valid cache counters.
+  if (input !== null && cached !== null && cached <= input) {
+    state.input = input;
+    state.cached = cached;
+    state.valid = true;
   }
-  state.input = input;
-  state.cached = cached;
-  state.valid = true;
-  if (!isToken(output) || !Number.isFinite(at)) {
+  if (output === null || !Number.isFinite(at)) {
     if (state.openTurn) state.openTurn.broken = true;
     return;
   }
   const open = state.openTurn;
   if (open) {
-    // Every in-turn snapshot must move forward in time and never regress in
-    // count; otherwise the turn cannot produce a delta.
     if (at < open.startedAt || (open.finalAt !== null && at < open.finalAt)) {
       open.broken = true;
     } else if (
@@ -682,8 +797,8 @@ interface RequestOptions {
 
 interface RequestContext {
   scope: ReturnType<typeof effectiveWorkspaceScope>;
-  root: { root: string | null; error: string | null };
   revision: string | null;
+  values: WorkspaceSettingsValues & { codexHome?: string };
 }
 
 /**
@@ -704,10 +819,21 @@ async function requestContext(options: RequestOptions): Promise<RequestContext> 
       revision: null,
     }
     : await readSettingsSnapshot(options.settings);
-  const root = options.codexHome
+  return {
+    scope: effectiveWorkspaceScope(snapshot.values),
+    revision: snapshot.revision,
+    values: snapshot.values,
+  };
+}
+
+/** Directory probing happens only after scope and exact-agent checks pass. */
+async function resolveRoot(
+  options: RequestOptions,
+  context: RequestContext,
+): Promise<{ root: string | null; error: string | null }> {
+  return options.codexHome
     ? { root: options.codexHome, error: null }
-    : await resolveCodexHomeFromValues(snapshot.values);
-  return { scope: effectiveWorkspaceScope(snapshot.values), root, revision: snapshot.revision };
+    : resolveCodexHomeFromValues(context.values);
 }
 
 const STALE = "设置已变化，已丢弃本次读取";
@@ -720,7 +846,7 @@ async function collectCumulativeUsageUncached(
   refresh: boolean,
 ): Promise<RpcOutput<typeof cumulativeUsageRpc>> {
   const workspaceId = input.workspaceId;
-  const { scope, root } = context;
+  const { scope } = context;
   if (!scope.enabled) {
     return empty(workspaceId, 0, 0, "累计统计未启用");
   }
@@ -770,15 +896,26 @@ async function collectCumulativeUsageUncached(
     return empty(workspaceId, 0, unavailable, "当前工作区没有可确认的 Codex 会话");
   }
 
+  // Settings may have changed while agent.refresh() was in flight. Stop before
+  // resolving any root; the request keeps its original grant only.
+  if (await settingsChangedSince(options.settings, context.revision)) {
+    return empty(workspaceId, eligible.size, unavailable, STALE);
+  }
+
+  const root = await resolveRoot(options, context);
   if (!root.root) {
     return empty(workspaceId, eligible.size, unavailable, root.error ?? "未找到 Codex 会话目录");
   }
-
-  // The settings may have changed while agent.refresh() was in flight. In that
-  // case this request keeps its already-resolved root and stops instead of
-  // reading a newly approved directory under an old grant.
   if (await settingsChangedSince(options.settings, context.revision)) {
     return empty(workspaceId, eligible.size, unavailable, STALE);
+  }
+
+  const key = `${workspaceId}|${[...eligible.keys()].sort().join(",")}|${root.root}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
+  if (!refresh) {
+    const cached = workspaceCache.get(key);
+    if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return cached.value;
+    const running = workspaceInflight.get(key);
+    if (running) return running;
   }
 
   let realRoot: string;
@@ -788,31 +925,42 @@ async function collectCumulativeUsageUncached(
     return empty(workspaceId, eligible.size, unavailable, "Codex 会话目录不可读");
   }
 
-  const reads = await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
-    const file = await findSessionFile(realRoot, uuid, createdMs, refresh);
-    if (!file) return null;
-    return readSessionCounts(file);
-  }));
-
-  if (await settingsChangedSince(options.settings, context.revision)) {
-    return empty(workspaceId, eligible.size, unavailable, STALE);
-  }
-
-  const samples = reads
-    .map((read) => read?.sample ?? null)
-    .filter((sample): sample is CacheCounts => sample !== null);
-  const totals = summarizeLatestSamples(samples);
-  return {
-    workspaceId,
-    inputTokens: totals.input,
-    cachedInputTokens: totals.cached,
-    covered: totals.covered,
-    eligible: eligible.size,
-    missing: eligible.size - totals.covered,
-    unavailable,
-    rate: totals.rate,
-    error: null,
-  };
+  const generation = cacheGeneration;
+  let task!: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
+  task = (async () => {
+    const reads = await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
+      const file = await findSessionFile(realRoot, uuid, createdMs, refresh);
+      if (!file) return null;
+      return readSessionCounts(file);
+    }));
+    if (await settingsChangedSince(options.settings, context.revision)) {
+      return empty(workspaceId, eligible.size, unavailable, STALE);
+    }
+    const samples = reads
+      .map((read) => read?.sample ?? null)
+      .filter((sample): sample is CacheCounts => sample !== null);
+    const totals = summarizeLatestSamples(samples);
+    return {
+      workspaceId,
+      inputTokens: totals.input,
+      cachedInputTokens: totals.cached,
+      covered: totals.covered,
+      eligible: eligible.size,
+      missing: eligible.size - totals.covered,
+      unavailable,
+      rate: totals.rate,
+      error: null,
+    };
+  })().then((value) => {
+    if (!refresh && generation === cacheGeneration) {
+      workspaceCache.set(key, { at: Date.now(), value });
+    }
+    return value;
+  }).finally(() => {
+    if (workspaceInflight.get(key) === task) workspaceInflight.delete(key);
+  });
+  if (!refresh) workspaceInflight.set(key, task);
+  return task;
 }
 
 function emptyTurn(reason: "not-codex" | "scope" | "missing-samples" | "read-failed"): RpcOutput<typeof turnOutputRpc> {
@@ -830,7 +978,7 @@ export async function collectTurnOutput(
   options: RequestOptions = {},
 ): Promise<RpcOutput<typeof turnOutputRpc>> {
   const context = await requestContext(options);
-  const { scope, root } = context;
+  const { scope } = context;
   if (!scope.enabled || scope.error) return emptyTurn("scope");
   if (!scope.allWorkspaces && !scope.workspaceIds.includes(input.workspaceId)) return emptyTurn("scope");
 
@@ -848,8 +996,10 @@ export async function collectTurnOutput(
   if (agent.provider !== "codex" && marker !== "codex") return emptyTurn("not-codex");
   const nativeHandle = agent.persistence?.nativeHandle;
   if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) return emptyTurn("not-codex");
-  if (!root.root) return emptyTurn("read-failed");
 
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+  const root = await resolveRoot(options, context);
+  if (!root.root) return emptyTurn("read-failed");
   if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
 
   let realRoot: string;
@@ -870,7 +1020,8 @@ export async function collectTurnOutput(
   if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
 
   const { outputTokens, elapsedMs, firstTokenMs } = read.lastTurn;
-  if (elapsedMs === null || elapsedMs <= 0) return emptyTurn("missing-samples");
+  // Independent first-token timing survives a zero or absent elapsed duration.
+  if (elapsedMs === null && firstTokenMs === null && outputTokens === null) return emptyTurn("missing-samples");
   return {
     outputTokens,
     elapsedMs,
@@ -898,28 +1049,7 @@ export async function collectCumulativeUsage(
   const { scope } = context;
   if (!scope.enabled) return empty(input.workspaceId, 0, 0, "累计统计未启用");
   if (scope.error) return empty(input.workspaceId, 0, 0, scope.error);
-  const manual = input.refresh === true;
-  const key = `${input.workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${options.codexHome ?? ""}|${scope.enabled}|${scope.allWorkspaces ? "*" : ""}|${scope.workspaceIds.join(",")}`;
-  if (!manual) {
-    const cached = workspaceCache.get(key);
-    if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return Promise.resolve(cached.value);
-    const running = workspaceInflight.get(key);
-    if (running) return running;
-  }
-  const generation = cacheGeneration;
-  let task: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
-  task = collectCumulativeUsageUncached(input, paseo, options, context, manual)
-    .then((value) => {
-      if (!manual && generation === cacheGeneration) {
-        workspaceCache.set(key, { at: Date.now(), value });
-      }
-      return value;
-    })
-    .finally(() => {
-      if (workspaceInflight.get(key) === task) workspaceInflight.delete(key);
-    });
-  if (!manual) workspaceInflight.set(key, task);
-  return task;
+  return collectCumulativeUsageUncached(input, paseo, options, context, input.refresh === true);
 }
 
 type ScopeSettings = CodexHomeSettings & {
