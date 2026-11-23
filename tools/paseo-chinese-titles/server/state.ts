@@ -1,4 +1,4 @@
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -24,7 +24,10 @@ export interface ChineseTitlesState {
 function pluginRoot(): string {
   const configured = process.env.PASEO_HOME?.trim();
   if (configured && !isAbsolute(configured)) throw new Error("PASEO_HOME must be absolute");
-  return resolve(configured || join(homedir(), ".paseo"), "plugin-data", "paseo-chinese-titles");
+  const home = resolve(configured || join(homedir(), ".paseo"));
+  let realHome = home;
+  try { realHome = realpathSync(home); } catch { /* first run: the home may not exist yet */ }
+  return resolve(realHome, "plugin-data", "paseo-chinese-titles");
 }
 
 /** Resolve a path and prove it stays inside this plugin's data directory. */
