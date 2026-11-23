@@ -14,7 +14,9 @@ import {
   renameProjectViaCli,
 } from "./cli";
 import { pickFirstTask, type FirstTaskFact } from "../shared/first-task";
-import { generateTitle, HELPER_WORKSPACE_TITLE, isHelperAgent, type GenerationResult } from "./helper";
+import { selectableSessionsFor } from "../shared/session-options.ts";
+import { readSessionConversation } from "./conversation";
+import { generateConversationTitle, generateTitle, HELPER_WORKSPACE_TITLE, isHelperAgent, type GenerationResult } from "./helper";
 import { planTitleGeneration } from "../shared/generation-plan";
 import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed";
 import { regenerateWorkspaceTitle as runWorkspaceRegeneration, RPC_DEADLINE_MS, type RegenerateResult } from "./regenerate";
@@ -162,7 +164,7 @@ export class ChineseTitlesEngine {
    * and autoNameWorkspaces, and shares the automatic claim set so the two paths
    * cannot write the same workspace at once.
    */
-  async regenerateWorkspaceTitle(workspaceId: string, paseo: PaseoApi): Promise<RegenerateResult> {
+  async regenerateWorkspaceTitle(workspaceId: string, paseo: PaseoApi, agentId?: string): Promise<RegenerateResult> {
     // Start the budget before any await: a slow state/settings read must not
     // let the RPC write after the daemon's transport timeout.
     const deadlineAt = Date.now() + RPC_DEADLINE_MS;
@@ -174,18 +176,54 @@ export class ChineseTitlesEngine {
       paseo,
       settings,
       workspaceId,
+      ...(agentId ? { agentId } : {}),
       claims: this.processingWorkspaces,
       deadlineAt,
-      generate: (request, timeoutMs, generateDeadlineAt) =>
-        generateTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
+      generateConversation: (request, timeoutMs, generateDeadlineAt) =>
+        generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
       listAgents: () => this.listAgents(paseo),
-      readFirstPrompt: (agentId) => this.readFirstPrompt(paseo, agentId),
+      readConversation: (sessionId) => readSessionConversation(paseo, sessionId),
     });
     if (this.state && result.status === "done" && result.title) {
       this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
       await saveState(this.state);
     }
     return result;
+  }
+
+  /**
+   * The sessions the panel may offer for this workspace. The list is display
+   * metadata only; the selection itself is validated again by
+   * regenerateWorkspaceTitle before any text is read.
+   */
+  async listWorkspaceSessions(
+    workspaceId: string,
+    paseo: PaseoApi,
+  ): Promise<Array<{ id: string; title: string | null; lastActivityAt: string | null }>> {
+    this.attach(paseo);
+    const workspace = await paseo.workspaces.ref(workspaceId).refresh();
+    // Never expose another workspace's sessions, a background workspace or the
+    // plugin's own helper directory through this list.
+    if (!workspace || workspace.archivingAt || workspace.background ||
+      isInsideDirectory(workspace.workspaceDirectory, helperDirectory())) {
+      return [];
+    }
+    const agents = await this.listAgents(paseo);
+    return selectableSessionsFor(
+      agents.filter((agent) => !isInsideDirectory(agent.cwd, helperDirectory())).map((agent) => ({
+        id: agent.id,
+        workspaceId: agent.workspaceId,
+        title: agent.title,
+        background: agent.background,
+        internal: agent.internal,
+        archivedAt: agent.archivedAt,
+        labels: agent.labels,
+        metadata: agent.metadata,
+        lastActivityAt: agent.lastUserMessageAt ?? agent.updatedAt ?? null,
+        createdAt: agent.createdAt,
+      })),
+      workspaceId,
+    );
   }
 
   async onWorkspaceCreated(workspace: { id: string; projectId: string }, paseo: PaseoApi): Promise<void> {

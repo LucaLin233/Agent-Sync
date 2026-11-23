@@ -273,6 +273,29 @@ export function isAllowedLatinToken(token: string): boolean {
 }
 
 /**
+ * Manual conversation summaries go straight into a workspace title. If the
+ * model's answer is longer than the limit, cut at a word or Han boundary
+ * instead of slicing an English term in half; a candidate cut that no longer
+ * passes the Chinese check is skipped rather than accepted.
+ */
+export function sanitizeConversationTitle(raw: string | null | undefined, maxChars: number): string | null {
+  if (typeof raw !== "string") return null;
+  const value = cleanModelTitle(raw);
+  if (!value || CONTROL.test(value)) return null;
+  const chars = Array.from(value);
+  if (chars.length <= maxChars) return isAcceptableTitle(value) ? value : null;
+  for (let end = maxChars; end >= 2; end -= 1) {
+    const next = chars[end] ?? "";
+    const previous = chars[end - 1] ?? "";
+    const cutsWord = /[A-Za-z0-9_.\-/@#]/u.test(next) && /[A-Za-z0-9_.\-/@#]/u.test(previous);
+    if (cutsWord) continue;
+    const candidate = chars.slice(0, end).join("").trim().replace(/[\s,;:，。；：、\-/·]+$/u, "");
+    if (candidate && isAcceptableTitle(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Model output must read as Chinese: at least two Han characters, and every
  * Latin word must be a product name, acronym or identifier.
  */
