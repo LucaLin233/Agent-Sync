@@ -123,14 +123,17 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 
 ### 手动重新生成
 
-工作区面板「中文标题」里有一个「重新生成中文标题」按钮，只作用于当前选中的工作区。
+工作区面板「中文标题」里先选会话、再选更新范围，最后点生成按钮。
 
-- **先选会话，再生成**。面板列出这个工作区的普通会话（排除后台、子会话、内部会话和本插件自己的命名辅助会话）。只有一个可选会话时自动选中；有多个时默认不选，必须明确点选。插件不会按「最近运行」或工作区里第一个会话擅自替你选。
+- **先选会话，再生成**。面板列出这个工作区的普通会话（排除后台、子会话、内部会话和本插件自己的命名辅助会话）。只有一个可选会话时自动选中；有多个时默认不选，必须明确点选。插件不会按「最近运行」或工作区里第一个会话擅自替你选；未选中的会话既不参与摘要也不被改名。
+- **三种更新范围**：「工作区和所选会话」（面板默认）、「仅工作区」、「仅所选会话」。一次请求只调用一次标题模型，生成的中文摘要同时写入选定目标，两处使用同一个标题和同一个字数上限。「仅会话」不读写工作区标题，也不改工作区的自动命名状态。「仅工作区」不改所选会话标题。
+- **旧请求兼容**：请求未携带 `scope` 时按原行为只更新工作区；面板会显式发送 `both`。
 - 生成时会读取所选会话的用户与助手可见文本：尾部几页，必要时再向前有界读取真正的首条用户任务，控制在少量页数、轮次和字数内。推理、工具调用、通知、待办、压缩记录、插件行和附件都不进入摘要；可识别的凭据（私钥、GitHub/OpenAI 类令牌、`*_TOKEN=` 赋值、`password=` 等）会先移除。**这段摘录会发送到设置里指定的标题模型**；界面与本节都提示这一点。
 - **只接受真实模型结果**。手动路径不会用确定性兜底冒充成功：模型不可用、超时、没有可概括内容，或答案不是合格简体中文标题时，保留原标题并给出可重试的具体原因（`provider_unavailable`、`model_failed`、`invalid_title`、`empty_conversation` 等）。超过字数上限时按汉字/单词边界裁剪，不截断英文术语。
-- 每次点击只触发一次生成；进行中按钮禁用，服务端对同一工作区的自动/手动生成返回 `busy`；成功、失败或跳过之后都可再次点击。重复点击属于正常用法，旧英文工作区和自动命名已跳过的工作区都能反复改。
-- 只调用 `setTitle`，不改目录、仓库、分支或 agent 标题。
-- 生成前记录当前标题，写入前重新读取；生成期间被手动改名则返回 `skipped` 且不覆盖。完成后回读确认写入值。
+- 每次点击只触发一次生成；进行中按钮禁用，服务端对同一工作区或同一会话的自动/手动生成返回 `busy`；成功、失败或跳过之后都可再次点击。重复点击属于正常用法，旧英文工作区和自动命名已跳过的工作区都能反复改。
+- 工作区标题用 `setTitle` 写入；会话标题复用官方 CLI `agent update --name`；两者都不改目录、仓库或分支。
+- 生成前记录各目标原标题，写入前逐一回读：生成期间工作区或所选会话被手动改名、归档或移出工作区，则本次不写任何目标并返回 `skipped`。工作区写入后再紧随 CLI 之前回读一次会话，若两处写之间会话被手动改名，工作区已写入，返回 `partial` 且不覆盖会话。
+- 两个写入没有跨对象事务。任一处失败或超时时按实际回读结果分别报告 `workspaceUpdated` / `sessionUpdated`，状态为 `partial` 并给出可重试的原因；不会回滚已成功的写入，也不会覆盖人手改动。完成后逐目标回读确认写入值。
 - Paseo 0.17.3 的常规插件 RPC 传输超时为 30 秒，而 `PluginHandlerContext` 没有 abort signal；插件使用 22 秒内部截止，并在最终写前再次检查。超时返回 `timeout`，迟到的模型或辅助会话完成不会在 RPC 返回后写入。
 
 自动首任务路径不变：仍是 `workspace.create.before` 种子加首个真实任务的模型/兜底标题，不读会话历史，也不受本面板选择影响。
@@ -138,9 +141,9 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 
 ## 验收与限制
 
-**本次候选（按会话概括的手动生成）跑了离线验证与一次隔离 daemon E2E**：`npm run typecheck`、`npm test`，以及 0.17.3、独占 `/tmp`、合成 HOME、仅 Unix socket、禁用真实 provider 的临时 daemon 冒烟；结果见下方“本次验证”。
+**本次候选（三种更新范围与双目标写入）跑了离线验证和一次隔离 daemon 冒烟**：`npm run typecheck`、`npm test`，以及 0.17.3 真实 daemon 安装本候选后的 RPC 接线检查（见下方“本次验证”）。全程使用合成 HOME 与独占 `/tmp`，`codex` provider 禁用，无真实模型、无生产写入、未推送。真实会话摘要、SDK `setTitle` 与 CLI `agent update --name` 的实际写入路径仍未经黑盒验证，因为该实例禁用了 provider，无法创建普通会话。
 
-下面这一组 0.17.3 隔离 daemon 黑盒结果来自**更早的构建**，不是本次候选的运行结果，只保留作为基础安装/命名背景，不能当作本版本的逐字输出或行为证据。本次 E2E 只覆盖安装/running、新 `workspace-sessions` RPC 接线与无会话时的可识别状态，不包含真实模型、真实会话摘要或 30 秒传输。
+下面这一组 0.17.3 隔离 daemon 黑盒结果来自**更早的构建**，不是本次候选的运行结果，只保留作为基础安装/命名背景，不能当作本版本的逐字输出或行为证据。那次 E2E 只覆盖安装/running、`workspace-sessions` RPC 接线与无会话时的可识别状态，不包含真实模型、真实会话摘要、会话改名或 30 秒传输。
 
 - （旧构建）最终 `npm pack` 目录无 `node_modules`，官方 `plugin install` 后 `plugin ls` 为 `status: "running"`。
 - （旧构建）普通目录英文首任务 `Fix login bug` → 工作区与 agent 均为 `修复 login bug`；本版本的同一输入应得到 `修复登录问题`，但未在真实 daemon 重跑。
@@ -153,9 +156,10 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 ### 本次验证
 
 - `npm run typecheck`：通过。
-- `npm test`：45 项通过。在原有覆盖（自然中文兜底、专名/标识符保留、普通英文/单汉字/全英文拒绝、中英混合首句规范化、`autoNameWorkspaces=false` 仍可手动生成、生成期间手动改名保护、并发 `busy` 与完成后重试、超时后不迟到写入、最终 refresh 后的截止与归档检查、创建种子与 metadata 标记、显式 title 保留、后台工作区跳过）之外，新增：单会话自动选中与多会话必须显式选择、跨工作区/辅助/子会话/隐藏会话选择被拒绝且不读取他人文本、长会话同时保留真实首任务与最近轮次（含 150 轮、隐藏推理混入的合成时间线）、隐藏事件/工具行/注入块不进摘录、`GH_TOKEN=`、`CCHP_TOKEN=`、密码 JSON、Bearer 等明确凭据被移除、模型失败/无效/超时/空历史不写标题、自动首任务兜底路径不受手动改动影响。
-- 本次 0.17.3 隔离 daemon E2E（0.17.3 CLI、独占 `/tmp`、合成 HOME、`unix://` socket、`codex` provider 禁用）：`plugin install` 后 `plugin ls` 为 `running`，插件日志无报错；新建普通工作区后调用 `chinese-titles.workspace-sessions` 返回 `{"sessions":[]}`；不传 `agentId` 的重生成返回 `{"status":"needs_selection","reason":"no_session"}`，传不属于该工作区的 `agentId` 返回 `{"status":"skipped","reason":"session_not_selectable"}`，工作区标题保持不变；对不存在的工作区调用会话列表返回空数组。临时 daemon 与临时根已退出并清理。
-- 未覆盖：客户端面板点击与会话选择器的实际渲染（宽屏/紧凑、深浅主题）、新 `workspace-sessions` RPC 与重生成 RPC 的 30 秒真实传输、真实 Codex 鉴权下的会话摘要模型结果、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
+- `npm test`：63 项通过。在原有覆盖（自然中文兜底、专名/标识符保留、普通英文/单汉字/全英文拒绝、中英混合首句规范化、`autoNameWorkspaces=false` 仍可手动生成、生成期间手动改名保护、并发 `busy` 与完成后重试、超时后不迟到写入、最终 refresh 后的截止与归档检查、创建种子与 metadata 标记、显式 title 保留、后台工作区跳过）之外，新增：单会话自动选中与多会话必须显式选择、跨工作区/辅助/子会话/隐藏会话选择被拒绝且不读取他人文本、长会话同时保留真实首任务与最近轮次（含 150 轮、隐藏推理混入的合成时间线）、隐藏事件/工具行/注入块不进摘录、`GH_TOKEN=`、`CCHP_TOKEN=`、密码 JSON、Bearer 等明确凭据被移除、模型失败/无效/超时/空历史不写标题、自动首任务兜底路径不受手动改动影响；三种范围各自的目标写入与未写入断言、双目标仅一次模型调用且两处标题逐字一致、多会话未选者零写入、生成期间工作区或会话手动改名/归档/移出时整体不写、工作区写后会话被改（或 CLI 失败）返回 `partial` 且不覆盖、缺省 `scope` 仍只改工作区、会话模式不占用工作区 claim、工作区写入真实失败时即便会话随后被改也不降级为 `skipped`。
+- （上一候选，非本版本）0.17.3 隔离 daemon E2E（0.17.3 CLI、独占 `/tmp`、合成 HOME、`unix://` socket、`codex` provider 禁用）：`plugin install` 后 `plugin ls` 为 `running`，插件日志无报错；新建普通工作区后调用 `chinese-titles.workspace-sessions` 返回 `{"sessions":[]}`；不传 `agentId` 的重生成返回 `{"status":"needs_selection","reason":"no_session"}`，传不属于该工作区的 `agentId` 返回 `{"status":"skipped","reason":"session_not_selectable"}`，工作区标题保持不变；对不存在的工作区调用会话列表返回空数组。临时 daemon 与临时根已退出并清理。
+- 本次隔离 daemon 冒烟（0.17.3 CLI 与 daemon、独占 `/tmp`、合成 HOME、`unix://` socket、`codex` provider 禁用、daemon 只监听该 socket）：`plugin install` 本候选后 `plugin ls` 为 `running`、插件日志无报错；对一个真实存在、无会话的工作区，`chinese-titles.workspace-sessions` 返回 `{"sessions":[]}`；重生成分别传 `scope: "both"`、`"workspace"`、`"session"` 和不传 `scope`，四种请求都返回 `{"status":"needs_selection","reason":"no_session","workspaceUpdated":false,"sessionUpdated":false}`，工作区标题未变；`scope: "all"` 被 RPC 输入校验拒绝，缺 `workspaceId` 同样被拒绝；传不属于该工作区的 `agentId` 返回 `{"status":"skipped","reason":"session_not_selectable"}`；不存在的 `workspaceId` 重生成返回 `not_found`，会话列表返回空数组。该实例的 `codex` provider 已禁用，创建普通会话会报 `Provider 'codex' is disabled`，因此 CLI 会话改名的写前回读与真实写入未在此次冒烟中执行。临时 daemon 已停止，合成 HOME 与 `/tmp` 临时目录已删除。
+- 未覆盖：客户端面板的更新范围控件、三种范围的界面文案与实际渲染（宽屏/紧凑、深浅主题）、CLI 会话改名与 SDK `setTitle` 在真实 daemon 上的写入、重生成 RPC 的 30 秒真实传输、真实 Codex 鉴权下的会话摘要模型结果、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
 
 ### 最小 smoke 复跑
 

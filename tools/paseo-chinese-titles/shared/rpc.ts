@@ -48,16 +48,26 @@ export const listWorkspaceSessionsRpc = defineRpc({
   }),
 });
 
+/**
+ * Where the one generated summary is written. The panel sends "both"; an old
+ * client that omits the field keeps the previous workspace-only behaviour.
+ */
+export const regenerateScopeSchema = z.enum(["both", "workspace", "session"]);
+
 export const regenerateWorkspaceTitleRpc = defineRpc({
   name: "chinese-titles.regenerate-workspace",
   input: z.object({
     workspaceId: z.string().trim().min(1).max(200),
     /** The session the user picked; omitted only when the workspace has exactly one eligible session. */
     agentId: z.string().trim().min(1).max(200).optional(),
+    scope: regenerateScopeSchema.optional(),
   }),
   output: z.object({
-    status: z.enum(["done", "busy", "needs_selection", "skipped", "error"]),
+    status: z.enum(["done", "partial", "busy", "needs_selection", "skipped", "error"]),
     title: z.string().optional(),
     reason: z.string().optional(),
+    /** Each write is independent; the two flags say exactly what was written. */
+    workspaceUpdated: z.boolean(),
+    sessionUpdated: z.boolean(),
   }),
 });
