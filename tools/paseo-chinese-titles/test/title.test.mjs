@@ -40,10 +40,11 @@ test("Paseo provisional titles are recognised conservatively", () => {
   assert.equal(isProvisional("手动标题", prompt), false);
 });
 
-test("fallback keeps ASCII product names but always ends with Han", () => {
-  assert.equal(fallbackTaskTitle({ prompt: "Fix login bug", baseName: "Paseo", maxChars: 28 }), "修复 login bug");
+test("fallback keeps only technical Latin names and always ends with Han", () => {
+  assert.equal(fallbackTaskTitle({ prompt: "Fix login bug", baseName: "Paseo", maxChars: 28 }), "修复登录问题");
   assert.equal(fallbackTaskTitle({ prompt: "更新用户资料", baseName: "app", maxChars: 28 }), "更新用户资料");
   assert.equal(fallbackTaskTitle({ prompt: "", baseName: "Paseo", maxChars: 28 }), "处理 Paseo");
+  assert.equal(fallbackTaskTitle({ prompt: "", baseName: "app", maxChars: 28 }), "处理工作区");
   const truncated = fallbackTaskTitle({
     prompt: "Fix aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa中文",
     baseName: "app",
@@ -64,13 +65,42 @@ test("ensureHan never returns Han-free text even at small limits", () => {
 
 test("project fallback is Chinese for ASCII display names", () => {
   assert.equal(fallbackProjectTitle("Paseo", 20), "项目 Paseo");
+  assert.equal(fallbackProjectTitle("my-project", 20), "项目 my-project");
+  assert.equal(fallbackProjectTitle("Program Files", 20), "新项目");
   assert.equal(fallbackProjectTitle("工作区指标", 20), "工作区指标");
   assert.ok(hasHan(fallbackProjectTitle("", 20)));
 });
 
 test("one generated title is reused for a workspace/session pair", () => {
-  assert.equal(titleForPair("修复登录 bug", "处理 app", 28), "修复登录 bug");
-  assert.equal(titleForPair("Fix login", "处理 app", 28), "处理 app");
+  assert.equal(titleForPair("修复登录问题", "处理工作区", 28), "修复登录问题");
+  assert.equal(titleForPair("Fix login", "修复登录问题", 28), "修复登录问题");
+});
+
+test("fallback turns mixed Chinese/English lines into natural Chinese", () => {
+  assert.equal(fallbackTaskTitle({ prompt: "修复 the login redirect loop", maxChars: 28 }), "修复登录跳转循环");
+  assert.equal(fallbackTaskTitle({ prompt: "修复登录问题 the bug", maxChars: 28 }), "修复登录问题");
+  assert.equal(fallbackTaskTitle({ prompt: "优化 Codex 会话", maxChars: 28 }), "优化 Codex 会话");
+  assert.equal(fallbackTaskTitle({ prompt: "Fix the aaaaaaaaaaaaaaaa 中文", maxChars: 28 }), "处理任务");
+});
+
+test("fallback follows Chinese action plus meaningful proper nouns", () => {
+  assert.equal(fallbackTaskTitle({ prompt: "Optimize Codex session handling", maxChars: 28 }), "优化 Codex 会话");
+  assert.equal(fallbackTaskTitle({ prompt: "Update Paseo plugin", maxChars: 28 }), "更新 Paseo 插件");
+  assert.equal(fallbackTaskTitle({ prompt: "Add OAuth callback", maxChars: 28 }), "新增 OAuth 回调");
+  assert.equal(
+    fallbackTaskTitle({ prompt: "Extend workspace usage plugin with token speed and first-token latency", maxChars: 28 }),
+    "扩展工作区用量插件",
+  );
+});
+
+test("ordinary English is rejected with punctuation, caps or hyphens", () => {
+  assert.equal(sanitizeModelTitle("修复 login bug", 28), null);
+  assert.equal(sanitizeModelTitle("修复 LOGIN BUG.", 28), null);
+  assert.equal(sanitizeModelTitle("修复 login-bug", 28), null);
+  assert.equal(sanitizeModelTitle("好", 28), null);
+  assert.equal(sanitizeModelTitle("优化 Codex 会话", 28), "优化 Codex 会话");
+  assert.equal(sanitizeModelTitle("更新 server/engine.ts", 28), "更新 server/engine.ts");
+  assert.equal(sanitizeModelTitle("修复 v0.17.3 回归", 28), "修复 v0.17.3 回归");
 });
 
 test("session naming defaults off and provider stays empty for auto detection", () => {
