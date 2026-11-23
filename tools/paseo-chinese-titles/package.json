@@ -1,0 +1,31 @@
+{
+  "name": "paseo-chinese-titles",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simplified-Chinese display names for Paseo projects, workspaces and sessions.",
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "index.server.ts",
+    "index.client.tsx",
+    "client/",
+    "server/",
+    "shared/"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.17.3",
+    "@getpaseo/plugin": "0.17.3",
+    "@getpaseo/protocol": "0.17.3",
+    "@types/node": "22.15.3",
+    "@types/react": "19.2.0",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "typescript": "5.9.3",
+    "zod": "4.4.3"
+  }
+}

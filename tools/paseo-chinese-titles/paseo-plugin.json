@@ -1,0 +1,14 @@
+{
+  "id": "paseo-chinese-titles",
+  "name": "Paseo 中文标题",
+  "description": "为新项目、工作区和普通会话生成简体中文显示名称，不改目录、仓库或分支。",
+  "requirements": {
+    "paseo": ">=0.16.0"
+  },
+  "translations": {
+    "zh-CN": {
+      "name": "Paseo 中文标题",
+      "description": "为新项目、工作区和普通会话生成简体中文显示名称，不改目录、仓库或分支。"
+    }
+  }
+}
