@@ -1,5 +1,6 @@
 import { useRpc, type AgentRef } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { turnOutputRpc } from "../shared/cumulative";
 
 /**
@@ -18,7 +19,15 @@ export function useTurnOutput(
   revision: string | null,
 ) {
   const run = useRpc(turnOutputRpc);
-  return useQuery({
+  // Paseo can report completion before Codex has flushed the rollout. A few
+  // bounded delayed re-reads cover that gap without turning the panel into a
+  // poller; the timer is cancelled whenever the observation changes or unmounts.
+  const [retries, setRetries] = useState(0);
+  const turnKey = revision ?? "";
+  useEffect(() => {
+    setRetries(0);
+  }, [turnKey, scopeKey, scopeRevision, refreshRevision]);
+  const query = useQuery({
     // Workspace, effective settings, and an explicit refresh are part of the
     // key so another workspace, a changed scope, or a manual refresh never
     // reuses an older rollout read.
@@ -30,12 +39,23 @@ export function useTurnOutput(
       scopeRevision,
       refreshRevision,
       revision ?? "",
+      retries,
     ],
     enabled,
     retry: false,
     staleTime: 15_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    queryFn: () => run({ workspaceId, agentId: agentRef.id }),
+    queryFn: () => run({
+      workspaceId,
+      agentId: agentRef.id,
+      refresh: refreshRevision > 0,
+    }),
   });
+  useEffect(() => {
+    if (!enabled || retries >= 3 || query.data?.reason !== "missing-samples") return;
+    const timer = setTimeout(() => setRetries((count) => count + 1), 1_200);
+    return () => clearTimeout(timer);
+  }, [enabled, retries, query.data]);
+  return query;
 }

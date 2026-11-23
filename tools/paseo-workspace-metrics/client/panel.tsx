@@ -230,7 +230,14 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     ? [scope.enabled, scope.allWorkspaces, [...scope.workspaceIds].sort().join(","), scope.error ?? ""].join("|")
     : "pending";
   const cumulativeEnabled = scope !== null && workspaceInScope(scope, workspaceId);
-  const cumulative = useCumulativeUsage(workspaceId, refs, cumulativeEnabled, scopeKey, scopeRevision);
+  const cumulative = useCumulativeUsage(
+    workspaceId,
+    refs,
+    cumulativeEnabled,
+    scopeKey,
+    scopeRevision,
+    refreshRevision,
+  );
   const samples = refs.map(({ id }) => query.data?.get(id)?.cacheSample ?? null);
   const totals = summarizeLatestSamples(samples);
   const colors = theme.colors;

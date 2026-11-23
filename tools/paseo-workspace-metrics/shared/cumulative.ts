@@ -10,6 +10,8 @@ export const cumulativeUsageRpc = defineRpc({
   input: z.object({
     workspaceId: z.string().min(1).max(128),
     agentIds: z.array(z.string().min(1).max(128)).min(1).max(200),
+    /** Manual refresh bypasses the short aggregation cache. */
+    refresh: z.boolean().optional(),
   }),
   output: z.object({
     workspaceId: z.string(),
@@ -37,6 +39,7 @@ export const turnOutputRpc = defineRpc({
   input: z.object({
     workspaceId: z.string().min(1).max(128),
     agentId: z.string().min(1).max(128),
+    refresh: z.boolean().optional(),
   }),
   output: z.object({
     outputTokens: z.number().int().nonnegative().nullable(),
