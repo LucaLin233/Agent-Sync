@@ -47,8 +47,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(listWorkspaceSessionsRpc, async ({ workspaceId }, { paseo }) => ({
     sessions: await engine.listWorkspaceSessions(workspaceId, paseo),
   }));
-  server.handle(regenerateWorkspaceTitleRpc, async ({ workspaceId, agentId }, { paseo }) =>
-    engine.regenerateWorkspaceTitle(workspaceId, paseo, agentId));
+  server.handle(regenerateWorkspaceTitleRpc, async ({ workspaceId, agentId, scope }, { paseo }) =>
+    engine.regenerateWorkspaceTitle(workspaceId, paseo, agentId, scope));
   server.handle(titleCatalogRpc, async (_input, { paseo }) => listTitleProviderOptions(paseo));
 
   return () => {
