@@ -11,7 +11,7 @@ paseo --home "$PASEO_HOME" plugin install \
   --id paseo-chinese-titles --ref "$REF"
 ```
 
-合并前请使用本分支的本地目录安装；不要把未合并的候选路径冒充 `main` 已发布内容。开发依赖固定 `@getpaseo/* 0.17.3` 是类型检查目标，不限制插件安装版本。
+合并前请使用本分支的本地目录安装；不要把未合并的候选路径冒充 `main` 已发布内容。开发依赖固定 `@getpaseo/* 0.17.3` 是类型检查目标；manifest 下限保持 `>=0.16.0`。新行为按 0.17.3 类型检查与单测验证，未在 0.16.0 黑盒复验。
 
 ## 存储位置与旧状态迁移
 
@@ -40,9 +40,8 @@ Provider、Model、Thinking 档位使用官方原生 `SettingsSelect`。目录�
 
 ## 兼容版本
 
-- 目标与完整黑盒实测：Paseo **0.17.3**。
-- manifest 下限：`>=0.16.0`。已静态核对 0.16.0 的 `@getpaseo/plugin` hooks（`workspace.create.after`、`agent.create.after`、`agent.turn.before/after`）、`PluginHandlerContext.paseo`、settings 注册与 client `useSettings`/`addSettingsScreen`；并核对 0.16.0 `@getpaseo/client` 的工作区 `create/setTitle/refresh/archive`、后台 workspace/agent 参数、agent `run/refresh/archive` 与 provider 入口。CLI `--home`、`workspace create --background`、`project rename`、`agent update --name` 为该下限的安装/更名依赖。
-- 实际以 0.16.0 CLI/daemon 干净安装：`plugin ls` 为 `running`；普通目录项目得到 `项目 proj`，英文首任务工作区得到 `修复 0.16 login bug`。0.16.0 的会话 agent 自动标题未实测通过：该 smoke 中 `plugin install` 重建了 plugin-settings，测试设置未在安装后重新写入，`autoNameSessions` 为默认 `false`，所以只覆盖项目与普通目录工作区；未证实接口不兼容。0.17.3 会话自动标题已实测。
+- 目标与类型检查：Paseo **0.17.3**（`@getpaseo/* 0.17.3`）。
+- manifest 下限：`>=0.16.0`。官方 v0.16.0 源码已有 `workspace.create.before`（`packages/plugin/src/server/lifecycle.ts:136,199`）、`addWorkspacePanel`（`packages/plugin/src/client/contracts.ts:236`），且 `session.ts:7350,7373-7405` 已让 metadata/firstAgentContext 经过该 hook，`workspace-auto-name.ts:179-191` 的覆盖条件与 0.17.3 相同；未发现真实 0.16.0 API 不兼容，故保留原下限。新行为仅在 0.17.3 类型检查与单测中验证，0.16.0 黑盒结果属于加入手动面板与种子钩子之前的构建，本版本未复验。
 
 ---
 
@@ -113,27 +112,44 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 ## 行为与边界
 
 - **项目**：SDK 没有项目更名方法，插件用官方 CLI `project rename` 写入 `customName`。写入前重新读取 `projectCustomName`；已有手动值直接跳过。无 app 连接时，插件用官方 CLI 定时 `project ls` 只发现新 `projectId`，再在插件专属中性目录下创建一个 **background directory workspace**（`workspace create --isolation local --path .../bootstrap --project <id> --title 中文标题引导 --background`）。这个 workspace 的 `workspace.create.after` 提供同 daemon 的 `context.paseo`，插件随后走正常 SDK 项目流程并归档它。每进程最多一次成功引导；只归档精确路径、`background`、同 project 且本进程发起的引导 workspace。
-- **工作区/会话**：通过 hook 自带的 `context.paseo` 生成。只会话命名只调用一次；同一首任务同时命名工作区和会话且该会话是获胜会话时，只生成一次并复用；竞争中的非获胜会话在工作区结果之外单独生成一次自己的会话标题。每个对象只写最终中文名一次，写后重新读取原始 `title` 覆盖值。**没有 CAS**：如果手动改名恰好落在最终 `refresh` 与写入之间，仍可能被本插件覆盖；插件只写一次，不重试、不写 placeholder，写入前看到已变化才跳过。
+- **工作区/会话**：通过 hook 自带的 `context.paseo` 生成。只会话命名只调用一次；同一首任务同时命名工作区和会话且该会话是获胜会话时，只生成一次并复用；竞争中的非获胜会话在工作区结果之外单独生成一次自己的会话标题。自动路径在 `workspace.create.before` 先写入一个中文兜底种子标题（仅当请求没有 `title`；New Workspace 原始请求就是这样传 `firstAgentContext`），首个真实任务到达后再用模型或兜底替换；种子值记录在 workspace metadata，只有标题仍等于该值时才允许自动替换。写后重新读取并核对 `title`。**没有跨进程 CAS**：如果手动改名恰好落在最终 `refresh` 与写入之间，仍可能被覆盖；同一进程内自动与手动共用 workspace claim，最终写前看到已变化才跳过。
 - **首任务判断**：不看创建顺序。workspace claim 内读取所有非后台、非子会话的首条真实用户消息，按 timeline entry 时间戳选最早者，同一毫秒用 agent ID 固定 tie break；由该获胜会话决定工作区标题。最早创建但一直没收到任务的空会话不会阻塞后创建会话先收到任务；两个会话都已有任务时也不会都返回 false。并发多 agent 由进程内 workspace claim 保证工作区只命名一次。
-- **模型输出校验**：去掉 JSON/引号/Markdown/标签后只取一行；必须包含汉字，否则视为无效。英文、空、只有产品名、控制字符都走中文兜底。兜底会保留 ASCII 产品/模块名，并保证截断后最终仍含汉字（例如 `修复 login bug`、`处理 Paseo`）。
-- **保留已有和手动名称**：首次启用时用官方 CLI 列表建立基线，已有对象不改。工作区/会话只有当前 `title` 为空或仍等于 Paseo 的 provisional 首 prompt 文本时才处理；显式标题或手动改名会跳过。
+- **模型输出校验**：去掉 JSON/引号/Markdown/标签后只取一行；至少两个汉字，且每个拉丁词必须是产品/协议/大写缩写/含数字或文件名的标识符。普通英文、单汉字、全英文、仅首字母大写的普通词、带末尾句号或普通连字符伪装的英文都视为无效（例如 `修复 login bug`、`修复 LOGIN BUG.`、`修复 login-bug`）。中英混合首句会先规范化，不会因为句中出现一个汉字就直接通过。
+- **中文兜底**：先识别常见任务动词和名词，保留有意义的专名/技术标识，再用自然中文组合（如 `修复登录问题`、`优化 Codex 会话`、`新增 OAuth 回调`）；识别不出时用简短通用中文（如 `处理任务`、`处理工作区`），不拼接整段普通英文。
+- **保留已有和手动名称**：首次启用时用官方 CLI 列表建立基线，已有对象不改。自动路径只处理当前 `title` 为空、仍等于 Paseo provisional 首 prompt 文本、或仍等于本插件创建时写入的种子标题；显式标题、手动改名和其他英文标题都不当成自动标题。手动按钮不受此限制，但写前回读，生成期间被手动改名则跳过。
 - **辅助会话**：中性目录、`background`、固定标题、只读 sandbox、`approval_policy: "never"`、禁用 web search、无预批准工具。辅助会话不进入本插件或 Better Paseo 的自动命名。
-- **Paseo 内置 workspace-auto-name**：0.17.3 daemon 也会在创建带首 prompt 的 workspace 时写 provisional title，并可能重命名 branch-off 的占位分支；没有受支持的关闭开关。本插件只写 `title`，不写 branch。若严格禁止分支变化，创建 worktree 时显式给 `--new-branch`，并接受内置标题生成仍可能与插件竞争；两者都遵守“手动标题优先”的重新读取规则，但无 CAS。
+- **Paseo 内置 workspace-auto-name**：0.17.3 daemon 会在创建带首 prompt 的 workspace 时异步生成原生摘要，只在当前标题为空或仍等于首 prompt 文本时写入；它还可能重命名 branch-off 的占位分支，且没有受支持的关闭开关。本插件在 `workspace.create.before` 写入一个不同于首 prompt 的中文种子标题，因此原生摘要不会覆盖它；插件随后用它自己的模型/兜底替换。插件只写 `title`，不写 branch。若严格禁止分支变化，创建 worktree 时显式给 `--new-branch`，并接受内置分支重命名仍可能发生。安装前已存在的旧工作区没有种子；隐式创建工作区（例如打开普通目录时由 Paseo 内部 upsert，而不经过 `workspace.create.before`）也不会经过种子钩子。这两类工作区若已有英文标题，使用下面的手动按钮修复；按钮也可处理原生自动命名已跳过或已写英文的现场。
 - **侧栏显示**：Paseo 的侧栏可按「标题」或「分支」显示。切到「分支」时看到的是 Git 分支名，不是本插件写入的标题；切到「标题」才能看到同一 daemon 持久的中文标题。
+
+### 手动重新生成
+
+工作区面板「中文标题」里有一个「重新生成中文标题」按钮，只作用于当前选中的工作区。
+
+- 每次点击只触发一次生成；进行中按钮禁用，服务端对同一工作区的自动/手动生成返回 `busy`；成功、失败或跳过之后都可再次点击。
+- 不受 `autoNameWorkspaces`、`legacy` / `done` / `skipped` 状态限制，适合旧英文工作区和自动命名已跳过的工作区。
+- 标题来源优先取该工作区最早的真实用户首任务；没有首任务时用现有中文标题，再没有则用简短中文兜底。只调用 `setTitle`，不改目录、仓库、分支或 agent 标题。
+- 生成前记录当前标题，写入前重新读取；生成期间被手动改名则返回 `skipped` 且不覆盖。完成后回读确认写入值。
+- Paseo 0.17.3 的常规插件 RPC 传输超时为 30 秒，而 `PluginHandlerContext` 没有 abort signal；插件使用 22 秒内部截止，并在最终写前再次检查。超时返回 `timeout`，迟到的模型或辅助会话完成不会在 RPC 返回后写入。
+
 
 ## 验收与限制
 
-已在本机 0.17.3 隔离 daemon 实测：
+本次候选已运行 `npm run typecheck` 与 `npm test`（见下方“本次验证”）。父会话另用本机官方 0.17.3 CLI/SDK 在独占 `/tmp`、合成 HOME、禁用真实 provider、仅 Unix socket 的临时 daemon 实测：`plugin install` 与 `plugin ls` 均 `running`；既有英文标题保持到主动触发；对同一工作区真实调用重命名 RPC 两次均 `done` 且逐次回读一致；带 `firstAgentContext` 的新建请求得到 `修复登录问题`；临时 daemon 已退出、临时根已清理。以下更早的 0.17.3 隔离 daemon 黑盒结果属于加入手动面板与种子钩子之前的构建，仅保留作为基础安装/命名背景；标题兜底风格已更新，不能直接当作本版本的逐字输出。
 
 - 最终 `npm pack` 目录无 `node_modules`，官方 `plugin install` 后 `plugin ls` 为 `status: "running"`。
-- 普通目录英文首任务 `Fix login bug` → 工作区与 agent 均为 `修复 login bug`；项目无 app 连接时经 CLI 引导后为 `项目 dirproj`。
+- 旧构建中普通目录英文首任务 `Fix login bug` → 工作区与 agent 均为 `修复 login bug`；本版本的同一输入应得到 `修复登录问题`，但未在真实 daemon 重跑。
 - Git worktree 使用显式 `--new-branch keep-branch`，运行任务后分支仍为 `keep-branch`，工作区/agent 为 `实现 auth flow`。
 - 手动 workspace `手工工作区`、显式 agent `人工标题` 均保留。
 - 同一 workspace 并发/先后两条不同会话：工作区只命名一次，后续会话只命名自己；双并发两个不同 workspace 时各自标题正确。
 - `plugin reload` 后名称保持；精确路径的引导 workspace 已归档，普通同标题 workspace 未被归档。
-- Better Paseo **1.6.4**（本地可核副本 `version=1.6.4`、`build=202611211751`）与插件同装运行；其 `title-generation.json` 的 `afterFirstReply=false` 时，新工作区/会话由本插件得到 `优化 cache metrics`，自动优化未接管。
+- Better Paseo **1.6.4**（本地可核副本 `version=1.6.4`、`build=202611211751`）与插件同装运行；其 `title-generation.json` 的 `afterFirstReply=false` 时，旧构建的新工作区/会话由本插件得到 `优化 cache metrics`，自动优化未接管。本版本按新规则应为 `优化缓存指标`，未在真实 daemon 复验。
 
-未覆盖：A 空会话/B 首任务 E2E 受官方 CLI `paseo run ""` 的 `MISSING_PROMPT` 限制，仅保留 `pickFirstTask` 单元测试；真实 Codex 鉴权下的模型成功回复、桌面/手机 UI、Better Paseo 手动“从对话生成标题”未实测。无 Codex 凭据时走中文兜底，不影响最终含汉字。
+### 本次验证
+
+- `npm run typecheck`：通过。
+- `npm test`：26 项通过，覆盖自然中文兜底、专名/标识符保留、普通英文/单汉字/全英文拒绝、中英混合首句规范化、旧英文工作区连续两次改名、`autoNameWorkspaces=false` 仍可手动生成、生成期间手动改名保护、并发 `busy` 与完成后重试、超时后不迟到写入、最终 refresh 后的截止与归档检查、创建种子与 metadata 标记、显式 title 保留、后台工作区跳过。
+- 已核（父会话 0.17.3 CLI/SDK 临时 daemon）：安装/running、既有英文标题不自动改动、重命名 RPC 两次 `done` 与回读、`firstAgentContext` 新建工作区的种子标题。
+- 未覆盖：客户端面板点击与 RPC 30 秒真实传输、真实 Codex 鉴权下的模型成功回复（临时 daemon 禁用 provider，走中文兜底）、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
 
 ### 最小 smoke 复跑
 

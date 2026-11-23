@@ -33,3 +33,15 @@ export const titleCatalogRpc = defineRpc({
     })),
   }),
 });
+
+export const regenerateWorkspaceTitleRpc = defineRpc({
+  name: "chinese-titles.regenerate-workspace",
+  input: z.object({
+    workspaceId: z.string().trim().min(1).max(200),
+  }),
+  output: z.object({
+    status: z.enum(["done", "busy", "skipped", "error"]),
+    title: z.string().optional(),
+    reason: z.string().optional(),
+  }),
+});

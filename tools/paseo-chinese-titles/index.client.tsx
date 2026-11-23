@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { reconcileRpc } from "./shared/rpc";
+import { ChineseTitlePanel } from "./client/regenerate";
 import { ChineseTitlesSettingsScreen } from "./client/settings";
 
 const INTERVAL_MS = 20_000;
@@ -12,6 +13,12 @@ export default function contribute(client: PluginClientContext) {
   };
   tick();
   const timer = setInterval(tick, INTERVAL_MS);
+  const workspacePanel = client.addWorkspacePanel({
+    id: "chinese-title",
+    title: "中文标题",
+    icon: "Languages",
+    Component: ChineseTitlePanel,
+  });
   const settingsScreen = client.addSettingsScreen({
     id: "chinese-titles",
     title: "Paseo 中文标题",
@@ -21,6 +28,7 @@ export default function contribute(client: PluginClientContext) {
   return () => {
     stopped = true;
     clearInterval(timer);
+    workspacePanel();
     settingsScreen();
   };
 }

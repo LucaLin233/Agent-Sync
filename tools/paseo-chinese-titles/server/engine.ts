@@ -3,7 +3,7 @@ import { basename, join, resolve } from "node:path";
 import type { PaseoAgent, PaseoApi, PaseoProject, PaseoWorkspace } from "./paseo-types";
 import type { PluginSettings } from "@getpaseo/plugin/server";
 import type { ChineseTitlesSettings } from "../shared/settings";
-import { isProvisional } from "../shared/title";
+import { distinctWorkspaceTitle, isProvisional } from "../shared/title";
 import {
   createBootstrapWorkspaceViaCli,
   listAgentIdsViaCli,
@@ -14,8 +14,10 @@ import {
   renameProjectViaCli,
 } from "./cli";
 import { pickFirstTask, type FirstTaskFact } from "../shared/first-task";
-import { generateTitle, isHelperAgent, type GenerationResult } from "./helper";
+import { generateTitle, HELPER_WORKSPACE_TITLE, isHelperAgent, type GenerationResult } from "./helper";
 import { planTitleGeneration } from "../shared/generation-plan";
+import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed";
+import { regenerateWorkspaceTitle as runWorkspaceRegeneration, RPC_DEADLINE_MS, type RegenerateResult } from "./regenerate";
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
@@ -121,6 +123,69 @@ export class ChineseTitlesEngine {
     if (!this.state || this.state.initialized) return;
     markBaseline(this.state, projectIds, workspaceIds, agentIds);
     await saveState(this.state);
+  }
+
+  /**
+   * Runs inside workspace.create.before. Paseo v0.17.3's native auto-name
+   * replaces a title that is empty or exactly the first-prompt title, so seed a
+   * different Chinese fallback before the asynchronous native summary starts.
+   */
+  async workspaceTitleSeed(request: {
+    title?: string | null;
+    background?: boolean;
+    metadata?: WorkspaceMetadata | null;
+    firstAgentContext?: { prompt?: string } | null;
+    source?: { kind: string; path?: string } | null;
+  }): Promise<WorkspaceSeedPlan | null> {
+    try {
+      await this.ready;
+      const settings = await this.currentSettings();
+      if (!settings?.autoNameWorkspaces) return null;
+      if (request.background) return null;
+      if (request.title?.trim() === HELPER_WORKSPACE_TITLE) return null;
+      if (request.source?.kind === "directory" && request.source.path &&
+        isInsideDirectory(request.source.path, helperDirectory())) return null;
+      return planWorkspaceTitleSeed({
+        title: request.title,
+        prompt: request.firstAgentContext?.prompt,
+        metadata: request.metadata,
+        maxChars: settings.titleMaxChars,
+      });
+    } catch {
+      // Seeding is best-effort and must never block workspace creation.
+      return null;
+    }
+  }
+
+  /**
+   * Manual per-workspace regeneration. It ignores automatic baseline states
+   * and autoNameWorkspaces, and shares the automatic claim set so the two paths
+   * cannot write the same workspace at once.
+   */
+  async regenerateWorkspaceTitle(workspaceId: string, paseo: PaseoApi): Promise<RegenerateResult> {
+    // Start the budget before any await: a slow state/settings read must not
+    // let the RPC write after the daemon's transport timeout.
+    const deadlineAt = Date.now() + RPC_DEADLINE_MS;
+    await this.ready;
+    const settings = await this.currentSettings();
+    if (!settings) return { status: "error", reason: "settings_unavailable" };
+    this.attach(paseo);
+    const result = await runWorkspaceRegeneration({
+      paseo,
+      settings,
+      workspaceId,
+      claims: this.processingWorkspaces,
+      deadlineAt,
+      generate: (request, timeoutMs, generateDeadlineAt) =>
+        generateTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
+      listAgents: () => this.listAgents(paseo),
+      readFirstPrompt: (agentId) => this.readFirstPrompt(paseo, agentId),
+    });
+    if (this.state && result.status === "done" && result.title) {
+      this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
+      await saveState(this.state);
+    }
+    return result;
   }
 
   async onWorkspaceCreated(workspace: { id: string; projectId: string }, paseo: PaseoApi): Promise<void> {
@@ -403,10 +468,12 @@ export class ChineseTitlesEngine {
         ? await this.pickWorkspaceFirstTask(paseo, workspace.id, agent.id, prompt)
         : null;
       const workspacePrompt = winner?.text ?? prompt.text;
+      const seededTitle = seededWorkspaceTitle(workspace.metadata);
       const workspaceEligible = Boolean(
         claimedWorkspace !== null &&
         winner !== null &&
-        isProvisional(workspace.title, workspacePrompt),
+        (isProvisional(workspace.title, workspacePrompt) ||
+          (seededTitle !== null && workspace.title === seededTitle)),
       );
       const agentEligible = Boolean(settings.autoNameSessions && isProvisional(agent.title, prompt.text));
       if (!workspaceEligible && !agentEligible) {
@@ -461,18 +528,21 @@ export class ChineseTitlesEngine {
         // Re-read the original override. Only one final write; no placeholder.
         const current = await paseo.workspaces.ref(workspace.id).refresh();
         const previous = this.state.workspaces[workspace.id]?.previousTitle ?? null;
-        if (workspaceResult && current && (current.title === previous || current.title === null || current.title === "" || isProvisional(current.title, workspacePrompt))) {
-          await paseo.workspaces.ref(workspace.id).setTitle(workspaceResult.title);
+        const finalTitle = workspaceResult
+          ? distinctWorkspaceTitle(workspaceResult.title, workspacePrompt, settings.titleMaxChars)
+          : null;
+        if (finalTitle && current && (current.title === previous || current.title === null || current.title === "" || isProvisional(current.title, workspacePrompt))) {
+          await paseo.workspaces.ref(workspace.id).setTitle(finalTitle);
           const verified = await paseo.workspaces.ref(workspace.id).refresh();
-          if (verified?.title !== workspaceResult.title) {
+          if (verified?.title !== finalTitle) {
             this.state.workspaces[workspace.id] = { status: "error", at: now(), error: "verification_failed" };
           } else {
             this.state.workspaces[workspace.id] = {
               status: "done",
               at: now(),
-              title: workspaceResult.title,
+              title: finalTitle,
               previousTitle: previous,
-              ...(workspaceResult.errorCode ? { error: workspaceResult.errorCode } : {}),
+              ...(workspaceResult?.errorCode ? { error: workspaceResult.errorCode } : {}),
             };
           }
         } else {
