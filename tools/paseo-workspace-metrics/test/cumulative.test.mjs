@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, createScopeSubscriptionHandler, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
+import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, projectEventLine, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -16,6 +16,36 @@ const token = (input, cached) => JSON.stringify({
   },
 });
 const other = JSON.stringify({ type: "response_item", payload: { type: "message", content: [] } });
+
+const at = (second) => `2026-11-22T00:00:${String(second).padStart(2, "0")}Z`;
+const turnStarted = (id, second) => JSON.stringify({
+  timestamp: at(second), type: "event_msg", payload: { type: "task_started", turn_id: id },
+});
+// task_complete may carry assistant text upstream; the reader must ignore it.
+const turnComplete = (id, second, extra = {}) => JSON.stringify({
+  timestamp: at(second),
+  type: "event_msg",
+  payload: { type: "task_complete", turn_id: id, last_agent_message: "ignore me", ...extra },
+});
+const turnEvent = (type, second) => JSON.stringify({
+  timestamp: at(second), type: "event_msg", payload: { type },
+});
+const tokenAt = (second, input, cached, output) => JSON.stringify({
+  timestamp: at(second),
+  type: "event_msg",
+  payload: {
+    type: "token_count",
+    info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output } },
+  },
+});
+
+async function runTurn(root, snapshots, agentId = snapshots[0].agent.id) {
+  return collectTurnOutput(
+    { workspaceId: WS, agentId },
+    paseoFor(snapshots),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+}
 
 async function makeRoot(t) {
   const root = await fs.mkdtemp(join(tmpdir(), "workspace-metrics-cumulative-"));
@@ -546,4 +576,501 @@ test("an older in-flight result cannot repopulate the cache after a settings cha
   );
   assert.equal(cached.inputTokens, 200);
   assert.equal(cached.cachedInputTokens, 150);
+});
+
+test("the latest completed Codex turn uses its own native boundaries", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 1_000, 900, 120),
+    tokenAt(3, 1_200, 1_050, 400),
+    turnComplete("turn-1", 4),
+    turnStarted("turn-2", 5),
+    tokenAt(6, 1_500, 1_300, 650),
+    turnComplete("turn-2", 7),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null });
+});
+
+test("a first turn has no baseline without an earlier completed boundary", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 1_000, 900, 40),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, {
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: 850,
+    reason: "missing-samples",
+  });
+});
+
+test("a turn with invalid output in the previous turn does not reuse its baseline", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 100, 50, 100),
+    turnStarted("turn-1", 1),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 200, 100, 250),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, {
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("a snapshot that moves backwards in time disqualifies the turn", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 4),
+    tokenAt(3, 100, 50, 40),
+    tokenAt(5, 120, 60, 80),
+    turnComplete("turn-1", 6),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.outputTokens, null);
+  assert.equal(result.elapsedMs, 2_000);
+});
+
+test("a second completed turn uses the counter observed at its own start", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 650),
+    turnComplete("turn-2", 6),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null });
+});
+
+test("a turn without a completion boundary is not reported", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason: "missing-samples" });
+});
+
+test("a completion without a matching start is ignored", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(1, 100, 50, 40),
+    turnComplete("unknown", 2),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+});
+
+test("an in-turn regression is discarded even when the final value recovers", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 400),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 300),
+    tokenAt(6, 220, 110, 500),
+    turnComplete("turn-2", 7),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, {
+    outputTokens: null,
+    elapsedMs: 3_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("Codex's own time_to_first_token_ms is projected when present", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  // turn-1 is the first boundary, so it only establishes the trusted final
+  // count; turn-2 then measures the delta from it.
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples" });
+});
+
+test("a task_complete carrying an error is not a completed turn", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3, { error: "stream disconnected" }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.outputTokens, null);
+});
+
+test("turn_aborted and thread_rolled_back leave no measurement", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    turnStarted("turn-2", 4),
+    tokenAt(5, 200, 100, 80),
+    turnEvent("turn_aborted", 6),
+  ]);
+  assert.equal((await runTurn(root, [snapshot("agent-a", a)])).reason, "missing-samples");
+  clearCumulativeCaches();
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    turnEvent("thread_rolled_back", 4),
+  ]);
+  assert.equal((await runTurn(root, [snapshot("agent-a", a)])).reason, "missing-samples");
+});
+
+test("a later turn without an observed baseline is not a delta", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(4, 100, 50, 40),
+    turnComplete("turn-2", 5),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.outputTokens, null);
+  assert.equal(result.elapsedMs, 2_000);
+});
+
+test("turn output stays gated by the cumulative switch and Codex marker", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+  ]);
+  const disabled = await collectTurnOutput(
+    { workspaceId: WS, agentId: "agent-a" },
+    paseoFor([snapshot("agent-a", a)]),
+    { codexHome: root },
+  );
+  assert.equal(disabled.reason, "scope");
+  const claude = await runTurn(root, [snapshot("agent-claude", a, {
+    provider: "claude",
+    persistence: { nativeHandle: a, metadata: {} },
+  })]);
+  assert.equal(claude.reason, "not-codex");
+  const other = await runTurn(root, [snapshot("agent-a", a, { workspaceId: "wks_other" })]);
+  assert.equal(other.reason, "read-failed");
+});
+
+test("manual refresh bypasses the short aggregation cache", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const file = await writeSession(root, a, [token(100, 50)]);
+  const first = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(first.inputTokens, 100);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  await fs.appendFile(file, token(200, 150) + "\n");
+  const cached = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(cached.inputTokens, 100);
+  const refreshed = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"], refresh: true },
+    paseoFor([snapshot("agent-a", a)]),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(refreshed.inputTokens, 200);
+  assert.equal(file.endsWith(".jsonl"), true);
+});
+
+test("a refresh finds a rollout that appeared after a negative path cache", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const before = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(before.covered, 0);
+  await writeSession(root, a, [token(100, 50)]);
+  const refreshed = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"], refresh: true },
+    paseoFor([snapshot("agent-a", a)]),
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(refreshed.covered, 1);
+  assert.equal(refreshed.inputTokens, 100);
+});
+
+test("settings changing during agent.refresh discards the old request", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const other = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [token(100, 50)]);
+  await writeSession(other, a, [token(400, 200)]);
+  let revision = "r1";
+  let values = { cumulativeEnabled: true, workspaceIds: [WS], codexHome: root };
+  const settings = {
+    read: async () => ({ status: "ready", revision, values }),
+  };
+  const paseo = {
+    agents: {
+      ref() {
+        return {
+          refresh: async () => {
+            revision = "r2";
+            values = { cumulativeEnabled: false, workspaceIds: [], codexHome: other };
+            return { agent: snapshot("agent-a", a).agent };
+          },
+        };
+      },
+    },
+  };
+  const stale = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { settings },
+  );
+  assert.equal(stale.inputTokens, 0);
+  assert.notEqual(stale.error, null);
+  const next = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { settings },
+  );
+  assert.equal(next.error, "累计统计未启用");
+});
+
+test("disabled or out-of-scope requests never probe the configured root", async (t) => {
+  clearCumulativeCaches();
+  const missing = join(tmpdir(), `workspace-metrics-absent-${Date.now()}`);
+  const disabled = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { settings: settingsFor({ cumulativeEnabled: false, workspaceIds: [WS], codexHome: missing }) },
+  );
+  assert.equal(disabled.error, "累计统计未启用");
+  const outside = await collectCumulativeUsage(
+    { workspaceId: "wks_other", agentIds: ["agent-a"] },
+    paseoFor([snapshot("agent-a", uuid(1))]),
+    { settings: settingsFor({ cumulativeEnabled: true, workspaceIds: [WS], codexHome: missing }) },
+  );
+  assert.equal(outside.error, "当前 workspace 不在本机累计用量允许范围");
+});
+
+test("the aggregation cache is keyed by the usable root", async (t) => {
+  clearCumulativeCaches();
+  const rootA = await makeRoot(t);
+  const rootB = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(rootA, a, [token(100, 50)]);
+  await writeSession(rootB, a, [token(400, 200)]);
+  const paseo = paseoFor([snapshot("agent-a", a)]);
+  const first = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: rootA, workspaceIds: [WS] },
+  );
+  assert.equal(first.inputTokens, 100);
+  const second = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: rootB, workspaceIds: [WS] },
+  );
+  assert.equal(second.inputTokens, 400);
+});
+
+test("an invalid cache snapshot keeps the last valid sample", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    token(100, 50),
+    JSON.stringify({
+      timestamp: "2026-11-22T00:00:02Z",
+      type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: { input_tokens: 50, cached_input_tokens: 90, output_tokens: 10 } } },
+    }),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.inputTokens, 100);
+  assert.equal(result.cachedInputTokens, 50);
+});
+
+test("first-token timing survives a zero elapsed duration", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 2),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 2, { time_to_first_token_ms: 850 }),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: 0, firstTokenMs: 850, reason: "missing-samples" });
+});
+
+test("structural projection ignores content and nested fields while keeping the envelope type", () => {
+  const line = JSON.stringify({
+    timestamp: "2026-11-22T00:00:03Z",
+    type: "event_msg",
+    payload: {
+      type: "task_complete",
+      turn_id: "turn-real",
+      last_agent_message: "text with \"turn_id\":\"fake\" and \"error\":{\"x\":1} and \"}\"",
+      error: { detail: "nested \"time_to_first_token_ms\": 1" },
+      extra: { deep: [1, { content: "\"turn_id\":\"fake2\"" }] },
+      time_to_first_token_ms: 850,
+    },
+  });
+  assert.deepEqual(projectEventLine(line), {
+    eventType: "event_msg",
+    payloadType: "task_complete",
+    timestamp: "2026-11-22T00:00:03Z",
+    turnId: "turn-real",
+    firstTokenMs: 850,
+    errorPresent: true,
+    input: null,
+    cached: null,
+    output: null,
+    closed: true,
+  });
+  const notEvent = JSON.stringify({
+    type: "response_item",
+    payload: { type: "task_complete", turn_id: "turn-fake", time_to_first_token_ms: 1 },
+  });
+  assert.equal(projectEventLine(notEvent).eventType, "response_item");
+  const nestedUsage = JSON.stringify({
+    timestamp: "2026-11-22T00:00:04Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: { input_tokens: 12, cached_input_tokens: 3, output_tokens: 4 }, extra: { output_tokens: 999 } },
+      text: "\"input_tokens\": 999",
+    },
+  });
+  const usage = projectEventLine(nestedUsage);
+  assert.equal(usage.input, 12);
+  assert.equal(usage.cached, 3);
+  assert.equal(usage.output, 4);
+});
+
+test("a between-turn counter change invalidates the next baseline", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    tokenAt(2, 100, 50, 40),
+    turnComplete("turn-1", 3),
+    tokenAt(4, 160, 80, 60),
+    turnStarted("turn-2", 5),
+    tokenAt(6, 220, 110, 80),
+    turnComplete("turn-2", 7),
+  ]);
+  const result = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.equal(result.outputTokens, null);
+  assert.equal(result.reason, "missing-samples");
+  assert.equal(result.elapsedMs, 2_000);
+});
+
+test("boundaries alone return timing on first read and on the cache hit", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    turnStarted("turn-1", 1),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
+  ]);
+  const first = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(first, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples" });
+  const cached = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(cached, first);
+});
+
+test("missing agents are part of the aggregation cache key", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [token(100, 50)]);
+  const paseo = paseoFor([snapshot("agent-a", a)]);
+  const first = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a"] },
+    paseo,
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(first.covered, 1);
+  assert.equal(first.unavailable, 0);
+  const second = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-a", "agent-missing"] },
+    paseo,
+    { codexHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(second.covered, 1);
+  assert.equal(second.unavailable, 1);
+});
+
+test("exponent numbers are consumed fully and truncated records are ignored", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const exponent = JSON.stringify({
+    timestamp: "2026-11-22T00:00:00Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: { total_token_usage: { input_tokens: 12e2, cached_input_tokens: 0, output_tokens: 4 } },
+    },
+  });
+  const truncated = '{"timestamp":"2026-11-22T00:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":900';
+  assert.equal(projectEventLine(exponent).input, 1_200);
+  assert.equal(projectEventLine(truncated).closed, false);
+  await writeSession(root, a, [truncated, exponent]);
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.inputTokens, 1_200);
+  assert.equal(result.covered, 1);
 });

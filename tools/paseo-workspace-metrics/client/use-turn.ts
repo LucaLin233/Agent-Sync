@@ -37,7 +37,13 @@ export function useLiveTurn(agentRef: AgentRef) {
           receive({ kind: "start", ...stamp });
           break;
         case "timeline":
-          if (event.item.type === "assistant_message") receive({ kind: "assistant", ...stamp });
+          if (event.item.type === "assistant_message") {
+            receive({
+              kind: "assistant",
+              ...stamp,
+              visible: event.item.text.trim().length > 0,
+            });
+          }
           break;
         case "turn_completed":
           receive({

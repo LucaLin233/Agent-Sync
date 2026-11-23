@@ -1,6 +1,7 @@
 {
   "id": "workspace-metrics",
   "name": "工作区用量",
+  "description": "查看工作区会话的 Token 用量、缓存命中率、首个可见回复耗时与整轮输出速率。",
   "requirements": {
     "paseo": ">=0.16.0"
   }

@@ -4,14 +4,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import type { cumulativeUsageRpc } from "../shared/cumulative.ts";
+import type { cumulativeUsageRpc, turnOutputRpc } from "../shared/cumulative.ts";
 import { summarizeLatestSamples } from "../shared/metrics.ts";
 import { effectiveWorkspaceScope, type WorkspaceSettingsValues } from "../shared/scope.ts";
 
 export interface CodexHomeSettings {
   read(): Promise<
-    | { status: "ready"; values: WorkspaceSettingsValues & { codexHome?: string } }
-    | { status: "invalid"; error: string }
+    | { status: "ready"; revision?: string; values: WorkspaceSettingsValues & { codexHome?: string } }
+    | { status: "invalid"; revision?: string; error: string }
   >;
 }
 
@@ -24,12 +24,26 @@ interface SessionFile {
   ctimeMs: number;
 }
 
-interface SessionCounts {
+export interface CompletedTurn {
+  /** Cumulative output rose by this much between the turn's native boundaries. */
+  outputTokens: number | null;
+  /** Both boundaries come from the same rollout, never from client events. */
+  elapsedMs: number | null;
+  /** Codex's own time_to_first_token_ms for that completed turn, if reported. */
+  firstTokenMs: number | null;
+}
+
+interface CacheCounts {
   input: number;
   cached: number;
 }
 
-interface FileState extends SessionCounts {
+interface SessionRead {
+  sample: CacheCounts | null;
+  lastTurn: CompletedTurn | null;
+}
+
+interface FileState {
   dev: number;
   ino: number;
   size: number;
@@ -37,6 +51,18 @@ interface FileState extends SessionCounts {
   ctimeMs: number;
   offset: number;
   valid: boolean;
+  input: number;
+  cached: number;
+  trustedOutput: number | null;
+  lastTurn: CompletedTurn | null;
+  openTurn: {
+    id: string;
+    startedAt: number;
+    baseline: number | null;
+    finalAt: number | null;
+    finalOutput: number | null;
+    broken: boolean;
+  } | null;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -49,7 +75,7 @@ const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const WORKSPACE_TTL_MS = 2_000;
 const pathCache = new Map<string, { at: number; file: SessionFile | null }>();
 const fileCache = new Map<string, FileState>();
-const inflight = new Map<string, Promise<SessionCounts | null>>();
+const inflight = new Map<string, Promise<SessionRead | null>>();
 const workspaceCache = new Map<string, { at: number; value: RpcOutput<typeof cumulativeUsageRpc> }>();
 const workspaceInflight = new Map<string, Promise<RpcOutput<typeof cumulativeUsageRpc>>>();
 let cacheGeneration = 0;
@@ -76,28 +102,294 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : null;
 }
 
-function parseTokenLine(line: string, state: FileState) {
-  const head = line.slice(0, 240);
-  if (!head.includes("event_msg") || !head.includes("token_count")) return;
-  let parsed: unknown;
+interface ProjectedEvent {
+  eventType: string | null;
+  payloadType: string | null;
+  timestamp: string | null;
+  turnId: string | null;
+  firstTokenMs: number | null;
+  errorPresent: boolean;
+  input: number | null;
+  cached: number | null;
+  output: number | null;
+  /** False when the top-level object did not close; partial records are ignored. */
+  closed: boolean;
+}
+
+function emptyProjection(): ProjectedEvent {
+  return {
+    eventType: null, payloadType: null, timestamp: null, turnId: null,
+    firstTokenMs: null, errorPresent: false, input: null, cached: null, output: null,
+    closed: false,
+  };
+}
+
+function skipSpace(raw: string, index: number): number {
+  while (index < raw.length && (raw[index] === " " || raw[index] === "\t" || raw[index] === "\n" || raw[index] === "\r")) {
+    index += 1;
+  }
+  return index;
+}
+
+function skipString(raw: string, index: number): number {
+  let escaped = false;
+  for (let cursor = index + 1; cursor < raw.length; cursor += 1) {
+    const char = raw[cursor];
+    if (escaped) escaped = false;
+    else if (char === "\\") escaped = true;
+    else if (char === '"') return cursor + 1;
+  }
+  return raw.length;
+}
+
+function skipValue(raw: string, index: number): number {
+  index = skipSpace(raw, index);
+  const first = raw[index];
+  if (first === '"') return skipString(raw, index);
+  if (first === "{" || first === "[") {
+    const close = first === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let cursor = index; cursor < raw.length; cursor += 1) {
+      const char = raw[cursor];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === first) depth += 1;
+      else if (char === close) {
+        depth -= 1;
+        if (depth === 0) return cursor + 1;
+      }
+    }
+    return raw.length;
+  }
+  while (index < raw.length && raw[index] !== "," && raw[index] !== "}" && raw[index] !== "]") index += 1;
+  return index;
+}
+
+/** Reads a short string value; longer values are skipped and return null. */
+function readSmallString(raw: string, index: number, max = 256): { value: string | null; end: number } {
+  const end = skipString(raw, index);
+  if (end - index - 2 > max) return { value: null, end };
   try {
-    parsed = JSON.parse(line);
+    return { value: JSON.parse(raw.slice(index, end)) as string, end };
   } catch {
+    return { value: null, end };
+  }
+}
+
+function readSafeNumber(raw: string, index: number): { value: number | null; end: number } {
+  const match = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(raw.slice(index, index + 32));
+  if (!match) return { value: null, end: index };
+  const end = index + match[0].length;
+  const value = Number(match[0]);
+  return { value: Number.isSafeInteger(value) && value >= 0 ? value : null, end };
+}
+
+function projectUsageFields(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "input_tokens") { const value = readSafeNumber(raw, index); out.input = value.value; index = value.end; }
+    else if (key.value === "cached_input_tokens") { const value = readSafeNumber(raw, index); out.cached = value.value; index = value.end; }
+    else if (key.value === "output_tokens") { const value = readSafeNumber(raw, index); out.output = value.value; index = value.end; }
+    else index = skipValue(raw, index);
+  }
+  return raw.length;
+}
+
+function projectInfo(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    index = key.value === "total_token_usage"
+      ? projectUsageFields(raw, index, out)
+      : skipValue(raw, index);
+  }
+  return raw.length;
+}
+
+function projectPayload(raw: string, index: number, out: ProjectedEvent): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "type") {
+      const value = readSmallString(raw, index, 64);
+      out.payloadType = value.value;
+      index = value.end;
+    } else if (key.value === "turn_id") {
+      const value = readSmallString(raw, index, 128);
+      out.turnId = value.value;
+      index = value.end;
+    } else if (key.value === "time_to_first_token_ms") {
+      const value = readSafeNumber(raw, index);
+      out.firstTokenMs = value.value;
+      index = value.end;
+    } else if (key.value === "error") {
+      // Only presence matters; the nested error body is skipped, never parsed.
+      const end = skipValue(raw, index);
+      out.errorPresent = raw.slice(index, end).trim() !== "null";
+      index = end;
+    } else if (key.value === "info") {
+      index = projectInfo(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return raw.length;
+}
+
+/**
+ * Structural projection of exactly the fields this reader uses. Strings and
+ * nested values that are not on the whitelist are skipped, not parsed, so
+ * assistant text and error bodies never enter the object graph. The top-level
+ * event type is taken from the real envelope, not from a substring.
+ */
+export function projectEventLine(raw: string): ProjectedEvent {
+  const out = emptyProjection();
+  let index = skipSpace(raw, 0);
+  if (raw[index] !== "{") return out;
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") { out.closed = true; break; }
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return out;
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return out;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "type") {
+      const value = readSmallString(raw, index, 32);
+      out.eventType = value.value ?? "";
+      index = value.end;
+    } else if (key.value === "timestamp") {
+      const value = readSmallString(raw, index, 64);
+      out.timestamp = value.value;
+      index = value.end;
+    } else if (key.value === "payload") {
+      index = projectPayload(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return out;
+}
+
+function parseLine(line: string, state: FileState) {
+  if (!line.includes("event_msg")) return;
+  const event = projectEventLine(line);
+  if (!event.closed || event.eventType !== "event_msg") return;
+  const at = event.timestamp === null ? NaN : Date.parse(event.timestamp);
+  const type = event.payloadType;
+
+  if (type === "task_started") {
+    if (!event.turnId || !Number.isFinite(at)) return;
+    const abandoned = state.openTurn !== null;
+    const baseline = abandoned ? null : state.trustedOutput;
+    if (abandoned) state.trustedOutput = null;
+    state.openTurn = { id: event.turnId, startedAt: at, baseline, finalAt: null, finalOutput: null, broken: false };
     return;
   }
-  const record = asRecord(parsed);
-  if (!record || record.type !== "event_msg") return;
-  const payload = asRecord(record.payload);
-  if (!payload || payload.type !== "token_count") return;
-  const info = asRecord(payload.info);
-  const total = asRecord(info?.total_token_usage);
-  if (!total) return;
-  const input = total.input_tokens;
-  const cached = total.cached_input_tokens;
-  if (!isToken(input) || !isToken(cached) || cached > input) return;
-  state.input = input;
-  state.cached = cached;
-  state.valid = true;
+
+  if (type === "task_complete" || type === "turn_complete") {
+    const open = state.openTurn;
+    if (!event.turnId || !open || open.id !== event.turnId || !Number.isFinite(at)) return;
+    state.openTurn = null;
+    const firstTokenMs = event.firstTokenMs;
+    if (event.errorPresent) {
+      state.trustedOutput = null;
+      state.lastTurn = { outputTokens: null, elapsedMs: null, firstTokenMs: null };
+      return;
+    }
+    const finalTrusted = !open.broken && open.finalOutput !== null &&
+      open.finalAt !== null && open.finalAt >= open.startedAt && open.finalAt <= at;
+    const outputValid = finalTrusted && open.baseline !== null && open.finalOutput! >= open.baseline;
+    state.trustedOutput = finalTrusted ? open.finalOutput : null;
+    state.lastTurn = {
+      outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
+      elapsedMs: at >= open.startedAt ? at - open.startedAt : null,
+      firstTokenMs,
+    };
+    return;
+  }
+
+  if (type === "turn_aborted" || type === "thread_rolled_back") {
+    state.openTurn = null;
+    state.lastTurn = null;
+    state.trustedOutput = null;
+    return;
+  }
+
+  if (type !== "token_count") return;
+  const input = event.input;
+  const cached = event.cached;
+  const output = event.output;
+  // A bad cache sample never discards the last valid cache counters.
+  if (input !== null && cached !== null && cached <= input) {
+    state.input = input;
+    state.cached = cached;
+    state.valid = true;
+  }
+  if (output === null || !Number.isFinite(at)) {
+    if (state.openTurn) state.openTurn.broken = true;
+    return;
+  }
+  const open = state.openTurn;
+  if (!open) {
+    // A valid count between turns means the last completed boundary is no
+    // longer the value the next turn starts from. Any change invalidates it,
+    // not only a smaller one.
+    if (state.trustedOutput !== null && output !== state.trustedOutput) {
+      state.trustedOutput = null;
+    }
+    return;
+  }
+  {
+    if (at < open.startedAt || (open.finalAt !== null && at < open.finalAt)) {
+      open.broken = true;
+    } else if (
+      (open.finalOutput !== null && output < open.finalOutput) ||
+      (open.baseline !== null && output < open.baseline)
+    ) {
+      open.broken = true;
+    } else {
+      open.finalAt = at;
+      open.finalOutput = output;
+    }
+  }
 }
 
 function resetState(file: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): FileState {
@@ -110,7 +402,10 @@ function resetState(file: { dev: number; ino: number; size: number; mtimeMs: num
     offset: 0,
     input: 0,
     cached: 0,
+    lastTurn: null,
     valid: false,
+    trustedOutput: null,
+    openTurn: null,
   };
 }
 
@@ -121,6 +416,13 @@ function sameFile(a: { dev: number; ino: number }, b: { dev: number; ino: number
 function sameState(a: FileState, b: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }) {
   return a.dev === b.dev && a.ino === b.ino && a.size === b.size &&
     a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
+
+function countsOf(state: FileState): SessionRead {
+  return {
+    sample: state.valid ? { input: state.input, cached: state.cached } : null,
+    lastTurn: state.lastTurn,
+  };
 }
 
 async function appendFromHandle(handle: FileHandle, state: FileState, end: number) {
@@ -135,7 +437,7 @@ async function appendFromHandle(handle: FileHandle, state: FileState, end: numbe
     pending = pending.length === 0 ? buffer.subarray(0, bytesRead) : Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
     let newline = pending.indexOf(0x0a);
     while (newline !== -1) {
-      parseTokenLine(pending.subarray(0, newline).toString("utf8"), state);
+      parseLine(pending.subarray(0, newline).toString("utf8"), state);
       pending = pending.subarray(newline + 1);
       newline = pending.indexOf(0x0a);
     }
@@ -151,7 +453,7 @@ function forget(path: string) {
   }
 }
 
-async function readSessionCountsUncached(file: SessionFile): Promise<SessionCounts | null> {
+async function readSessionCountsUncached(file: SessionFile): Promise<SessionRead | null> {
   let before;
   try {
     before = await fs.lstat(file.path);
@@ -176,7 +478,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionCoun
 
     let state = fileCache.get(file.path);
     if (state && sameState(state, stat)) {
-      return state.valid ? { input: state.input, cached: state.cached } : null;
+      return countsOf(state);
     }
     if (!state || !sameFile(state, stat) || stat.size < state.offset) {
       state = resetState(stat);
@@ -194,7 +496,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionCoun
     state.mtimeMs = stat.mtimeMs;
     state.ctimeMs = stat.ctimeMs;
     fileCache.set(file.path, state);
-    return state.valid ? { input: state.input, cached: state.cached } : null;
+    return countsOf(state);
   } catch {
     forget(file.path);
     return null;
@@ -203,7 +505,7 @@ async function readSessionCountsUncached(file: SessionFile): Promise<SessionCoun
   }
 }
 
-function readSessionCounts(file: SessionFile): Promise<SessionCounts | null> {
+function readSessionCounts(file: SessionFile): Promise<SessionRead | null> {
   const key = `${file.path}|${file.dev}|${file.ino}|${file.size}|${file.mtimeMs}|${file.ctimeMs}`;
   const running = inflight.get(key);
   if (running) return running;
@@ -295,10 +597,18 @@ function dateKeys(millis: number): string[] {
   return keys;
 }
 
-async function findSessionFile(root: string, uuid: string, createdMs: number | null): Promise<SessionFile | null> {
+async function findSessionFile(
+  root: string,
+  uuid: string,
+  createdMs: number | null,
+  refresh = false,
+): Promise<SessionFile | null> {
   const key = `${root}|${uuid}|${createdMs ?? ""}`;
   const cached = pathCache.get(key);
-  if (cached && Date.now() - cached.at < PATH_TTL_MS) return cached.file;
+  // A refresh ignores a cached miss so a rollout that just appeared is found.
+  if (cached && Date.now() - cached.at < PATH_TTL_MS && (cached.file !== null || !refresh)) {
+    return cached.file;
+  }
 
   const candidates = await listExact(join(root, "archived_sessions"), uuid);
   const dates = new Set<string>();
@@ -319,29 +629,44 @@ async function findSessionFile(root: string, uuid: string, createdMs: number | n
         return null;
       }
     } catch {
-      pathCache.set(key, { at: Date.now(), file: null });
+      if (!refresh) pathCache.set(key, { at: Date.now(), file: null });
       return null;
     }
   }
-  pathCache.set(key, { at: Date.now(), file: best });
+  if (best || !refresh) pathCache.set(key, { at: Date.now(), file: best });
   return best;
 }
 
-async function readSettings(
-  settings?: CodexHomeSettings,
-): Promise<WorkspaceSettingsValues & { codexHome?: string }> {
-  if (!settings) return {};
+interface SettingsSnapshot {
+  values: WorkspaceSettingsValues & { codexHome?: string };
+  revision: string | null;
+}
+
+async function readSettingsSnapshot(settings?: CodexHomeSettings): Promise<SettingsSnapshot> {
+  if (!settings) return { values: {}, revision: null };
   try {
     const state = await settings.read();
-    if (state.status === "ready") return state.values;
+    if (state.status === "ready") return { values: state.values, revision: state.revision ?? null };
+    return { values: {}, revision: state.revision ?? null };
   } catch {
     // An unreadable setting means no scope; never widen the default.
   }
-  return {};
+  return { values: {}, revision: null };
+}
+
+/** True when the stored settings moved on during this request's async work. */
+async function settingsChangedSince(settings: CodexHomeSettings | undefined, revision: string | null): Promise<boolean> {
+  if (!settings || revision === null) return false;
+  try {
+    const state = await settings.read();
+    return state.revision !== revision;
+  } catch {
+    return true;
+  }
 }
 
 export async function workspaceScope(settings?: CodexHomeSettings) {
-  const values = await readSettings(settings);
+  const { values } = await readSettingsSnapshot(settings);
   const scope = effectiveWorkspaceScope(values);
   return {
     enabled: scope.enabled,
@@ -370,11 +695,10 @@ async function usableRoot(root: string): Promise<boolean> {
   return false;
 }
 
-export async function resolveCodexHome(
-  settings?: CodexHomeSettings,
+export async function resolveCodexHomeFromValues(
+  values: WorkspaceSettingsValues & { codexHome?: string },
   options: { home?: string; env?: string | null } = {},
 ): Promise<{ root: string | null; error: string | null }> {
-  const values = await readSettings(settings);
   const home = resolve(options.home ?? homedir());
   let homeReal = home;
   try {
@@ -448,6 +772,14 @@ export async function resolveCodexHome(
   return { root: null, error: "未找到 Codex 会话目录；请设置 CODEX_HOME 或插件 codexHome" };
 }
 
+export async function resolveCodexHome(
+  settings?: CodexHomeSettings,
+  options: { home?: string; env?: string | null } = {},
+): Promise<{ root: string | null; error: string | null }> {
+  const { values } = await readSettingsSnapshot(settings);
+  return resolveCodexHomeFromValues(values, options);
+}
+
 function empty(
   workspaceId: string,
   eligible: number,
@@ -467,20 +799,66 @@ function empty(
   };
 }
 
+interface RequestOptions {
+  settings?: CodexHomeSettings;
+  codexHome?: string;
+  cumulativeEnabled?: boolean;
+  workspaceIds?: string[];
+  allWorkspaces?: boolean;
+}
+
+interface RequestContext {
+  scope: ReturnType<typeof effectiveWorkspaceScope>;
+  revision: string | null;
+  values: WorkspaceSettingsValues & { codexHome?: string };
+}
+
+/**
+ * One settings snapshot decides both the scope and the data root. Tests may
+ * pass explicit options, which carry no store revision.
+ */
+async function requestContext(options: RequestOptions): Promise<RequestContext> {
+  const explicit = options.cumulativeEnabled !== undefined ||
+    options.workspaceIds !== undefined ||
+    options.allWorkspaces !== undefined;
+  const snapshot = explicit
+    ? {
+      values: {
+        cumulativeEnabled: options.cumulativeEnabled,
+        workspaceIds: options.workspaceIds,
+        allWorkspaces: options.allWorkspaces,
+      } as WorkspaceSettingsValues & { codexHome?: string },
+      revision: null,
+    }
+    : await readSettingsSnapshot(options.settings);
+  return {
+    scope: effectiveWorkspaceScope(snapshot.values),
+    revision: snapshot.revision,
+    values: snapshot.values,
+  };
+}
+
+/** Directory probing happens only after scope and exact-agent checks pass. */
+async function resolveRoot(
+  options: RequestOptions,
+  context: RequestContext,
+): Promise<{ root: string | null; error: string | null }> {
+  return options.codexHome
+    ? { root: options.codexHome, error: null }
+    : resolveCodexHomeFromValues(context.values);
+}
+
+const STALE = "设置已变化，已丢弃本次读取";
+
 async function collectCumulativeUsageUncached(
   input: RpcInput<typeof cumulativeUsageRpc>,
   paseo: PluginHandlerContext["paseo"],
-  options: {
-    settings?: CodexHomeSettings;
-    codexHome?: string;
-    cumulativeEnabled?: boolean;
-    workspaceIds?: string[];
-    allWorkspaces?: boolean;
-    scope?: ReturnType<typeof effectiveWorkspaceScope>;
-  } = {},
+  options: RequestOptions,
+  context: RequestContext,
+  refresh: boolean,
 ): Promise<RpcOutput<typeof cumulativeUsageRpc>> {
   const workspaceId = input.workspaceId;
-  const scope = options.scope ?? effectiveWorkspaceScope(await resolveWorkspaceValues(options));
+  const { scope } = context;
   if (!scope.enabled) {
     return empty(workspaceId, 0, 0, "累计统计未启用");
   }
@@ -530,59 +908,143 @@ async function collectCumulativeUsageUncached(
     return empty(workspaceId, 0, unavailable, "当前工作区没有可确认的 Codex 会话");
   }
 
-  const root = options.codexHome
-    ? { root: options.codexHome, error: null }
-    : await resolveCodexHome(options.settings);
+  // Settings may have changed while agent.refresh() was in flight. Stop before
+  // resolving any root; the request keeps its original grant only.
+  if (await settingsChangedSince(options.settings, context.revision)) {
+    return empty(workspaceId, eligible.size, unavailable, STALE);
+  }
+
+  const root = await resolveRoot(options, context);
   if (!root.root) {
     return empty(workspaceId, eligible.size, unavailable, root.error ?? "未找到 Codex 会话目录");
   }
+  if (await settingsChangedSince(options.settings, context.revision)) {
+    return empty(workspaceId, eligible.size, unavailable, STALE);
+  }
 
-  let realRoot = root.root;
+  const key = `${workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${[...eligible.keys()].sort().join(",")}|${unavailable}|${root.root}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
+  if (!refresh) {
+    const cached = workspaceCache.get(key);
+    if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return cached.value;
+    const running = workspaceInflight.get(key);
+    if (running) return running;
+  }
+
+  let realRoot: string;
   try {
     realRoot = await fs.realpath(root.root);
   } catch {
     return empty(workspaceId, eligible.size, unavailable, "Codex 会话目录不可读");
   }
 
-  const counts = await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
-    const file = await findSessionFile(realRoot, uuid, createdMs);
-    if (!file) return null;
-    return readSessionCounts(file);
-  }));
+  const generation = cacheGeneration;
+  let task!: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
+  task = (async () => {
+    const reads = await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
+      const file = await findSessionFile(realRoot, uuid, createdMs, refresh);
+      if (!file) return null;
+      return readSessionCounts(file);
+    }));
+    if (await settingsChangedSince(options.settings, context.revision)) {
+      return empty(workspaceId, eligible.size, unavailable, STALE);
+    }
+    const samples = reads
+      .map((read) => read?.sample ?? null)
+      .filter((sample): sample is CacheCounts => sample !== null);
+    const totals = summarizeLatestSamples(samples);
+    return {
+      workspaceId,
+      inputTokens: totals.input,
+      cachedInputTokens: totals.cached,
+      covered: totals.covered,
+      eligible: eligible.size,
+      missing: eligible.size - totals.covered,
+      unavailable,
+      rate: totals.rate,
+      error: null,
+    };
+  })().then((value) => {
+    if (!refresh && generation === cacheGeneration) {
+      workspaceCache.set(key, { at: Date.now(), value });
+    }
+    return value;
+  }).finally(() => {
+    if (workspaceInflight.get(key) === task) workspaceInflight.delete(key);
+  });
+  if (!refresh) workspaceInflight.set(key, task);
+  return task;
+}
 
-  const samples = counts.filter((sample): sample is SessionCounts => sample !== null);
-  const totals = summarizeLatestSamples(samples);
+function emptyTurn(reason: "not-codex" | "scope" | "missing-samples" | "read-failed"): RpcOutput<typeof turnOutputRpc> {
+  return { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason };
+}
+
+/**
+ * The latest completed Codex turn for one agent. It shares the cumulative
+ * feature's settings snapshot, gates, and rollout reader; timing and first-token
+ * values do not depend on a cache sample.
+ */
+export async function collectTurnOutput(
+  input: RpcInput<typeof turnOutputRpc>,
+  paseo: PluginHandlerContext["paseo"],
+  options: RequestOptions = {},
+): Promise<RpcOutput<typeof turnOutputRpc>> {
+  const context = await requestContext(options);
+  const { scope } = context;
+  if (!scope.enabled || scope.error) return emptyTurn("scope");
+  if (!scope.allWorkspaces && !scope.workspaceIds.includes(input.workspaceId)) return emptyTurn("scope");
+
+  let result;
+  try {
+    result = await paseo.agents.ref(input.agentId).refresh();
+  } catch {
+    return emptyTurn("read-failed");
+  }
+  const agent = result?.agent;
+  if (!agent || agent.workspaceId !== input.workspaceId || agent.archivedAt || agent.background) {
+    return emptyTurn("read-failed");
+  }
+  const marker = agent.persistence?.metadata?.provider;
+  if (agent.provider !== "codex" && marker !== "codex") return emptyTurn("not-codex");
+  const nativeHandle = agent.persistence?.nativeHandle;
+  if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) return emptyTurn("not-codex");
+
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+  const root = await resolveRoot(options, context);
+  if (!root.root) return emptyTurn("read-failed");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+
+  let realRoot: string;
+  try {
+    realRoot = await fs.realpath(root.root);
+  } catch {
+    return emptyTurn("read-failed");
+  }
+
+  const created = typeof agent.createdAt === "string" ? Date.parse(agent.createdAt) : NaN;
+  const createdMs = Number.isFinite(created) ? created : null;
+  // A newly written rollout must not sit behind a 30 second negative path cache.
+  const file = await findSessionFile(realRoot, nativeHandle.toLowerCase(), createdMs, true);
+  if (!file) return emptyTurn("missing-samples");
+  const read = await readSessionCounts(file);
+  if (!read?.lastTurn) return emptyTurn("missing-samples");
+
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+
+  const { outputTokens, elapsedMs, firstTokenMs } = read.lastTurn;
+  // Independent first-token timing survives a zero or absent elapsed duration.
+  if (elapsedMs === null && firstTokenMs === null && outputTokens === null) return emptyTurn("missing-samples");
   return {
-    workspaceId,
-    inputTokens: totals.input,
-    cachedInputTokens: totals.cached,
-    covered: totals.covered,
-    eligible: eligible.size,
-    missing: eligible.size - totals.covered,
-    unavailable,
-    rate: totals.rate,
-    error: null,
+    outputTokens,
+    elapsedMs,
+    firstTokenMs,
+    reason: outputTokens === null ? "missing-samples" : null,
   };
 }
 
-async function resolveWorkspaceValues(options: {
-  settings?: CodexHomeSettings;
-  cumulativeEnabled?: boolean;
-  workspaceIds?: string[];
-  allWorkspaces?: boolean;
-}): Promise<WorkspaceSettingsValues> {
-  if (
-    options.cumulativeEnabled !== undefined ||
-    options.workspaceIds !== undefined ||
-    options.allWorkspaces !== undefined
-  ) {
-    return {
-      cumulativeEnabled: options.cumulativeEnabled,
-      workspaceIds: options.workspaceIds,
-      allWorkspaces: options.allWorkspaces,
-    };
-  }
-  return readSettings(options.settings);
+export function createTurnOutputHandler(settings?: CodexHomeSettings) {
+  return (input: RpcInput<typeof turnOutputRpc>, context: PluginHandlerContext) =>
+    collectTurnOutput(input, context.paseo, { settings });
 }
 
 export function createCumulativeHandler(settings?: CodexHomeSettings) {
@@ -593,36 +1055,13 @@ export function createCumulativeHandler(settings?: CodexHomeSettings) {
 export async function collectCumulativeUsage(
   input: RpcInput<typeof cumulativeUsageRpc>,
   paseo: PluginHandlerContext["paseo"],
-  options: {
-    settings?: CodexHomeSettings;
-    codexHome?: string;
-    cumulativeEnabled?: boolean;
-    workspaceIds?: string[];
-    allWorkspaces?: boolean;
-  } = {},
+  options: RequestOptions = {},
 ): Promise<RpcOutput<typeof cumulativeUsageRpc>> {
-  const scope = effectiveWorkspaceScope(await resolveWorkspaceValues(options));
+  const context = await requestContext(options);
+  const { scope } = context;
   if (!scope.enabled) return empty(input.workspaceId, 0, 0, "累计统计未启用");
   if (scope.error) return empty(input.workspaceId, 0, 0, scope.error);
-  const key = `${input.workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${options.codexHome ?? ""}|${scope.enabled}|${scope.allWorkspaces ? "*" : ""}|${scope.workspaceIds.join(",")}`;
-  const cached = workspaceCache.get(key);
-  if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return Promise.resolve(cached.value);
-  const running = workspaceInflight.get(key);
-  if (running) return running;
-  const generation = cacheGeneration;
-  let task: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
-  task = collectCumulativeUsageUncached(input, paseo, { ...options, scope })
-    .then((value) => {
-      if (generation === cacheGeneration) {
-        workspaceCache.set(key, { at: Date.now(), value });
-      }
-      return value;
-    })
-    .finally(() => {
-      if (workspaceInflight.get(key) === task) workspaceInflight.delete(key);
-    });
-  workspaceInflight.set(key, task);
-  return task;
+  return collectCumulativeUsageUncached(input, paseo, options, context, input.refresh === true);
 }
 
 type ScopeSettings = CodexHomeSettings & {
