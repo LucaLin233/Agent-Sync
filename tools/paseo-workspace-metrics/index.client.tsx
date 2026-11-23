@@ -3,7 +3,13 @@ import { MetricsPanel } from "./client/panel";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries, type DirectoryAgent } from "./shared/agents";
 import { cumulativeUsageRpc } from "./shared/cumulative";
-import { formatCachePillLabel, formatRecentPillLabel } from "./shared/metrics";
+import {
+  appendTurnSpeed,
+  formatCachePillLabel,
+  formatRecentPillLabel,
+  formatTokenSpeed,
+  tokensPerSecond,
+} from "./shared/metrics";
 import { workspaceSettingsSubscription } from "./shared/scope";
 
 interface PillState {
@@ -15,6 +21,8 @@ interface PillState {
 interface CumulativeState {
   rate: number | null;
   error: string | null;
+  /** Latest completed turn's speed from the same aggregate response. */
+  turnSpeed: number | null;
 }
 
 const CUMULATIVE_MIN_INTERVAL_MS = 10_000;
@@ -35,12 +43,13 @@ export default function contribute(client: PluginClientContext) {
   };
 
   const addPill = (agent: DirectoryAgent, workspaceId: string, label: string) => {
+    const speed = cumulative.get(workspaceId)?.turnSpeed ?? null;
     const registration = client.addComposerPill({
       id: "open-metrics",
       workspaceId,
       agentId: agent.id,
       button: {
-        title: "打开工作区用量",
+        title: speed === null ? "打开工作区用量" : "工作区最近完成轮 " + formatTokenSpeed(speed),
         icon: "Activity",
         label,
         behavior: {
@@ -69,7 +78,9 @@ export default function contribute(client: PluginClientContext) {
     const state = cumulative.get(workspaceId);
     if (!state) return "缓存 …";
     if (state.error) return recentLabel();
-    return formatCachePillLabel(state.rate);
+    // The same response carries the latest completed turn; an unknown speed
+    // leaves the original cache label untouched and never becomes 0.
+    return appendTurnSpeed(formatCachePillLabel(state.rate), state.turnSpeed);
   };
 
   // Reuses live registrations; only a changed workspace or label causes a write.
@@ -89,7 +100,11 @@ export default function contribute(client: PluginClientContext) {
       if (!existing) {
         addPill(agent, target.workspaceId, label);
       } else if (existing.label !== label) {
-        existing.registration.update({ label });
+        const speed = cumulative.get(target.workspaceId)?.turnSpeed ?? null;
+        existing.registration.update({
+          label,
+          title: speed === null ? "打开工作区用量" : "工作区最近完成轮 " + formatTokenSpeed(speed),
+        });
         existing.label = label;
       }
     }
@@ -129,12 +144,16 @@ export default function contribute(client: PluginClientContext) {
         void client.rpc(cumulativeUsageRpc, { workspaceId, agentIds })
           .then((result) => {
             if (lifetime.signal.aborted || generation !== requestGeneration) return;
-            cumulative.set(workspaceId, { rate: result.rate, error: result.error });
+            cumulative.set(workspaceId, {
+              rate: result.rate,
+              error: result.error,
+              turnSpeed: tokensPerSecond(result.recentTurn?.outputTokens, result.recentTurn?.elapsedMs),
+            });
             reconcile();
           })
           .catch((error) => {
             if (lifetime.signal.aborted || generation !== requestGeneration) return;
-            cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败" });
+            cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败", turnSpeed: null });
             console.error("Cumulative usage failed", error);
             reconcile();
           });
