@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type TitleStatus = "legacy" | "pending" | "generating" | "done" | "skipped" | "error";
 
@@ -21,13 +21,37 @@ export interface ChineseTitlesState {
   agents: Record<string, EntityTitleState>;
 }
 
+function pluginRoot(): string {
+  const configured = process.env.PASEO_HOME?.trim();
+  if (configured && !isAbsolute(configured)) throw new Error("PASEO_HOME must be absolute");
+  return resolve(configured || join(homedir(), ".paseo"), "plugin-data", "paseo-chinese-titles");
+}
+
+/** Resolve a path and prove it stays inside this plugin's data directory. */
+export function assertPluginPath(candidate: string): string {
+  const root = pluginRoot();
+  const resolved = resolve(candidate);
+  const rel = relative(root, resolved);
+  if (rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) return resolved;
+  throw new Error("Plugin path escapes its data directory");
+}
+
+/** Build a path from fixed, separator-free segments only. */
+export function safePluginPath(...segments: string[]): string {
+  for (const segment of segments) {
+    if (!segment || segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\")) {
+      throw new Error("Invalid plugin path segment");
+    }
+  }
+  return assertPluginPath(join(pluginRoot(), ...segments));
+}
+
 export function pluginDataDir(): string {
-  const home = process.env.PASEO_HOME || join(homedir(), ".paseo");
-  return join(home, "plugin-data", "paseo-chinese-titles");
+  return assertPluginPath(pluginRoot());
 }
 
 export function helperDirectory(): string {
-  return join(pluginDataDir(), "helper");
+  return safePluginPath("helper");
 }
 
 export function isInsideDirectory(path: string | null | undefined, directory: string): boolean {
@@ -49,7 +73,7 @@ export function newState(): ChineseTitlesState {
 }
 
 export async function loadState(): Promise<ChineseTitlesState> {
-  const file = join(pluginDataDir(), "state.json");
+  const file = safePluginPath("state.json");
   try {
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<ChineseTitlesState>;
@@ -74,8 +98,8 @@ export function saveState(state: ChineseTitlesState): Promise<void> {
   writeChain = writeChain.then(async () => {
     const dir = pluginDataDir();
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-    const file = join(dir, "state.json");
-    const temp = join(dir, `.state-${process.pid}-${Date.now()}.tmp`);
+    const file = safePluginPath("state.json");
+    const temp = safePluginPath(`.state-${process.pid}-${Date.now()}.tmp`);
     await fs.writeFile(temp, snapshot, { encoding: "utf8", mode: 0o600 });
     await fs.rename(temp, file);
   });

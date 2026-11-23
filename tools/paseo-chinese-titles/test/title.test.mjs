@@ -107,3 +107,13 @@ test("generation plan counts session-only once, shared once, competitor twice", 
   const none = planTitleGeneration({ workspaceEligible: false, agentEligible: false, winnerIsAgent: false });
   assert.deepEqual(none, { workspace: false, agent: "none" });
 });
+
+test("plugin data paths cannot escape the plugin directory", async () => {
+  const { assertPluginPath, pluginDataDir, safePluginPath } = await import("../server/state.ts");
+  const root = pluginDataDir();
+  assert.equal(assertPluginPath(root), root);
+  assert.equal(safePluginPath("helper", "bootstrap"), `${root}/helper/bootstrap`);
+  assert.throws(() => safePluginPath("../escape"));
+  assert.throws(() => safePluginPath("/absolute"));
+  assert.throws(() => assertPluginPath(`${root}/../escape`));
+});

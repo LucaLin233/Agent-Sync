@@ -16,11 +16,11 @@ import {
 import { pickFirstTask, type FirstTaskFact } from "../shared/first-task";
 import { generateTitle, isHelperAgent, type GenerationResult } from "./helper";
 import { planTitleGeneration } from "../shared/generation-plan";
-import { helperDirectory, isInsideDirectory, loadState, markBaseline, saveState, type ChineseTitlesState } from "./state";
+import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
 const BOOTSTRAP_TITLE = "中文标题引导";
-const bootstrapDirectory = () => join(helperDirectory(), "bootstrap");
+const bootstrapDirectory = () => safePluginPath("helper", "bootstrap");
 
 function isExactDirectory(path: string | null | undefined, directory: string): boolean {
   if (!path) return false;
@@ -245,7 +245,7 @@ export class ChineseTitlesEngine {
     const target = projects.find((project) =>
       !this.state?.projects[project.projectId] && !isInsideDirectory(project.path, helperDirectory()));
     if (!target) return;
-    const directory = bootstrapDirectory();
+    const directory = safePluginPath("helper", "bootstrap");
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     this.bootstrapProjectId = target.projectId;
     const created = await createBootstrapWorkspaceViaCli(settings, target.projectId, directory, BOOTSTRAP_TITLE);
