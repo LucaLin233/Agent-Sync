@@ -37,4 +37,4 @@ description: 当前运行端（Minis、宿主端 Codex 及 paseo）的派发、�
 ## 处理记忆
 
 - 实际涉及记忆读写、检索、更正、整理，或确需保存经验、实施经验固化（包括非平台任务），先完整读取 `references/memory-common.md`〔分支 memory-common〕，再按原触发读取共同维护、纠正及本端资源。
-- Paseo 的 LUNO 主会话在真实任务收尾时，另按 `references/runtime-host.md`〈记忆入口〉判断本次是否有新增、经核实且可复用的经验要写入宿主经验日志；这不需要用户点名记忆，写入前提、授权范围和回读仍按该节。
+- Minis 与 Paseo 的 LUNO 主会话按端写入此类经验：Minis 按 `references/minis-memory.md`〔分支 minis-memory〕，Paseo 按 `references/runtime-host.md`〈记忆入口〉。
