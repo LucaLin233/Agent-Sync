@@ -79,7 +79,7 @@ export async function loadState(): Promise<ChineseTitlesState> {
   try {
     const root = pluginDataDir();
     if (file !== root && !file.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin state path");
-    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
+    // codeql[js/path-injection]
     const raw = await fs.readFile(file, "utf8");
     const parsed = JSON.parse(raw) as Partial<ChineseTitlesState>;
     if (parsed?.version !== 1) return newState();
@@ -104,16 +104,16 @@ export function saveState(state: ChineseTitlesState): Promise<void> {
     const dir = pluginDataDir();
     const root = pluginDataDir();
     if (dir !== root && !dir.startsWith(`${root}${sep}`)) throw new Error("Invalid plugin data directory");
-    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
+    // codeql[js/path-injection]
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const file = safePluginPath("state.json");
     const temp = safePluginPath(`.state-${process.pid}-${Date.now()}.tmp`);
     if ((file !== dir && !file.startsWith(`${dir}${sep}`)) || (temp !== dir && !temp.startsWith(`${dir}${sep}`))) {
       throw new Error("Invalid plugin state path");
     }
-    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
+    // codeql[js/path-injection]
     await fs.writeFile(temp, snapshot, { encoding: "utf8", mode: 0o600 });
-    // codeql[js/path-injection] PASEO_HOME is the plugin host root; every child is a fixed literal checked above.
+    // codeql[js/path-injection]
     await fs.rename(temp, file);
   });
   return writeChain;
