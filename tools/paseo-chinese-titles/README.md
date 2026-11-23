@@ -13,6 +13,27 @@ paseo --home "$PASEO_HOME" plugin install \
 
 合并前请使用本分支的本地目录安装；不要把未合并的候选路径冒充 `main` 已发布内容。开发依赖固定 `@getpaseo/* 0.17.3` 是类型检查目标，不限制插件安装版本。
 
+## 存储位置与旧状态迁移
+
+插件状态不再把 `PASEO_HOME` 当文件系统路径，而是：
+
+- 固定 base：`$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/`；
+- 每个 daemon 一个 32 位十六进制 SHA-256 namespace（输入是 `PASEO_HOME`），因此不同 daemon 状态隔离；
+- `helper/` 与 `bootstrap/` 也位于该 namespace 下。
+
+旧版曾使用 `$PASEO_HOME/plugin-data/paseo-chinese-titles/state.json`。升级时由部署者一次性迁移，插件代码不读取旧任意路径：
+
+```sh
+NS=$(printf '%s' "$PASEO_HOME" | sha256sum | cut -c1-32)
+OLD="$PASEO_HOME/plugin-data/paseo-chinese-titles/state.json"
+NEW="$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/$NS/state.json"
+mkdir -p "$(dirname "$NEW")"
+# 在插件已 disable/停止写入的窗口内，单写入者串行复制
+cp "$OLD" "$NEW.tmp" && chmod 600 "$NEW.tmp" && mv "$NEW.tmp" "$NEW"
+```
+
+保留旧文件作为回滚副本；不要在新旧版本同时运行时复制，避免重复命名。迁移后安装/更新从已合并提交构建的插件，再按实际需要启用。
+
 ## 兼容版本
 
 - 目标与完整黑盒实测：Paseo **0.17.3**。

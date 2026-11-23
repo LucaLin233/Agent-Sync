@@ -117,3 +117,20 @@ test("plugin data paths cannot escape the plugin directory", async () => {
   assert.throws(() => safePluginPath("/absolute"));
   assert.throws(() => assertPluginPath(`${root}/../escape`));
 });
+
+test("plugin storage is scoped by hashed PASEO_HOME, not by the env path", async () => {
+  const { createHash } = await import("node:crypto");
+  const { pluginDataDir } = await import("../server/state.ts");
+  const previous = process.env.PASEO_HOME;
+  try {
+    process.env.PASEO_HOME = "/synthetic/daemon-a";
+    const a = pluginDataDir();
+    assert.ok(a.endsWith(createHash("sha256").update("/synthetic/daemon-a").digest("hex").slice(0, 32)));
+    assert.ok(!a.includes("/synthetic/daemon-a"));
+    process.env.PASEO_HOME = "/synthetic/daemon-b";
+    assert.notEqual(pluginDataDir(), a);
+  } finally {
+    if (previous === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = previous;
+  }
+});

@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 export type TitleStatus = "legacy" | "pending" | "generating" | "done" | "skipped" | "error";
 
@@ -21,10 +22,11 @@ export interface ChineseTitlesState {
   agents: Record<string, EntityTitleState>;
 }
 
+/** Stable OS-home base; PASEO_HOME is used only as a hash namespace, never as a path. */
 function pluginRoot(): string {
-  const configured = process.env.PASEO_HOME?.trim();
-  if (configured && !isAbsolute(configured)) throw new Error("PASEO_HOME must be absolute");
-  return resolve(configured || join(homedir(), ".paseo"), "plugin-data", "paseo-chinese-titles");
+  const configured = process.env.PASEO_HOME?.trim() || join(homedir(), ".paseo");
+  const namespace = createHash("sha256").update(configured).digest("hex").slice(0, 32);
+  return resolve(homedir(), ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace);
 }
 
 /** Resolve a path and prove it stays inside this plugin's data directory. */
