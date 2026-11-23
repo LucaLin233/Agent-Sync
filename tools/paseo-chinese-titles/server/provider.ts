@@ -4,6 +4,7 @@ import type { ChineseTitlesSettings } from "../shared/settings";
 interface ProviderOverride {
   extends?: string;
   enabled?: boolean;
+  label?: string;
 }
 
 interface ProviderModel {
@@ -12,14 +13,29 @@ interface ProviderModel {
   isDefault?: boolean;
   isSelectable?: boolean;
   defaultThinkingOptionId?: string;
-  thinkingOptions?: readonly { id: string }[];
+  thinkingOptions?: readonly { id: string; label?: string; isDefault?: boolean }[];
 }
 
 interface ProviderEntry {
   provider: string;
   status: string;
   enabled?: boolean;
+  label?: string;
   models?: readonly ProviderModel[];
+}
+
+export interface TitleProviderCatalog {
+  providers: Array<{
+    id: string;
+    label: string;
+    models: Array<{
+      id: string;
+      label: string;
+      isDefault: boolean;
+      defaultThinkingOptionId?: string;
+      thinkingOptions: Array<{ id: string; label: string; isDefault: boolean }>;
+    }>;
+  }>;
 }
 
 export interface ResolvedTitleProvider {
@@ -111,4 +127,43 @@ export async function resolveTitleProvider(
     };
   }
   throw new Error("No ready Codex provider (or Codex alias) with a usable model is configured.");
+}
+
+/** Non-secret catalog for the settings screen: ready Codex providers and aliases only. */
+export async function listTitleProviderOptions(paseo: PaseoApi): Promise<TitleProviderCatalog> {
+  const config = await paseo.config.get();
+  const overrides = (config.config.providers ?? {}) as Record<string, ProviderOverride>;
+  const snapshot = await paseo.providers.snapshot();
+  const entries = (snapshot.entries ?? []) as unknown as ProviderEntry[];
+  const ready = entries.filter((entry) => entry.enabled !== false && entry.status === "ready");
+  const configOrder = Object.keys(overrides);
+  ready.sort((left, right) => {
+    const leftIndex = configOrder.indexOf(left.provider);
+    const rightIndex = configOrder.indexOf(right.provider);
+    return (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
+      (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+  });
+  const providers: TitleProviderCatalog["providers"] = [];
+  for (const entry of ready) {
+    if (!isCodexFamily(entry.provider, overrides)) continue;
+    const models = await modelsFor(paseo, entry.provider, entry).catch(() => []);
+    const selectable = models.filter((model) => model.isSelectable !== false);
+    if (selectable.length === 0) continue;
+    providers.push({
+      id: entry.provider,
+      label: entry.label?.trim() || overrides[entry.provider]?.label?.trim() || entry.provider,
+      models: selectable.map((model) => ({
+        id: model.id,
+        label: model.label?.trim() || model.id,
+        isDefault: model.isDefault === true,
+        ...(model.defaultThinkingOptionId ? { defaultThinkingOptionId: model.defaultThinkingOptionId } : {}),
+        thinkingOptions: (model.thinkingOptions ?? []).map((option) => ({
+          id: option.id,
+          label: option.label?.trim() || option.id,
+          isDefault: option.isDefault === true,
+        })),
+      })),
+    });
+  }
+  return { providers };
 }

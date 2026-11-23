@@ -34,6 +34,10 @@ cp "$OLD" "$NEW.tmp" && chmod 600 "$NEW.tmp" && mv "$NEW.tmp" "$NEW"
 
 保留旧文件作为回滚副本；不要在新旧版本同时运行时复制，避免重复命名。迁移后安装/更新从已合并提交构建的插件，再按实际需要启用。
 
+## 设置屏
+
+Provider、Model、Thinking 档位使用官方原生 `SettingsSelect`。目录来自 daemon 当前 provider catalog：只列状态为 ready 的 Codex 内置或 `extends: "codex"` 别名，显示 provider 的 label、保存真实 ID；选择 provider 后只列该 provider 的可选模型，选择模型后只列其 thinking options。保留「自动选择 provider / 模型默认 / 默认思考档」，切换上层时清空失效的模型和思考档。目录不可用或已保存值过期时显示不可用状态，不做手输。
+
 ## 兼容版本
 
 - 目标与完整黑盒实测：Paseo **0.17.3**。

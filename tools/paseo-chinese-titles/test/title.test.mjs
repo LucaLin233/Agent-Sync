@@ -134,3 +134,25 @@ test("plugin storage is scoped by hashed PASEO_HOME, not by the env path", async
     else process.env.PASEO_HOME = previous;
   }
 });
+
+test("Codex catalog lists only ready Codex aliases with linked models and thinking options", async () => {
+  const { listTitleProviderOptions } = await import("../server/provider.ts");
+  const paseo = {
+    config: { get: async () => ({ config: { providers: { cchp: { extends: "codex", label: "CCHP" }, pi: {} } } }) },
+    providers: {
+      snapshot: async () => ({ entries: [
+        { provider: "cchp", status: "ready", enabled: true, label: "CCHP host", models: [
+          { id: "deepseek-flash", label: "DeepSeek Flash", isDefault: true, defaultThinkingOptionId: "low", thinkingOptions: [{ id: "low", label: "Low" }, { id: "high", label: "High" }] },
+        ] },
+        { provider: "pi", status: "ready", enabled: true, models: [{ id: "pi-model", label: "Pi" }] },
+      ] }),
+      listModels: async () => ({ models: [] }),
+    },
+  };
+  const catalog = await listTitleProviderOptions(paseo);
+  assert.deepEqual(catalog.providers.map((provider) => provider.id), ["cchp"]);
+  assert.equal(catalog.providers[0].label, "CCHP host");
+  assert.equal(catalog.providers[0].models[0].id, "deepseek-flash");
+  assert.deepEqual(catalog.providers[0].models[0].thinkingOptions.map((option) => option.id), ["low", "high"]);
+  assert.equal(catalog.providers[0].models[0].isDefault, true);
+});

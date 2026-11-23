@@ -11,3 +11,25 @@ export const reconcileRpc = defineRpc({
     agents: z.number().int().nonnegative(),
   }),
 });
+
+export const titleCatalogRpc = defineRpc({
+  name: "chinese-titles.provider-catalog",
+  input: z.object({}),
+  output: z.object({
+    providers: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      models: z.array(z.object({
+        id: z.string(),
+        label: z.string(),
+        isDefault: z.boolean(),
+        defaultThinkingOptionId: z.string().optional(),
+        thinkingOptions: z.array(z.object({
+          id: z.string(),
+          label: z.string(),
+          isDefault: z.boolean(),
+        })),
+      })),
+    })),
+  }),
+});

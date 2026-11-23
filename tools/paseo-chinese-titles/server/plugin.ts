@@ -1,5 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { reconcileRpc } from "../shared/rpc";
+import { reconcileRpc, titleCatalogRpc } from "../shared/rpc";
+import { listTitleProviderOptions } from "./provider";
 import { CHINESE_TITLES_SETTINGS } from "../shared/settings";
 import { listAgentIdsViaCli, listProjectIdsViaCli, listWorkspaceIdsViaCli } from "./cli";
 import { ChineseTitlesEngine } from "./engine";
@@ -38,6 +39,7 @@ export default function contribute(server: PluginServerContext) {
     await engine.onTurn(agent.id, null, context.paseo);
   });
   server.handle(reconcileRpc, async (_input, { paseo }) => engine.reconcile(paseo));
+  server.handle(titleCatalogRpc, async (_input, { paseo }) => listTitleProviderOptions(paseo));
 
   return () => {
     void engine.dispose();

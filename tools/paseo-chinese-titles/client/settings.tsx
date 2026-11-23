@@ -1,13 +1,50 @@
-import { useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { SettingsAction, SettingsCard, SettingsInput, SettingsSection, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { useState } from "react";
+import { useRpc, useSettings, type PluginSurfaceProps } from "@getpaseo/plugin/client";
+import { SettingsAction, SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
+import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { CHINESE_TITLES_SETTINGS, type ChineseTitlesSettings } from "../shared/settings";
+import { titleCatalogRpc } from "../shared/rpc";
+
+interface CatalogModel {
+  id: string;
+  label: string;
+  isDefault: boolean;
+  defaultThinkingOptionId?: string;
+  thinkingOptions: Array<{ id: string; label: string; isDefault: boolean }>;
+}
+interface CatalogProvider {
+  id: string;
+  label: string;
+  models: CatalogModel[];
+}
+interface Catalog {
+  providers: CatalogProvider[];
+}
 
 export function ChineseTitlesSettingsScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(CHINESE_TITLES_SETTINGS);
+  const loadCatalog = useRpc(titleCatalogRpc);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalogState, setCatalogState] = useState<"loading" | "ready" | "error">("loading");
   const [draft, setDraft] = useState<{ values: ChineseTitlesSettings; revision: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setCatalogState("loading");
+    void loadCatalog({}).then(
+      (result) => {
+        if (!alive) return;
+        setCatalog(result);
+        setCatalogState("ready");
+      },
+      () => {
+        if (!alive) return;
+        setCatalogState("error");
+      },
+    );
+    return () => { alive = false; };
+  }, [loadCatalog]);
 
   if (settings.status === "loading") {
     return <Text style={{ color: theme.colors.foregroundMuted }}>正在读取设置…</Text>;
@@ -17,7 +54,6 @@ export function ChineseTitlesSettingsScreen({ theme }: PluginSurfaceProps) {
   }
 
   const values = draft?.values ?? settings.values;
-  const revision = draft?.revision ?? settings.revision;
   const update = (patch: Partial<ChineseTitlesSettings>) => {
     setError(null);
     setDraft((current) => ({
@@ -34,6 +70,40 @@ export function ChineseTitlesSettingsScreen({ theme }: PluginSurfaceProps) {
       else setError("保存失败；设置可能已被其他客户端更新，请重试。");
     });
   };
+
+  const providerOptions = [
+    { value: "", label: "自动选择就绪的 Codex provider" },
+    ...(catalog?.providers ?? []).map((provider) => ({ value: provider.id, label: provider.label })),
+  ];
+  if (values.provider && !providerOptions.some((option) => option.value === values.provider)) {
+    providerOptions.push({ value: values.provider, label: `不可用：${values.provider}` });
+  }
+  const selectedProvider = catalog?.providers.find((provider) => provider.id === values.provider);
+  const modelOptions = values.provider
+    ? [
+        { value: "", label: "模型默认" },
+        ...(selectedProvider?.models ?? []).map((model) => ({ value: model.id, label: model.label })),
+      ]
+    : [{ value: "", label: "自动模型" }];
+  if (values.model && !modelOptions.some((option) => option.value === values.model)) {
+    modelOptions.push({ value: values.model, label: `不可用：${values.model}` });
+  }
+  const selectedModel = selectedProvider?.models.find((model) => model.id === values.model);
+  const thinkingOptions = [
+    { value: "", label: "默认思考档" },
+    ...(selectedModel?.thinkingOptions ?? []).map((option) => ({ value: option.id, label: option.label })),
+  ];
+  if (values.thinkingOptionId && !thinkingOptions.some((option) => option.value === values.thinkingOptionId)) {
+    thinkingOptions.push({ value: values.thinkingOptionId, label: `不可用：${values.thinkingOptionId}` });
+  }
+  const catalogHint =
+    catalogState === "loading"
+      ? "正在读取 daemon 的 Codex provider 目录…"
+      : catalogState === "error"
+        ? "Provider 目录读取失败；保留已保存值，重新打开设置页可重试。"
+        : (catalog?.providers.length ?? 0) === 0
+          ? "当前没有就绪的 Codex provider 或 Codex 别名。"
+          : undefined;
 
   return (
     <View style={{ gap: 20 }}>
@@ -64,32 +134,29 @@ export function ChineseTitlesSettingsScreen({ theme }: PluginSurfaceProps) {
       </SettingsSection>
       <SettingsSection title="Codex provider 与模型">
         <SettingsCard>
-          <SettingsInput
-            key={`provider-${revision}`}
+          <SettingsSelect
             label="Provider"
-            hint="留空自动选择已就绪的 Codex provider 或别名；示例：cchp"
-            initialValue={values.provider}
-            placeholder="cchp"
-            disabled={settings.saving}
-            onChangeText={(provider) => update({ provider })}
+            hint={catalogHint ?? "只列就绪的 Codex 内置或 extends codex 别名。"}
+            value={values.provider}
+            options={providerOptions}
+            disabled={settings.saving || catalogState === "loading"}
+            onValueChange={(provider) => update({ provider, model: "", thinkingOptionId: "" })}
           />
-          <SettingsInput
-            key={`model-${revision}`}
+          <SettingsSelect
             label="Model"
-            hint="留空使用默认模型；示例：deepseek-flash"
-            initialValue={values.model}
-            placeholder="deepseek-flash"
-            disabled={settings.saving}
-            onChangeText={(model) => update({ model })}
+            hint={values.provider ? "只列该 provider 的可选模型。" : "先选择 Provider 才能限定模型。"}
+            value={values.model}
+            options={modelOptions}
+            disabled={settings.saving || catalogState === "loading" || !values.provider}
+            onValueChange={(model) => update({ model, thinkingOptionId: "" })}
           />
-          <SettingsInput
-            key={`thinking-${revision}`}
+          <SettingsSelect
             label="Thinking 档位"
-            hint="可留空，使用模型默认档。"
-            initialValue={values.thinkingOptionId}
-            placeholder="low"
-            disabled={settings.saving}
-            onChangeText={(thinkingOptionId) => update({ thinkingOptionId })}
+            hint={selectedModel ? "使用该模型提供的思考档位。" : "选择模型后可选。"}
+            value={values.thinkingOptionId}
+            options={thinkingOptions}
+            disabled={settings.saving || catalogState === "loading" || !selectedModel}
+            onValueChange={(thinkingOptionId) => update({ thinkingOptionId })}
           />
         </SettingsCard>
       </SettingsSection>
