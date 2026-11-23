@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import type { PaseoAgentHandle, PaseoApi, PaseoWorkspaceHandle } from "./paseo-types";
 import type { ChineseTitlesSettings } from "../shared/settings";
-import { fallbackProjectTitle, fallbackTaskTitle, sanitizeModelTitle } from "../shared/title";
+import { fallbackProjectTitle, fallbackTaskTitle, isAcceptableTitle, sanitizeModelTitle } from "../shared/title";
 import { helperDirectory, assertPluginPath } from "./state";
 import { resolveTitleProvider } from "./provider";
 
@@ -15,6 +15,7 @@ const SYSTEM_PROMPT = [
   "You name Paseo projects, workspaces and tasks.",
   "Use Simplified Chinese for every title and always include at least one Han character.",
   "Keep product, module, issue, PR and file names in their original form when they help identify the task.",
+  "Do not paste ordinary English words after a Chinese action; a title such as 修复 login bug is invalid.",
   "Do not use tools, read or write files, run commands, or ask questions.",
   "Return exactly one short title, without quotes, Markdown, explanations or line breaks.",
 ].join(" ");
@@ -34,6 +35,13 @@ export interface GenerationResult {
   title: string;
   source: "model" | "fallback";
   errorCode?: GenerationErrorCode;
+}
+
+export interface GenerateOptions {
+  /** Upper bound for the helper turn, independent of workspace/agent creation. */
+  timeoutMs?: number;
+  /** Absolute epoch milliseconds for all work; falls back early when exceeded. */
+  deadlineAt?: number;
 }
 
 function fallbackFor(request: GenerationRequest): string {
@@ -75,13 +83,17 @@ export async function generateTitle(
   paseo: PaseoApi,
   settings: ChineseTitlesSettings,
   request: GenerationRequest,
+  options: GenerateOptions = {},
 ): Promise<GenerationResult> {
   const fallback = fallbackFor(request);
+  const deadlineAt = options.deadlineAt ?? Date.now() + (options.timeoutMs ?? 45_000) + 10_000;
+  const remaining = () => deadlineAt - Date.now();
   let resolved: Awaited<ReturnType<typeof resolveTitleProvider>> | null = null;
   let workspace: PaseoWorkspaceHandle | null = null;
   let helper: PaseoAgentHandle | null = null;
   try {
     resolved = await resolveTitleProvider(paseo, settings);
+    if (remaining() <= 2_000) throw new Error("title generation deadline exceeded");
     const directory = assertPluginPath(helperDirectory());
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const source = { kind: "directory" as const, path: directory, ...(request.projectId ? { projectId: request.projectId } : {}) };
@@ -118,14 +130,18 @@ export async function generateTitle(
       },
       background: true,
     });
-    const result = await helper.run(requestPrompt(request), { timeoutMs: 45_000 });
+    if (remaining() <= 2_000) throw new Error("title generation deadline exceeded");
+    const runTimeoutMs = Math.min(options.timeoutMs ?? 45_000, Math.max(1_000, remaining() - 2_000));
+    const result = await helper.run(requestPrompt(request), { timeoutMs: runTimeoutMs });
     if (result.status !== "idle") throw new Error("helper turn did not finish");
     const title = sanitizeModelTitle(result.lastMessage, request.maxChars);
     if (!title) throw new Error("empty or non-Chinese title");
     return { title, source: "model" };
   } catch (error) {
     return {
-      title: fallback,
+      title: request.kind === "project" || isAcceptableTitle(fallback)
+        ? fallback
+        : fallbackTaskTitle({ prompt: "", maxChars: request.maxChars }),
       source: "fallback",
       errorCode: resolved ? "model_failed" : classify(error),
     };
