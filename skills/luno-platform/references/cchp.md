@@ -6,8 +6,8 @@ CCHP 任务先完整读取 `references/cchp-upstream/ENTRY.md`；其相对引用
 
 - 产品行为查[官网文档](https://cch-plus.com/zh-CN/docs/cli)与[发布说明](https://cch-plus.com/zh-CN/release-notes)。可用时按官方入口用 `cchp docs` 检索或阅读，引用公开原文。只向官方公开站点发送公开术语或已知公开 URL；不得外发秘密、实例地址、内部 ID、内部字段值或请求内容。公开查询不运行 `status` 或 `login`。
 - 本机命令与参数查具体子命令的 `--help`；用 `cchp version` 核 CLI 与内置规范版本，用 `cchp schema` 核具体操作契约。以上 CLI 查询用无凭据最小白名单，不读保存的登录态；对有启动探测的版本，显式设 `CCHP_CREDENTIAL_STORE=file` 只为跳过钥匙串探测，不得读取凭据文件。CLI 缺失、不支持或不符合上述边界及写入授权时，直读官网和对应版本的公开上游，不用登录态补查，也不把上游资料当成本机契约。
-- 不提供 `HOME`/`XDG_*` 时，上述离线查询在最小白名单中显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 和 `CCHP_CREDENTIAL_STORE=file`：v0.2.0 与 v0.2.1 的 `version`、`schema` 均实测成功；v0.2.1 缺前两项会启动即报找不到配置或缓存目录。`/dev/null` 只用于已确认无需真实目录的离线命令，不用于 `docs`、`cache` 或实际更新。
-- `update --check --json` 在 v0.2.1 实测退出 0，`check_only` 为 true、`updated` 为 false、`install_method` 为 direct；它只做公开版本检查，实际执行更新仍需授权。官方入口已介绍 `update` 与 `--dry-run`，本端不复制。
+- 2026-11-23 在 Linux amd64 实测：不提供 `HOME`/`XDG_*` 时，上述离线查询在最小白名单中显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 和 `CCHP_CREDENTIAL_STORE=file`，v0.2.0 与 v0.2.1 的 `version`、`schema` 均成功；v0.2.1 缺前两项会启动即报找不到配置或缓存目录。`/dev/null` 只用于已确认无需真实目录的离线命令，不用于 `docs`、`cache` 或实际更新。
+- `update --check --json` 只做公开版本检查，实际执行更新仍需授权。v0.2.1 在本机 direct 安装、2026-11-23 Linux amd64 实测退出 0，`check_only` 为 true、`updated` 为 false；`install_method` 为 `direct` 仅是该安装端的识别结果，不外推到其他安装方式。
 - 实例版本、权限、生效值及其来源，只能在当次授权范围内取证；官网、发布说明和本机 schema 均不证明实例状态。
 
 ## 管理入口
