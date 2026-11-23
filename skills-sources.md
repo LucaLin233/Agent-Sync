@@ -157,14 +157,14 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## cchp
 
-- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，采用正式发布 [`v0.2.0`](https://github.com/CCH-HQ/cchp-cli/releases/tag/v0.2.0)，标签解引用到提交 `71d8191ce40815a7639aecc27e95e7e5e95dedc0`。2026-11-21 公开核对：默认分支 HEAD `c529a988c2bca72fccca8fc27607fbccb101ec60` 含未发布的 `cchp update`，不采纳；`workflows.md` 在默认分支的末次提交同为 `71d8191ce40815a7639aecc27e95e7e5e95dedc0`。
-- **取材范围**：上游 `skills/cchp/` 全部 6 个文件原样收入 `skills/luno-platform/references/cchp-upstream/`，仅将 `SKILL.md` 改名为 `ENTRY.md`；不翻译、不合并、不改正文、frontmatter 或相对引用。上游根 `LICENSE` 原样收入该包的 `LICENSE.upstream.txt`；不复制二进制、spec、docs、构建或安装脚本。此版仅 `ENTRY.md` 与 `references/workflows.md` 字节变化，其余 4 个资源和 LICENSE 不变。
+- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，采用正式发布 [`v0.2.1`](https://github.com/CCH-HQ/cchp-cli/releases/tag/v0.2.1)，标签对象 `d02dc9bf83459db30839d36ef78dbed000e5cb02` 解引用到提交 `28dcf3c3ae445aeb6240a211359360c475c9e15c`。2026-11-23 公开核对：默认分支 HEAD 同为该提交；6 个技能文件与根 `LICENSE` 均按该提交原字节对照。
+- **取材范围**：上游 `skills/cchp/` 全部 6 个文件原样收入 `skills/luno-platform/references/cchp-upstream/`，仅将 `SKILL.md` 改名为 `ENTRY.md`；不翻译、不合并、不改正文、frontmatter 或相对引用。上游根 `LICENSE` 原样收入该包的 `LICENSE.upstream.txt`；不复制二进制、spec、docs、构建或安装脚本。此版仅 `ENTRY.md` 变化，末尾新增 `Keeping cchp up to date` 节；其余 5 个资源和 `LICENSE.upstream.txt` 与 v0.2.1 原字节一致。
 - **许可**：MIT，`Copyright (c) 2026 the cchp contributors`；完整版权与 MIT 条款随包分发，仓库根 LICENSE 不替代它。
 - **落端核对**：按登记及同步规则核现场身份、历史前态与逐端回读。Minis 逐文件核验，并核适用的 App 登记和新会话元数据；ID 和部署状态只按实际回读记录。
 - **追新**：用官方 GitHub 默认分支 HEAD、目标文件末次提交、内容哈希及正文与 LICENSE 原字节差分发现变化。采纳时固定获准正式发行标签解引用的提交，审定后更新字节和登记，不自动跟 main；不从已退役的独立 cchp 入口更新。
-- **原始文件 SHA-256**（2026-11-21，固定发行提交）：
+- **原始文件 SHA-256**（2026-11-23，固定发行提交 `28dcf3c3ae445aeb6240a211359360c475c9e15c`）：
   - `skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt`：`481c79a8e1493001832cfb2e417e2a698f7f0b0d3b3351a10fa0750e53046cb2`
-  - `skills/luno-platform/references/cchp-upstream/ENTRY.md`：`8ac1321108a1aa5944922414c2bb02a318c9364c58b545cf29410c8932b1bee0`
+  - `skills/luno-platform/references/cchp-upstream/ENTRY.md`：`1c9b578ca6df2f8a5aa966bac9bfb42a49005e6f840d42321105919df3e1077d`
   - `skills/luno-platform/references/cchp-upstream/references/auth.md`：`0db41d2c9142d8b63e30a0933d257233634e4bd5c0ddcf94356fdfea514af053`
   - `skills/luno-platform/references/cchp-upstream/references/errors.md`：`8cca46803de493de7ac75f24be098d7a5e236900a786474529627da68c9a60dc`
   - `skills/luno-platform/references/cchp-upstream/references/output-contract.md`：`10bf216fa42ff8ed87aa137898039c72328af10b20279e5f90ea1d0fb0c8d296`
