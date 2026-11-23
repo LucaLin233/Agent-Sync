@@ -12,6 +12,10 @@ export interface AgentDirectoryEntry {
   workspaceId?: string | null;
   archivedAt?: string | null;
   background?: boolean;
+  /** Public status only: used to notice a turn reaching its terminal state. */
+  status?: string | null;
+  /** Public timestamp only: a terminal refresh after the last observed turn. */
+  updatedAt?: string | null;
 }
 
 /** Only these directory fields are read; the raw snapshot is never retained. */
@@ -27,6 +31,8 @@ export interface DirectoryAgent {
   workspaceId: string | null;
   archived: boolean;
   background: boolean;
+  status: string | null;
+  updatedAt: string | null;
   /** Computed latest valid sample; raw usage and the source snapshot are dropped. */
   sample: CacheSample | null;
 }
@@ -44,6 +50,8 @@ export function projectDirectoryAgent(agent: DirectoryAgentSource): DirectoryAge
     workspaceId: agent.workspaceId ?? null,
     archived,
     background,
+    status: agent.status ?? null,
+    updatedAt: agent.updatedAt ?? null,
     sample: archived || background
       ? null
       : latestCacheSample(agent.provider, agent.lastUsage, agent.persistence?.metadata?.provider),

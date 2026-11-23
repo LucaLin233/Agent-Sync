@@ -7,6 +7,7 @@ import {
   emptyTurnTotals,
   formatCachePillLabel,
   formatCacheRate,
+  formatPillTitle,
   formatTurnPillLabel,
   latestCompletedTurn,
   mergeTurnTotals,
@@ -148,4 +149,10 @@ test("turns without an output delta or a positive duration keep separate denomin
   assert.equal(averageFirstTokenMs(totals), 200);
   assert.equal(mergeTurnTotals(totals, totals).completed, 6);
   assert.equal(mergeTurnTotals(totals, totals).firstTokenSamples, 4);
+});
+
+test("the pill title keeps the open action, cache rate and near-turn basis", () => {
+  assert.equal(formatPillTitle(0.982, 22.72), "打开工作区用量 · 缓存 98.2% · 近轮 22.7 t/s");
+  assert.equal(formatPillTitle(0.982, null), "打开工作区用量");
+  assert.equal(formatPillTitle(null, 12), "打开工作区用量 · 缓存 — · 近轮 12.0 t/s");
 });

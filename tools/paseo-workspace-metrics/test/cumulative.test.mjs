@@ -1240,7 +1240,7 @@ test("a completed turn replayed after a rollback is not counted twice", async (t
     tokenAt(0, 0, 0, 0),
     turnStarted("turn-1", 1),
     tokenAt(2, 100, 50, 400),
-    turnComplete("turn-1", 3),
+    turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
     turnStarted("turn-2", 4),
     tokenAt(5, 200, 100, 900),
     turnComplete("turn-2", 6),
@@ -1254,6 +1254,73 @@ test("a completed turn replayed after a rollback is not counted twice", async (t
   // successful turn is not a second observation when replayed.
   assert.equal(result.turns.completed, 2);
   assert.equal(result.turns.speedSamples, 1);
+  assert.equal(result.recentTurn, null);
+  // The detail follows file order, so the replayed turn re-describes it: its
+  // own boundaries are back, while the cleared baseline keeps the delta empty.
+  const detail = await runTurn(root, [snapshot("agent-a", a)]);
+  assert.deepEqual(detail, {
+    outputTokens: null,
+    elapsedMs: 2_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+});
+
+test("the session's latest success keeps the greatest completion time", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  const b = uuid(2);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 2),
+    turnStarted("turn-2", 3),
+    tokenAt(5, 0, 0, 500),
+    turnComplete("turn-2", 9),
+  ]);
+  // B finishes at second 7, between A's two turns.
+  await writeSession(root, b, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-b1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-b1", 2),
+    turnStarted("turn-b2", 3),
+    tokenAt(5, 0, 0, 300),
+    turnComplete("turn-b2", 7),
+  ]);
+  const result = await run(root, [snapshot("agent-a", a), snapshot("agent-b", b)]);
+  // A's second turn (second 9) is newest even though B is read second.
+  assert.equal(result.recentTurn.completedAt, Date.parse(at(9)));
+  assert.equal(result.recentTurn.outputTokens, 500);
+});
+
+test("a replayed turn refreshes the detail with its own duration, still counted once", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeRoot(t);
+  const a = uuid(1);
+  await writeSession(root, a, [
+    tokenAt(0, 0, 0, 0),
+    turnStarted("turn-1", 1),
+    tokenAt(2, 0, 0, 0),
+    turnComplete("turn-1", 3),
+    turnEvent("thread_rolled_back", 4),
+    turnStarted("turn-1", 7),
+    tokenAt(7, 0, 0, 0),
+    turnComplete("turn-1", 8),
+  ]);
+  const detail = await runTurn(root, [snapshot("agent-a", a)]);
+  // The replayed turn is the detail's terminal measurement: 1 s, not the
+  // pre-rollback 2 s it replaced.
+  assert.deepEqual(detail, {
+    outputTokens: null,
+    elapsedMs: 1_000,
+    firstTokenMs: null,
+    reason: "missing-samples",
+  });
+  const result = await run(root, [snapshot("agent-a", a)]);
+  assert.equal(result.turns.completed, 1);
   assert.equal(result.recentTurn, null);
 });
 

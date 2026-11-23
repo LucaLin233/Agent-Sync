@@ -163,6 +163,12 @@ export function formatTurnPillLabel(value: number | null | undefined): string {
   return "近轮 " + formatTokenSpeed(value);
 }
 
+/** Pill title: keeps the open action, cache rate and near-turn basis. */
+export function formatPillTitle(rate: number | null | undefined, speed: number | null | undefined): string {
+  if (speed === null || speed === undefined || !Number.isFinite(speed)) return "打开工作区用量";
+  return "打开工作区用量 · " + formatCachePillLabel(rate) + " · " + formatTurnPillLabel(speed);
+}
+
 /** Appends the suffix only when a reliable same-turn speed exists. */
 export function appendTurnSpeed(label: string, speed: number | null | undefined): string {
   return speed === null || speed === undefined || !Number.isFinite(speed) ? label : label + " · " + formatTurnPillLabel(speed);

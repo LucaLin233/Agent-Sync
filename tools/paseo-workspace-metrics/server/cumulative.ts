@@ -359,22 +359,27 @@ function parseLine(line: string, state: FileState) {
       open.finalAt !== null && open.finalAt >= open.startedAt && open.finalAt <= at;
     const outputValid = finalTrusted && open.baseline !== null && open.finalOutput! >= open.baseline;
     state.trustedOutput = finalTrusted ? open.finalOutput : null;
-    // A turn replayed after a rollback keeps its baseline effect but is not a
-    // second observation, and it never becomes the newest completed turn.
+    const turn: CompletedTurn = {
+      completedAt: at,
+      outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
+      elapsedMs: at >= open.startedAt ? at - open.startedAt : null,
+      firstTokenMs,
+    };
+    // The detail follows the file's event order, so a replayed turn replaces
+    // the terminal measurement it re-describes.
+    state.lastTurn = turn;
+    // A turn replayed after a rollback is not a second observation: it neither
+    // adds to the cumulative sums nor restores the overview's success turn.
     if (state.countedTurnIds.has(event.turnId)) return;
     state.countedTurnIds.add(event.turnId);
     if (state.countedTurnIds.size > 64) {
       const oldest = state.countedTurnIds.values().next().value;
       if (oldest !== undefined) state.countedTurnIds.delete(oldest);
     }
-    state.lastTurn = {
-      completedAt: at,
-      outputTokens: outputValid ? open.finalOutput! - open.baseline! : null,
-      elapsedMs: at >= open.startedAt ? at - open.startedAt : null,
-      firstTokenMs,
-    };
-    state.lastSuccessful = state.lastTurn;
-    state.turns = addTurn(state.turns, state.lastTurn);
+    if (state.lastSuccessful === null || turn.completedAt > state.lastSuccessful.completedAt) {
+      state.lastSuccessful = turn;
+    }
+    state.turns = addTurn(state.turns, turn);
     return;
   }
 
