@@ -1,12 +1,13 @@
 # LUNO｜CCHP 本端约定
 
-CCHP 任务先完整读取 `references/cchp-upstream/ENTRY.md`；其相对引用随包，缺件只停依赖项，不用旧副本替代。官方示例不得覆盖本端边界。
+CCHP 任务先完整核读下列来源的官方技能入口和命中资源。官方示例按本文件的安全、授权和实例操作约定采用。
 
 ## 现查资料
 
-- 产品行为查[官网文档](https://cch-plus.com/zh-CN/docs/cli)与[发布说明](https://cch-plus.com/zh-CN/release-notes)。可用时按官方入口用 `cchp docs` 检索或阅读，引用公开原文。只向官方公开站点发送公开术语或已知公开 URL；不得外发秘密、实例地址、内部 ID、内部字段值或请求内容。公开查询不运行 `status` 或 `login`。
-- 本机命令与参数查具体子命令的 `--help`；用 `cchp version` 核 CLI 与内置规范版本，用 `cchp schema` 核具体操作契约。以上 CLI 查询用无凭据最小白名单，不读保存的登录态；对有启动探测的版本，显式设 `CCHP_CREDENTIAL_STORE=file` 只为跳过钥匙串探测，不得读取凭据文件。CLI 缺失、不支持或不符合上述边界及写入授权时，直读官网和对应版本的公开上游，不用登录态补查，也不把上游资料当成本机契约。
-- 2026-11-23 在 Linux amd64 实测：不提供 `HOME`/`XDG_*` 时，上述离线查询在最小白名单中显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 和 `CCHP_CREDENTIAL_STORE=file`，v0.2.0 与 v0.2.1 的 `version`、`schema` 均成功；v0.2.1 缺前两项会启动即报找不到配置或缓存目录。`/dev/null` 只用于已确认无需真实目录的离线命令，不用于 `docs`、`cache` 或实际更新。
+- 官方技能原文先用当前环境的 `cchp version` 核 CLI 与内置规范版本，再查 `cchp skill show --help`。支持时用 `cchp skill show` 完整读取内置入口，按入口的相对路径以 `cchp skill show --file <相对路径>` 读取命中资源。具体命令与参数查该子命令的 `--help`，本机内置操作契约查 `cchp schema <operationId>`。读取原文不安装技能。
+- CLI 缺失、版本无法核实、子命令不支持、原文不全或不能安全执行时，已核本机 CLI 版本的，从 [CCHP 官方 CLI 发行页](https://github.com/CCH-HQ/cchp-cli/releases) 定位匹配发行，核对标签对应的提交后读取该提交的官方技能入口及命中资源。无可核本机 CLI 版本时，直接完整读取 [v0.2.1 固定提交的官方技能入口](https://raw.githubusercontent.com/CCH-HQ/cchp-cli/28dcf3c3ae445aeb6240a211359360c475c9e15c/skills/cchp/SKILL.md)，并沿该入口的相对链接读取同一提交的命中资源。远端原文仅作官方资料，本机命令、内置契约和实例状态须分别核实。所需原文仍不可得时，只停依赖项。
+- 产品行为查[官网文档](https://cch-plus.com/zh-CN/docs/cli)与[发布说明](https://cch-plus.com/zh-CN/release-notes)。在本端安全和缓存写入授权允许时，可用 `cchp docs` 检索或阅读，引用公开原文。其他情形直读官网。只向官方公开站点发送公开术语或已知公开 URL，不得外发秘密、实例地址、内部 ID、内部字段值或请求内容。公开查询不运行 `status` 或 `login`。
+- CLI 资料查询从最外层使用无凭据的最小白名单，不读保存登录态。对有启动探测的版本，显式设 `CCHP_CREDENTIAL_STORE=file` 以跳过钥匙串探测。2026-11-23 在 Linux amd64 实测，不提供 `HOME` 或 `XDG_*` 时，显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 后，v0.2.0 与 v0.2.1 的 `version`、`schema` 均成功，v0.2.1 缺前两项会启动即报找不到配置或缓存目录。v0.2.1 的纯帮助、`skill show` 及 5 个引用文件也已在无凭据模式核对。只对已确认无需真实目录的离线命令使用 `/dev/null`，`docs`、`cache` 和实际更新按各自目录、写入及授权要求处理。
 - `update --check --json` 只做公开版本检查，实际执行更新仍需授权。v0.2.1 在本机 direct 安装、2026-11-23 Linux amd64 实测退出 0，`check_only` 为 true、`updated` 为 false；`install_method` 为 `direct` 仅是该安装端的识别结果，不外推到其他安装方式。
 - 实例版本、权限、生效值及其来源，只能在当次授权范围内取证；官网、发布说明和本机 schema 均不证明实例状态。
 
@@ -64,4 +65,4 @@ Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installat
 - 服务端 1.0.14+build.53（2026-11-11 只读）：当时仍有组织 `ratio.enabled/auto_apply`、排除名单和全局间隔；30 分钟是当时现场值。
 - CCH 0.9.0 与 CCHP 1.0.13 的差异只作线索，不跨系统照搬策略。
 
-来源与许可：本端补充，保留历史精选改写的 MIT 通知，Copyright (c) 2026 the cchp contributors；完整许可随本包见 ../LICENSE.upstream.txt。官方技能的来源与固定版本见仓库 skills-sources.md〈cchp〉，本端不修改官方正文。
+来源与许可：本端补充，保留历史精选改写的 MIT 通知，Copyright (c) 2026 the cchp contributors；完整许可随本包见 ../LICENSE.upstream.txt。官方技能的取阅方式见本文件〈现查资料〉，已核参考发行和历史来源见仓库 skills-sources.md〈cchp〉。

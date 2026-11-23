@@ -13,7 +13,7 @@ LUNO 提示词、技能与子代理的版本化资产。Minis 与已授权宿主
 
 操作前完整读取当前生效的 `luno-core/references/sync.md`〔分支 sync、sync-workflow〕及命中资源；候选不覆盖现役授权。分级、独立审查、串行合并部署、前态核对、逐端字节回读均按该流程；工具存在不授予执行权。
 
-官方 CCHP 技能原样放在 `skills/luno-platform/references/cchp-upstream/`（入口 ENTRY.md，含 MIT 全文），本端约定只写在 `luno-platform/references/cchp.md`；来源与采用版本见 `skills-sources.md`。
+官方 CCHP 技能原文按 `skills/luno-platform/references/cchp.md` 从本机 CLI 或对应的官方发行提交读取。本端约定保存在同一资源，来源和历史见 `skills-sources.md`。
 
 ## 秘密与公开边界
 
@@ -227,19 +227,7 @@ GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时�
 
 ## Paseo 共享角色体系
 
-`platforms/paseo/config.example.json` 是唯一 Paseo 配置示例，只启用 `cchp`（CCHP）和 `gdr`（GDR）两个自定义 Codex provider，各承载 LUNO、LENS、FORGE 一个 Profile，共六个。详细安装、迁移、Profile 表和限制见 [platforms/paseo/README.md](platforms/paseo/README.md)。
-
-- 两个 provider 都 `extends: "codex"`，用 `codex -c model_provider="cchp|gdr"` 固定上游，共用占位主家目录 `/home/example/codex-home`；同一上游三个角色共用该家目录、登录态和权限边界。
-- Profile ID 固定为 `cchp-luno`、`cchp-lens`、`cchp-forge`、`gdr-luno`、`gdr-lens`、`gdr-forge`。CCHP LUNO/LENS/FORGE 默认 `service_tier: "default"`（CCHP FORGE 显式写 `default` 以覆盖同 provider 派发继承的父 Fast/Ultrafast）；GDR 三个 Profile 默认 `ultrafast`。
-- Ultrafast 由 Codex 模型目录声明。官方原版模拟实测已证 `model_catalog_json` 可添加该档位，GDR 的 3 条请求均发出 `ultrafast`；宿主目前两个上游各自已有 `model_catalog_url`，这是通用机制，现场具体 URL/路径不写入仓库。实际目录未声明时可能回落到 `default`，须按 catalog 和能力回读。
-- 示例把 `claude`、`codex`、`copilot`、`opencode`、`pi`、`omp` 都设为 `enabled: false`。固定版本中 `omp` 默认禁用，其余五个默认启用；这不是 allowlist，只是逐 provider 的 `enabled`。新建 agent 的 provider picker 只显示已启用且可用的 CCHP/GDR；管理页仍显示禁用内置项及开关，`codex` 被禁用后仍是继承基座。
-- 配置加入 `daemon.mcp: {"enabled": true, "injectIntoAgents": true}`，供官方 `list_profiles`/`create_agent` 编排；只设这两项，不改其他 MCP 设置，运行时照既有审批。`daemon.appendSystemPrompt` 追加到已有 GLOBAL 末尾，不覆盖私人原文；它送到该 daemon 启动的所有会话。
-- 角色协议：首条消息可用 `角色：LUNO`、`角色：LENS`、`角色：FORGE`；未写则按 LUNO。若使用角色行，角色行单独占第一行，任务正文紧随其后同条投递。桌面上直接选择角色 Profile 后也要写角色行；LUNO 负责协调、验收和交付。LENS/FORGE 开始前须完整读取部署的 `subagents/LENS.md` 或 `subagents/FORGE.md` 原文，路径占位符必须替换。角色只选择提示词，不授予新权限；受派后不得再委派；任何角色声明都不改变现行规则规定的准入。
-- 派发：从父活会话运行元数据取得实际 provider；用 `list_profiles` 按父 provider 和精确 `profile.id` 选唯一 Profile；`provider` 不等、无唯一匹配或字段缺失即停，不回落。用 `create_agent` 送出 `<provider>/<model>`、`settings.modeId`、`settings.thinkingOptionId`、`settings.features`（Profile 的 `options`）和一次 `initialPrompt`；创建后用 `get_agent_status` 回读实际 `provider` 和 `model`。标签和角色自述不能作为正式身份证据；正式独立身份没有可核证据时不采纳。
-- 官方原版不提供 `codexRoleVerification`。普通角色派发按父 provider、精确 Profile、显式参数和 provider/model 回读验收；正式独立审查或放行需要独立身份证据时，没有可核证据只报「通道身份未验证」并停止正式采纳。原权限、沙箱和恢复义务不降。
-- 旧 LENS/FORGE 记录绑定旧独立家目录，不能直接在共用主家目录续用；切换时隔离或归档。旧 LUNO 记录也应在隔离实例验收后再切换。旧会话可能保存运行时注入的提示词，回退设置不会清除历史。
-
-恢复：若已合并，恢复合并前的 `config.json` 并按同一维护窗口 `paseo reload`（或按报告重启），再让新会话按旧配置启动。
+`platforms/paseo/config.example.json` 是官方原版双上游、六 Profile 的唯一配置示例。部署、验收与恢复见 [Paseo 官方原版部署](platforms/paseo/README.md)，本端角色派发按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。
 
 ## 测试与历史
 

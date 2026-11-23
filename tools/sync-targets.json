@@ -267,13 +267,6 @@
         "skills/luno-platform/LICENSE.matt-pocock.txt",
         "skills/luno-platform/LICENSE.openminis.txt",
         "skills/luno-platform/LICENSE.upstream.txt",
-        "skills/luno-platform/references/cchp-upstream/ENTRY.md",
-        "skills/luno-platform/references/cchp-upstream/LICENSE.upstream.txt",
-        "skills/luno-platform/references/cchp-upstream/references/auth.md",
-        "skills/luno-platform/references/cchp-upstream/references/errors.md",
-        "skills/luno-platform/references/cchp-upstream/references/output-contract.md",
-        "skills/luno-platform/references/cchp-upstream/references/pagination.md",
-        "skills/luno-platform/references/cchp-upstream/references/workflows.md",
         "skills/luno-platform/references/cchp.md",
         "skills/luno-platform/references/memory-common.md",
         "skills/luno-platform/references/minis-memory.md",
@@ -310,7 +303,7 @@
           ]
         }
       },
-      "note": "本候选新增 memory-common/minis-memory 两份记忆资源，另承接 CCHP 上游包；不表示已部署或独立对象已删除。"
+      "note": "包内受管资源以 `resources` 为准，各端实际部署及旧独立对象的退役状态以现场回读为准。"
     },
     {
       "id": "luno-surge",

@@ -34,7 +34,7 @@
 - 子代理：仓库 `subagents/`、Minis 的助理配置，以及宿主端的角色文件与 paseo 角色家目录。
 - 宿主端的回读口径见〔分支 sync-host〕。
 
-**上游核对只认 GitHub 仓库**：判断技能有没有上游更新，只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff；不探测技能市场的端点（如 skills.sh 的搜索或下载接口），它们的可用性和返回码不作为来源依据。完整吸收件保持原样、本端约定写同层独立自有文件的通用执行边界见 `luno-core/references/execution.md`〔分支 execution〕〈上游件〉，不只适用于 CCHP：`luno-platform/references/cchp.md` 是本端约定，官方件在同层 `cchp-upstream/`，目录相邻不表示官方原文被改写。**来源例外**要逐个对象裁定并登记：目前只有 `luno-surge`，它的官方 Agent Skill 只随 Surge Mac 应用包分发，取源方式、包身份校验（bundle id、版本、build）和逐文件 sha256 判据写在 `luno-surge/references/SOURCE.md`。例外只对该对象有效，不外推，也不能用同名的第三方仓库冒充官方来源。
+**上游核对只认 GitHub 仓库**：判断技能有没有上游更新，只比对上游 GitHub 仓库的默认分支 HEAD、目标文件的末次提交和内容哈希，并与本地逐字 diff；不探测技能市场的端点（如 skills.sh 的搜索或下载接口），它们的可用性和返回码不作为来源依据。完整吸收件保持原样、本端约定写同层独立自有文件的通用执行边界见 `luno-core/references/execution.md`〔分支 execution〕〈上游件〉。**来源例外**要逐个对象裁定并登记：目前只有 `luno-surge`，它的官方 Agent Skill 只随 Surge Mac 应用包分发，取源方式、包身份校验（bundle id、版本、build）和逐文件 sha256 判据写在 `luno-surge/references/SOURCE.md`。例外只对该对象有效，不外推，也不能用同名的第三方仓库冒充官方来源。
 
 **巡检和复制**：巡检输出里「内容不一致」指本地与仓库不一致，「与平台不一致」才是平台侧的问题。同步技能文件用单文件内容复制，不用整目录 `cp -r`：它曾把文件 mode 改成 755 污染 git；已经漂移的按 `git ls-files -s` 恢复索引中的 mode。
 
