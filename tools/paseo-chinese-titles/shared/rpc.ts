@@ -69,5 +69,15 @@ export const regenerateWorkspaceTitleRpc = defineRpc({
     /** Each write is independent; the two flags say exactly what was written. */
     workspaceUpdated: z.boolean(),
     sessionUpdated: z.boolean(),
+    /**
+     * Present only when some readable turns were not covered (page/entry/char
+     * limit, a timeline reset or gap, a read error or the segment budget). The
+     * title then describes the covered part, not the whole session.
+     */
+    coverage: z.object({
+      kind: z.literal("partial"),
+      reason: z.string().optional(),
+      turns: z.number().int().nonnegative(),
+    }).optional(),
   }),
 });

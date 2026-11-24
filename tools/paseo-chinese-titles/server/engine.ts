@@ -3,7 +3,7 @@ import { basename, join, resolve } from "node:path";
 import type { PaseoAgent, PaseoApi, PaseoProject, PaseoWorkspace } from "./paseo-types";
 import type { PluginSettings } from "@getpaseo/plugin/server";
 import type { ChineseTitlesSettings } from "../shared/settings";
-import { distinctWorkspaceTitle, isProvisional } from "../shared/title";
+import { distinctWorkspaceTitle, isProvisional } from "../shared/title.ts";
 import {
   createBootstrapWorkspaceViaCli,
   listAgentIdsViaCli,
@@ -12,22 +12,53 @@ import {
   listWorkspaceIdsViaCli,
   renameAgentViaCli,
   renameProjectViaCli,
-} from "./cli";
-import { pickFirstTask, type FirstTaskFact } from "../shared/first-task";
+} from "./cli.ts";
+import { pickFirstTask, type FirstTaskFact } from "../shared/first-task.ts";
 import { selectableSessionsFor } from "../shared/session-options.ts";
-import { readSessionConversation } from "./conversation";
-import { generateConversationTitle, generateTitle, HELPER_WORKSPACE_TITLE, isHelperAgent, type GenerationResult } from "./helper";
-import { planTitleGeneration } from "../shared/generation-plan";
-import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed";
+import { isDiscontinuous, readSessionConversation, readSessionNamingMaterial } from "./conversation.ts";
+import {
+  generateConversationTitle,
+  generateSessionTitle,
+  generateTitle,
+  HELPER_WORKSPACE_TITLE,
+  isHelperAgent,
+  type GenerationResult,
+} from "./helper.ts";
+import {
+  afterSessionFailure,
+  afterSessionSuccess,
+  isLegacyRepairCandidate,
+  isUnrepairedLegacyEntry,
+  planSessionNaming,
+  type SessionNamingState,
+} from "../shared/session-naming.ts";
+import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed.ts";
 import {
   regenerateWorkspaceTitle as runWorkspaceRegeneration,
   RPC_DEADLINE_MS,
   type RegenerateResult,
   type RegenerateScope,
-} from "./regenerate";
-import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state";
+} from "./regenerate.ts";
+import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state.ts";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
+/**
+ * A session gets the first naming attempt after its first substantive answer
+ * and at most one more on a later completed turn. Exhausting both stops.
+ */
+const MAX_SESSION_ATTEMPTS = 2;
+/**
+ * Paseo runs lifecycle hooks with a 30 s transport timeout. Keep the whole
+ * naming step (scan + model + one rename + verification) below it so a slow
+ * model still returns an enum failure instead of being abandoned mid-write.
+ */
+const SESSION_NAMING_BUDGET_MS = 20_000;
+const SESSION_MODEL_TIMEOUT_MS = 15_000;
+/** Below this the CLI rename plus its verification cannot finish in budget. */
+const RENAME_MIN_BUDGET_MS = 3_000;
+/** Keep enough of the rename budget for the post-write refresh. */
+const RENAME_VERIFY_RESERVE_MS = 1_000;
+const RENAME_MAX_TIMEOUT_MS = 10_000;
 const BOOTSTRAP_TITLE = "中文标题引导";
 const bootstrapDirectory = () => safePluginPath("helper", "bootstrap");
 
@@ -37,6 +68,20 @@ function isExactDirectory(path: string | null | undefined, directory: string): b
 }
 
 type Settings = PluginSettings<typeof import("../shared/settings").settingsSchema>;
+
+/**
+ * The one write the tests need to substitute: the official CLI is the only
+ * way to rename a session, and a unit test has no daemon to call. Production
+ * always uses the default.
+ */
+export interface EngineDependencies {
+  renameAgent?: (
+    settings: ChineseTitlesSettings,
+    agentId: string,
+    title: string,
+    timeoutMs?: number,
+  ) => Promise<{ ok: boolean; failure?: string }>;
+}
 
 export interface ReconcileSummary {
   ok: boolean;
@@ -69,7 +114,13 @@ export class ChineseTitlesEngine {
   private bootstrapProjectId: string | null = null;
   private disposed = false;
 
-  constructor(private readonly settings: Settings) {
+  private readonly settings: Settings;
+  private readonly renameAgent: NonNullable<EngineDependencies["renameAgent"]>;
+
+  constructor(settings: Settings, dependencies: EngineDependencies = {}) {
+    this.settings = settings;
+    this.renameAgent = dependencies.renameAgent ??
+      ((values, agentId, title, timeoutMs) => renameAgentViaCli(values, agentId, title, timeoutMs));
     this.ready = this.load();
   }
 
@@ -291,12 +342,29 @@ export class ChineseTitlesEngine {
     await saveState(this.state);
   }
 
-  async onTurn(agentId: string, turnId: string | null, paseo: PaseoApi): Promise<void> {
+  /**
+   * Before a turn only the workspace may be named, from its first task. Session
+   * naming waits for a finished answer, so it is not attempted here.
+   */
+  async onTurnBefore(agentId: string, turnId: string | null, paseo: PaseoApi): Promise<void> {
     await this.ready;
     if (!this.state) return;
     this.attach(paseo);
     await this.ensureBaseline(paseo, { agentId });
-    await this.processAgent(agentId, turnId, paseo);
+    await this.processAgent(agentId, turnId, paseo, "before", false);
+  }
+
+  /**
+   * After a turn, session naming runs only when the turn completed and its
+   * answer is substantive. A failed, canceled or tool-only turn never spends a
+   * naming attempt.
+   */
+  async onTurnAfter(agentId: string, turnId: string | null, paseo: PaseoApi, completed: boolean): Promise<void> {
+    await this.ready;
+    if (!this.state) return;
+    this.attach(paseo);
+    await this.ensureBaseline(paseo, { agentId });
+    await this.processAgent(agentId, turnId, paseo, "after", completed);
   }
 
   async reconcile(paseo: PaseoApi): Promise<ReconcileSummary> {
@@ -341,10 +409,13 @@ export class ChineseTitlesEngine {
       for (const agent of allAgents) {
         if (agent.background || isSubagent(agent) || isHelperAgent(agent) || isInsideDirectory(agent.cwd, helperDirectory())) continue;
         if (!agent.workspaceId || !agent.lastUserMessageAt) continue;
+        // A reconcile scan has no turn id, so it may only make the first naming
+        // attempt. Retries need a provably different completed turn.
         if (this.state.agents[agent.id]?.status !== "pending") continue;
+        if ((this.state.agents[agent.id]?.attempts ?? 0) > 0) continue;
         if (!workspaceById.has(agent.workspaceId)) continue;
         const before = this.state.agents[agent.id]?.status;
-        await this.processAgent(agent.id, null, paseo);
+        await this.processAgent(agent.id, null, paseo, "after", false);
         if (before === "pending" && this.state.agents[agent.id]?.status !== "pending") agents += 1;
       }
 
@@ -495,162 +566,335 @@ export class ChineseTitlesEngine {
     }
   }
 
-  private async processAgent(agentId: string, turnId: string | null, paseo: PaseoApi): Promise<void> {
+  private async processAgent(
+    agentId: string,
+    turnId: string | null,
+    paseo: PaseoApi,
+    phase: "before" | "after",
+    completed: boolean,
+  ): Promise<void> {
     if (!this.state || this.processingAgents.has(agentId)) return;
+    // A finished entity does no more work on later turns: no extra refresh,
+    // timeline read or model call. Only a not-yet-repaired legacy
+    // `done + model_failed|provider_unavailable` entry is still inspected,
+    // because whether it may be repaired depends on the live title.
+    const prior = this.state.agents[agentId];
+    if (prior && prior.status !== "pending" && prior.status !== "error" &&
+      !isUnrepairedLegacyEntry(prior)) {
+      // Nothing left to name for this session. Only a workspace still waiting
+      // for its own first task can need this turn, and an unknown workspace
+      // (an older state file) falls through once to record it.
+      const workspacePending = prior.workspaceId !== undefined &&
+        this.state.workspaces[prior.workspaceId]?.status === "pending";
+      if (prior.workspaceId !== undefined && !workspacePending) return;
+    }
     // Claim before any await so two hooks cannot both pass the state check.
     this.processingAgents.add(agentId);
-    let claimedWorkspace: string | null = null;
     try {
-      const agentState = this.state.agents[agentId];
-      if (agentState && agentState.status !== "pending" && agentState.status !== "error") return;
       const settings = await this.currentSettings();
       if (!settings) return;
       const refreshed = await paseo.agents.ref(agentId).refresh();
       const agent = refreshed?.agent;
       if (!agent || agent.background || isSubagent(agent) || isHelperAgent(agent) || isInsideDirectory(agent.cwd, helperDirectory())) {
-        this.state.agents[agentId] = { status: "skipped", at: now() };
+        this.state.agents[agentId] = { ...this.state.agents[agentId], status: "skipped", at: now() };
         return;
       }
       if (!agent.workspaceId) {
-        this.state.agents[agentId] = { status: "skipped", at: now() };
+        this.state.agents[agentId] = { ...this.state.agents[agentId], status: "skipped", at: now() };
         return;
       }
       const workspace = await paseo.workspaces.ref(agent.workspaceId).refresh();
       if (!workspace || workspace.background || isInsideDirectory(workspace.workspaceDirectory, helperDirectory())) {
-        this.state.agents[agentId] = { status: "skipped", at: now() };
+        this.state.agents[agentId] = { ...this.state.agents[agentId], status: "skipped", at: now() };
         return;
       }
+      // Remember the workspace so a named session can skip later turns without
+      // another refresh or timeline read. Persist once for an older state file.
+      const remembered = this.state.agents[agentId]?.workspaceId === agent.workspaceId;
+      this.state.agents[agentId] = {
+        ...(this.state.agents[agentId] ?? { status: "pending", at: now() }),
+        workspaceId: agent.workspaceId,
+      };
+      if (!remembered) await saveState(this.state);
       const prompt = await this.readFirstPrompt(paseo, agent.id);
       if (!prompt) return;
-      if (turnId !== null && prompt.turnId !== null && prompt.turnId !== turnId) return;
 
-      const workspaceState = this.state.workspaces[workspace.id];
-      const candidate = Boolean(settings.autoNameWorkspaces && workspaceState?.status === "pending");
-      if (candidate && !this.processingWorkspaces.has(workspace.id)) {
-        this.processingWorkspaces.add(workspace.id);
-        claimedWorkspace = workspace.id;
+      // The workspace keeps its existing first-task behaviour: it is named from
+      // the workspace's first task, on that first turn (or a reconcile scan).
+      const onFirstTurn = turnId === null || prompt.turnId === null || prompt.turnId === turnId;
+      if (onFirstTurn) {
+        await this.nameWorkspaceFromFirstTask(paseo, settings, agent, workspace, prompt);
       }
-      const winner = claimedWorkspace !== null
-        ? await this.pickWorkspaceFirstTask(paseo, workspace.id, agent.id, prompt)
-        : null;
+
+      // A session is named only after a completed turn produced a real answer,
+      // from the first question and that answer together.
+      await this.nameSession(paseo, settings, agent, workspace, prompt, turnId, phase, completed);
+    } catch {
+      if (this.state) {
+        this.state.agents[agentId] = { ...this.state.agents[agentId], status: "error", at: now(), error: "internal_failed" };
+        await saveState(this.state);
+      }
+    } finally {
+      this.processingAgents.delete(agentId);
+    }
+  }
+
+  /** Workspace first-task naming; unchanged apart from living in its own step. */
+  private async nameWorkspaceFromFirstTask(
+    paseo: PaseoApi,
+    settings: ChineseTitlesSettings,
+    agent: PaseoAgent,
+    workspace: PaseoWorkspace,
+    prompt: { text: string; turnId: string | null; at: string },
+  ): Promise<void> {
+    if (!this.state) return;
+    if (this.processingWorkspaces.has(workspace.id)) return;
+    const workspaceState = this.state.workspaces[workspace.id];
+    if (!settings.autoNameWorkspaces || workspaceState?.status !== "pending") return;
+    this.processingWorkspaces.add(workspace.id);
+    let workspaceResult: GenerationResult | null = null;
+    try {
+      const winner = await this.pickWorkspaceFirstTask(paseo, workspace.id, agent.id, prompt);
       const workspacePrompt = winner?.text ?? prompt.text;
       const seededTitle = seededWorkspaceTitle(workspace.metadata);
-      const workspaceEligible = Boolean(
-        claimedWorkspace !== null &&
+      const eligible = Boolean(
         winner !== null &&
         (isProvisional(workspace.title, workspacePrompt) ||
           (seededTitle !== null && workspace.title === seededTitle)),
       );
-      const agentEligible = Boolean(settings.autoNameSessions && isProvisional(agent.title, prompt.text));
-      if (!workspaceEligible && !agentEligible) {
-        if (settings.autoNameSessions && !isProvisional(agent.title, prompt.text)) {
-          this.state.agents[agent.id] = { status: "skipped", at: now() };
-        }
-        // A lost workspace claim is contention, not a manual title. Leave the
-        // pending state for the claim holder instead of marking it skipped.
-        return;
-      }
-
-      if (workspaceEligible) {
-        this.state.workspaces[workspace.id] = { status: "generating", at: now(), previousTitle: workspace.title ?? null };
-        await saveState(this.state);
-      }
-      if (agentEligible) {
-        this.state.agents[agent.id] = { status: "generating", at: now(), previousTitle: agent.title ?? null };
-        await saveState(this.state);
-      }
-
-      const plan = planTitleGeneration({
-        workspaceEligible,
-        agentEligible,
-        winnerIsAgent: winner?.id === agent.id,
+      if (!eligible) return;
+      this.state.workspaces[workspace.id] = { status: "generating", at: now(), previousTitle: workspace.title ?? null };
+      await saveState(this.state);
+      workspaceResult = await generateTitle(paseo, settings, {
+        kind: "workspace",
+        prompt: workspacePrompt,
+        projectName: workspace.projectDisplayName,
+        baseName: workspace.name,
+        projectId: workspace.projectId,
+        maxChars: settings.titleMaxChars,
       });
-      let workspaceResult: GenerationResult | null = null;
-      let agentResult: GenerationResult | null = null;
-      if (plan.workspace) {
-        workspaceResult = await generateTitle(paseo, settings, {
-          kind: "workspace",
-          prompt: workspacePrompt,
-          projectName: workspace.projectDisplayName,
-          baseName: workspace.name,
-          projectId: workspace.projectId,
-          maxChars: settings.titleMaxChars,
-        });
-      }
-      if (plan.agent === "reuse-workspace") {
-        agentResult = workspaceResult;
-      } else if (plan.agent === "generate") {
-        agentResult = await generateTitle(paseo, settings, {
-          kind: "session",
-          prompt: prompt.text,
-          projectName: workspace.projectDisplayName,
-          baseName: workspace.name,
-          projectId: workspace.projectId,
-          maxChars: settings.titleMaxChars,
-        });
-      }
-
-      if (workspaceEligible) {
-        // Re-read the original override. Only one final write; no placeholder.
-        const current = await paseo.workspaces.ref(workspace.id).refresh();
-        const previous = this.state.workspaces[workspace.id]?.previousTitle ?? null;
-        const finalTitle = workspaceResult
-          ? distinctWorkspaceTitle(workspaceResult.title, workspacePrompt, settings.titleMaxChars)
-          : null;
-        if (finalTitle && current && (current.title === previous || current.title === null || current.title === "" || isProvisional(current.title, workspacePrompt))) {
-          await paseo.workspaces.ref(workspace.id).setTitle(finalTitle);
-          const verified = await paseo.workspaces.ref(workspace.id).refresh();
-          if (verified?.title !== finalTitle) {
-            this.state.workspaces[workspace.id] = { status: "error", at: now(), error: "verification_failed" };
-          } else {
-            this.state.workspaces[workspace.id] = {
-              status: "done",
-              at: now(),
-              title: finalTitle,
-              previousTitle: previous,
-              ...(workspaceResult?.errorCode ? { error: workspaceResult.errorCode } : {}),
-            };
-          }
+      // Re-read the original override. Only one final write; no placeholder.
+      const current = await paseo.workspaces.ref(workspace.id).refresh();
+      const previous = this.state.workspaces[workspace.id]?.previousTitle ?? null;
+      const finalTitle = distinctWorkspaceTitle(workspaceResult.title, workspacePrompt, settings.titleMaxChars);
+      if (current && (current.title === previous || current.title === null || current.title === "" || isProvisional(current.title, workspacePrompt))) {
+        await paseo.workspaces.ref(workspace.id).setTitle(finalTitle);
+        const verified = await paseo.workspaces.ref(workspace.id).refresh();
+        if (verified?.title !== finalTitle) {
+          this.state.workspaces[workspace.id] = { status: "error", at: now(), error: "verification_failed" };
         } else {
-          // A manual rename won the race; never clobber it.
-          this.state.workspaces[workspace.id] = { status: "skipped", at: now(), previousTitle: previous };
+          this.state.workspaces[workspace.id] = {
+            status: "done",
+            at: now(),
+            title: finalTitle,
+            previousTitle: previous,
+            ...(workspaceResult.errorCode ? { error: workspaceResult.errorCode } : {}),
+          };
         }
-        await saveState(this.state);
-      }
-
-      if (agentEligible) {
-        const current = await paseo.agents.ref(agent.id).refresh();
-        if (agentResult && current?.agent && isProvisional(current.agent.title, prompt.text)) {
-          const renamed = await renameAgentViaCli(settings, agent.id, agentResult.title);
-          if (!renamed.ok) {
-            this.state.agents[agent.id] = { status: "error", at: now(), error: renamed.failure ?? "failed" };
-            console.warn("[paseo-chinese-titles] agent rename CLI failed", { agentId: agent.id, code: renamed.failure ?? "failed" });
-          } else {
-            const verified = await paseo.agents.ref(agent.id).refresh();
-            if (verified?.agent.title?.trim() !== agentResult.title) {
-              this.state.agents[agent.id] = { status: "error", at: now(), error: "verification_failed" };
-            } else {
-              this.state.agents[agent.id] = {
-                status: "done",
-                at: now(),
-                title: agentResult.title,
-                ...(agentResult.errorCode ? { error: agentResult.errorCode } : {}),
-              };
-            }
-          }
-        } else {
-          this.state.agents[agent.id] = { status: "skipped", at: now() };
-        }
-        await saveState(this.state);
-      }
-    } catch {
-      if (this.state) {
-        this.state.agents[agentId] = { status: "error", at: now(), error: "internal_failed" };
-        await saveState(this.state);
+      } else {
+        // A manual rename won the race; never clobber it.
+        this.state.workspaces[workspace.id] = { status: "skipped", at: now(), previousTitle: previous };
       }
     } finally {
-      if (claimedWorkspace) this.processingWorkspaces.delete(claimedWorkspace);
-      this.processingAgents.delete(agentId);
+      this.processingWorkspaces.delete(workspace.id);
+      if (this.state) await saveState(this.state);
+    }
+  }
+
+  /**
+   * Automatic session naming. The material is the first user question plus the
+   * substantive answer of the completed turn, so the title reflects what the
+   * session actually did instead of Paseo's first-sentence provisional text.
+   *
+   * One model failure keeps the provisional title and spends one attempt; only
+   * a later, different completed turn may spend the second. A duplicate event,
+   * a restart, a failed or tool-only turn and concurrent hooks never spend an
+   * attempt they have not been recorded as spending.
+   */
+  private async nameSession(
+    paseo: PaseoApi,
+    settings: ChineseTitlesSettings,
+    agent: PaseoAgent,
+    workspace: PaseoWorkspace,
+    prompt: { text: string; turnId: string | null; at: string },
+    turnId: string | null,
+    phase: "before" | "after",
+    completed: boolean,
+  ): Promise<void> {
+    if (!this.state) return;
+    // Sending a prompt is not an answer. Only the after-turn hook may name.
+    if (phase !== "after") return;
+    // Automatic session naming stays opt-in; a disabled setting leaves any
+    // recorded state untouched for when the user enables it again.
+    if (!settings.autoNameSessions) return;
+    const agentState = this.state.agents[agent.id];
+    // A legacy baseline entry is never touched, and a skipped entry has already
+    // stopped. `done` is handled by the repair rule below.
+    if (agentState?.status === "legacy" || agentState?.status === "skipped") return;
+
+    const provisional = isProvisional(agent.title, prompt.text);
+    // A named session is an explicit choice unless it still equals the title we
+    // recorded for a not-yet-verified repair candidate.
+    const repairCandidate = isLegacyRepairCandidate(agentState, agent.title);
+    if (!provisional && !repairCandidate) {
+      if (agentState?.status === "pending" || agentState?.status === "error" || agentState?.status === "generating") {
+        this.state.agents[agent.id] = { ...agentState, status: "skipped", at: now() };
+        await saveState(this.state);
+      } else if (isUnrepairedLegacyEntry(agentState)) {
+        // The live title differs from the recorded fallback: the user renamed
+        // it. Close the one-time repair question so later turns do no work.
+        this.state.agents[agent.id] = { ...agentState, repairUsed: true, at: now() };
+        await saveState(this.state);
+      }
+      return;
+    }
+
+    // One deadline covers the scan, the model and the single write, so a slow
+    // step cannot push the others past the daemon's hook timeout.
+    const namingDeadlineAt = Date.now() + SESSION_NAMING_BUDGET_MS;
+    let material: Awaited<ReturnType<typeof readSessionNamingMaterial>> = null;
+    if (completed || repairCandidate || turnId === null) {
+      material = await readSessionNamingMaterial(paseo, agent.id, { turnId, deadlineAt: namingDeadlineAt });
+    }
+    const hasAnswer = Boolean(material?.answer);
+    // A reconcile scan has no turn id and no outcome. A readable substantive
+    // answer is enough evidence that the first turn finished, but such a scan
+    // may still only make the first attempt (see planSessionNaming).
+    const plan = planSessionNaming({
+      state: agentState,
+      currentTitle: agent.title,
+      prompt: prompt.text,
+      hasAnswer,
+      turnId,
+      completed: completed || (turnId === null && hasAnswer),
+      maxAttempts: MAX_SESSION_ATTEMPTS,
+      provisional,
+    });
+    if (plan.kind === "generate") {
+      // Persist the spent attempt before the model call. A crash or restart
+      // during generation must not hand the same turn a fresh attempt, and a
+      // duplicate event for this turn is then recognised by `lastTurnId`.
+      this.state.agents[agent.id] = {
+        status: "pending",
+        at: now(),
+        attempts: plan.attempt,
+        lastTurnId: turnId,
+        workspaceId: agent.workspaceId,
+        ...(plan.repair ? { repairUsed: true } : {}),
+      };
+      await saveState(this.state);
+      const generated = await generateSessionTitle(paseo, settings, {
+        question: material?.question ?? prompt.text,
+        answer: material?.answer ?? "",
+        projectName: workspace.projectDisplayName,
+        baseName: workspace.name,
+        projectId: workspace.projectId,
+        maxChars: settings.titleMaxChars,
+      }, {
+        timeoutMs: SESSION_MODEL_TIMEOUT_MS,
+        deadlineAt: namingDeadlineAt,
+      });
+      // Keep the workspace on every recorded outcome so a finished session can
+      // skip later turns without another refresh.
+      const record = (state: SessionNamingState) => {
+        this.state!.agents[agent.id] = { ...state, workspaceId: agent.workspaceId };
+      };
+      if (!generated.title) {
+        // No usable model title: the live provisional title stays as it is.
+        record(afterSessionFailure({
+          errorCode: generated.errorCode ?? "model_failed",
+          attempt: plan.attempt,
+          maxAttempts: MAX_SESSION_ATTEMPTS,
+          turnId,
+          repair: plan.repair,
+          at: now(),
+        }));
+        await saveState(this.state);
+        return;
+      }
+      // Re-read immediately before the only write: a manual rename that landed
+      // during generation must win, and an agent that disappeared, was archived
+      // or moved to another workspace must not be renamed through a stale ref.
+      const current = (await paseo.agents.ref(agent.id).refresh())?.agent;
+      const liveTitle = current?.title?.trim() ?? "";
+      // A missing agent refreshes to `undefined`; the provisional check would
+      // treat that as "still ours", so existence is checked first.
+      const stillOurs = current !== undefined &&
+        (current.workspaceId ?? null) === (agent.workspaceId ?? null) &&
+        !current.archivedAt &&
+        (isProvisional(current.title, prompt.text) ||
+          (plan.repair && liveTitle === agentState?.title?.trim()));
+      if (!stillOurs) {
+        this.state.agents[agent.id] = {
+          status: "skipped",
+          at: now(),
+          attempts: plan.attempt,
+          lastTurnId: turnId,
+          workspaceId: agent.workspaceId,
+          ...(plan.repair ? { repairUsed: true } : {}),
+        };
+        await saveState(this.state);
+        return;
+      }
+      // The whole naming step shares one deadline. If the refresh and the model
+      // used it up, the CLI write would outlive the hook timeout, so record a
+      // timeout instead of starting a rename that cannot be verified in time.
+      const remainingMs = namingDeadlineAt - Date.now();
+      if (remainingMs < RENAME_MIN_BUDGET_MS) {
+        record(afterSessionFailure({
+          errorCode: "timeout",
+          attempt: plan.attempt,
+          maxAttempts: MAX_SESSION_ATTEMPTS,
+          turnId,
+          repair: plan.repair,
+          at: now(),
+        }));
+        await saveState(this.state);
+        return;
+      }
+      const renameTimeoutMs = Math.min(remainingMs - RENAME_VERIFY_RESERVE_MS, RENAME_MAX_TIMEOUT_MS);
+      const renamed = await this.renameAgent(settings, agent.id, generated.title, renameTimeoutMs);
+      const verified = renamed.ok ? await paseo.agents.ref(agent.id).refresh() : null;
+      if (!renamed.ok || verified?.agent.title?.trim() !== generated.title) {
+        // A failed or unverified write is not a model failure: spend this
+        // attempt but keep the remaining one for a later completed turn, so a
+        // transient CLI timeout does not strand the session forever.
+        const error = renamed.ok ? "verification_failed" : renamed.failure ?? "failed";
+        record(afterSessionFailure({
+          errorCode: error,
+          attempt: plan.attempt,
+          maxAttempts: MAX_SESSION_ATTEMPTS,
+          turnId,
+          repair: plan.repair,
+          at: now(),
+        }));
+        if (!renamed.ok) {
+          console.warn("[paseo-chinese-titles] agent rename CLI failed", { agentId: agent.id, code: error });
+        }
+        await saveState(this.state);
+        return;
+      }
+      record(afterSessionSuccess({
+        title: generated.title,
+        attempt: plan.attempt,
+        turnId,
+        repair: plan.repair,
+        at: now(),
+      }));
+      await saveState(this.state);
+      return;
+    }
+    if (plan.kind === "blocked" && plan.reason === "exhausted") {
+      // Both attempts are spent: stop looking at this session.
+      this.state.agents[agent.id] = {
+        status: "skipped",
+        at: now(),
+        workspaceId: agent.workspaceId,
+        ...(agentState?.error ? { error: agentState.error } : {}),
+        ...(agentState?.attempts !== undefined ? { attempts: agentState.attempts } : {}),
+        ...(agentState?.lastTurnId !== undefined ? { lastTurnId: agentState.lastTurnId } : {}),
+      };
+      await saveState(this.state);
     }
   }
 
@@ -679,10 +923,18 @@ export class ChineseTitlesEngine {
     return pickFirstTask(facts);
   }
 
+  /**
+   * The first visible user message. It is read forward from the head with a
+   * small page and time budget: the hook that calls it must stay inside the
+   * daemon's hook timeout, and a discontinuity page proves nothing about the
+   * real opening.
+   */
   private async readFirstPrompt(paseo: PaseoApi, agentId: string): Promise<{ text: string; turnId: string | null; at: string } | null> {
     const timeline = paseo.agents.ref(agentId).timeline;
+    const deadlineAt = Date.now() + 5_000;
     let cursor: { epoch: string; seq: number } | undefined;
     for (let page = 0; page < 50; page += 1) {
+      if (Date.now() >= deadlineAt) return null;
       const result = await timeline.refetch({
         direction: "after",
         projection: "projected",
@@ -690,6 +942,10 @@ export class ChineseTitlesEngine {
         ...(cursor ? { cursor } : {}),
       });
       if (result.error) return null;
+      // A stale cursor or sequence gap makes the daemon return a tail page.
+      // That page may start mid-session, so it can never prove the real first
+      // prompt, and a first page that is already such a reset is no exception.
+      if (isDiscontinuous(result)) return null;
       for (const entry of result.entries ?? []) {
         if (entry.item.type === "user_message" && entry.item.text.trim()) {
           return { text: entry.item.text, turnId: entry.turnId ?? null, at: entry.timestamp };

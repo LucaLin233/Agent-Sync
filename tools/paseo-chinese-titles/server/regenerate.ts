@@ -28,6 +28,8 @@ export interface RegenerateResult {
   sessionUpdated: boolean;
   /** The session whose conversation was summarised; internal to the engine. */
   agentId?: string;
+  /** Present only when some readable turns were not covered; `reason` names the limit. */
+  coverage?: { kind: "partial"; reason?: string; turns: number };
 }
 
 export interface SessionRenameResult {
@@ -48,7 +50,14 @@ export interface RegenerateOptions {
   /** Shared with the automatic session path so a manual rename cannot race it. */
   agentClaims: Set<string>;
   generateConversation: (
-    request: { transcript: string; projectName?: string | null; baseName?: string | null; projectId?: string | null; maxChars: number },
+    request: {
+      transcript: string;
+      segments?: readonly string[];
+      projectName?: string | null;
+      baseName?: string | null;
+      projectId?: string | null;
+      maxChars: number;
+    },
     timeoutMs: number,
     deadlineAt: number,
   ) => Promise<ConversationGenerationResult>;
@@ -95,7 +104,8 @@ function statusFor(wantsWorkspace: boolean, wantsSession: boolean, workspaceUpda
  * There is no deterministic substitute for a conversation summary: if the
  * model is unavailable, times out or answers without a valid Chinese title,
  * the existing titles are kept. One generated title is reused for both
- * requested targets, and the model is called exactly once per request.
+ * requested targets. A short conversation needs one model turn; a long one is
+ * condensed part by part first, all inside the same request's deadline.
  *
  * Paseo 0.17.3's PluginHandlerContext has no abort signal. The caller therefore
  * gives this function a deadline shorter than the daemon's 30 s RPC timeout,
@@ -103,6 +113,16 @@ function statusFor(wantsWorkspace: boolean, wantsSession: boolean, workspaceUpda
  * model completion can never write after the RPC has timed out.
  */
 export async function regenerateWorkspaceTitle(options: RegenerateOptions): Promise<RegenerateResult> {
+  const coverageOut: { value?: RegenerateResult["coverage"] } = {};
+  const result = await runRegeneration(options, coverageOut);
+  const wrote = result.status === "done" || result.status === "partial";
+  return coverageOut.value && wrote ? { ...result, coverage: coverageOut.value } : result;
+}
+
+async function runRegeneration(
+  options: RegenerateOptions,
+  coverageOut: { value?: RegenerateResult["coverage"] },
+): Promise<RegenerateResult> {
   const scope: RegenerateScope = options.scope ?? "workspace";
   const wantsWorkspace = scope !== "session";
   const wantsSession = scope !== "workspace";
@@ -175,6 +195,18 @@ export async function regenerateWorkspaceTitle(options: RegenerateOptions): Prom
       return { status: "skipped", reason: "empty_conversation", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
 
+    // A summary built from a bounded read of a longer or partly unreadable
+    // session is still useful, but the caller must be able to say that some
+    // turns were not covered instead of presenting it as complete.
+    // Only an incomplete read is reported; a full read needs no caveat.
+    const coverage = conversation.coverage ?? { kind: "full" as const };
+    if (coverage.kind === "partial") {
+      coverageOut.value = {
+        kind: "partial",
+        turns: conversation.coveredTurns ?? conversation.turns,
+        ...(coverage.reason ? { reason: coverage.reason } : {}),
+      };
+    }
     const startWorkspaceTitle = normalizedTitle(workspace.title);
     const startSessionTitle = normalizedTitle(targetAgent.title);
     const maxChars = options.settings.titleMaxChars;
@@ -188,6 +220,7 @@ export async function regenerateWorkspaceTitle(options: RegenerateOptions): Prom
     );
     const generation: Promise<ConversationGenerationResult | null> = options.generateConversation({
       transcript,
+      ...(conversation.segments && conversation.segments.length > 1 ? { segments: conversation.segments } : {}),
       projectName: workspace.projectDisplayName,
       baseName: workspace.name,
       projectId: workspace.projectId,

@@ -1,10 +1,15 @@
 /**
- * Builds the bounded conversation excerpt sent to the title model.
+ * Turns visible timeline entries into chronological, redacted text blocks.
  *
- * Only visible user and assistant text is considered: reasoning, tool calls,
- * notifications, todo/compaction records and plugin rows are dropped by the
- * caller. Obvious credentials are redacted here so they never reach the
+ * Only visible user text and assistant answers are considered: reasoning, tool
+ * calls, notifications, todo/compaction records and plugin rows are dropped by
+ * the caller. Obvious credentials are redacted here so they never reach the
  * helper session, an RPC reply, a log or a file.
+ *
+ * The manual summary reads the transcript in chronological page order and
+ * covers every readable turn. A single long turn can still be clipped, and a
+ * session longer than the bounded budget is reported as partial coverage rather
+ * than silently sampled; see `planSegments` and `server/conversation.ts`.
  */
 
 export interface ConversationEntry {
@@ -20,13 +25,41 @@ export interface ExcerptOptions {
   maxChars?: number;
   /** Maximum characters of one message. */
   maxMessageChars?: number;
-  /** How many turns may be sampled across the whole session. */
-  maxTurns?: number;
 }
 
 export interface ConversationExcerpt {
+  /** Joined segments, in chronological order. */
   text: string;
   turns: number;
+  /** Contiguous chronological groups, each within the model input budget. */
+  segments: string[];
+  /** Turns that made it into `segments`; equal to `turns` for full coverage. */
+  coveredTurns: number;
+  coverage: TranscriptCoverage;
+}
+
+/** One conversation turn, already grouped, filtered, redacted and clipped. */
+export interface TranscriptTurn {
+  id: string | null;
+  text: string;
+  chars: number;
+}
+
+export type TranscriptPartialReason =
+  | "page_cap"
+  | "entry_cap"
+  | "char_cap"
+  | "deadline"
+  | "cursor_missing"
+  | "read_error"
+  | "segment_cap"
+  | "reset"
+  | "gap";
+
+export interface TranscriptCoverage {
+  kind: "full" | "partial";
+  /** Why only part of the timeline could be read; absent for a full read. */
+  reason?: TranscriptPartialReason;
 }
 
 const REDACTIONS: ReadonlyArray<readonly [RegExp, string]> = [
@@ -111,8 +144,8 @@ function clip(text: string, maxChars: number): string {
   return cut ? `${cut}…` : "";
 }
 
-interface TurnBucket {
-  parts: string[];
+function lengthOf(value: string): number {
+  return Array.from(value).length;
 }
 
 const ROLE_LABEL: Readonly<Record<string, string>> = {
@@ -120,82 +153,66 @@ const ROLE_LABEL: Readonly<Record<string, string>> = {
   assistant_message: "助手",
 };
 
-const USER_PREFIX = "用户：";
-
-function lengthOf(value: string): number {
-  return Array.from(value).length;
-}
-
-function turnText(turn: TurnBucket): string {
-  return turn.parts.filter(Boolean).join("\n");
-}
+/** A completed turn needs at least this much visible prose to count as an answer. */
+export const MIN_ANSWER_CHARS = 4;
 
 /**
- * A slot budget goes to the user's own question first and to the assistant's
- * answer only with the remainder, so one very long answer cannot hide the
- * question it answered.
+ * True when the visible assistant text can carry a real answer. A turn that
+ * only ran tools, or a failed/canceled turn, must not spend the one naming
+ * retry; the caller waits for the next completed turn instead.
  */
-function blockFor(turn: TurnBucket, quota: number): string {
-  if (quota <= 0) return "";
-  const asked = turn.parts.filter((part) => part.startsWith(USER_PREFIX)).join("\n");
-  const answered = turn.parts.filter((part) => !part.startsWith(USER_PREFIX)).join("\n");
-  let block = "";
-  if (asked) block = clip(asked, quota);
-  if (answered) {
-    const left = quota - lengthOf(block) - (block ? 2 : 0);
-    if (left > 16) {
-      const more = clip(answered, left);
-      if (more) block = block ? `${block}\n${more}` : more;
-    } else if (!block) {
-      block = clip(answered, quota);
-    }
-  }
-  return block;
+export function isSubstantiveAnswer(text: string | null | undefined): boolean {
+  if (typeof text !== "string" || !text.trim()) return false;
+  const cleaned = redactSecrets(normalize(withoutInjectedBlocks(text))).replace(/\s+/gu, "");
+  return Array.from(cleaned).length >= MIN_ANSWER_CHARS;
 }
 
 /**
- * Adds the middle of the largest unselected gap while the budget can still pay
- * for it. Even sampling alone can step over a short but essential turn (one
- * message about the prompt rules, the next about the skill rules), and the
- * character budget, not a fixed turn count, is the real limit.
+ * Groups chronological entries by turn id, keeps the user's question before
+ * the answer of its own turn, and clips each message to a fixed size. Entries
+ * without a turn id become their own turn.
  */
-function fillGaps(selected: number[], total: number, cost: (index: number) => number, budget: number): number[] {
-  const chosen = new Set(selected);
-  let used = selected.reduce((sum, index) => sum + cost(index), 0);
-  for (;;) {
-    const ordered = [...chosen].sort((left, right) => left - right);
-    let bestGap: { middle: number; span: number } | null = null;
-    for (let slot = 0; slot < ordered.length - 1; slot += 1) {
-      const span = ordered[slot + 1] - ordered[slot];
-      if (span < 2) continue;
-      const middle = ordered[slot] + Math.floor(span / 2);
-      if (!bestGap || span > bestGap.span) bestGap = { middle, span };
+export function buildTranscriptTurns(
+  entries: readonly ConversationEntry[],
+  options: ExcerptOptions = {},
+): TranscriptTurn[] {
+  const maxMessageChars = options.maxMessageChars ?? 1_600;
+  const turns: Array<{ id: string | null; parts: string[] }> = [];
+  const indexByKey = new Map<string, number>();
+  let lastText = "";
+  for (const entry of entries) {
+    const label = ROLE_LABEL[entry.type];
+    if (!label || typeof entry.text !== "string") continue;
+    const cleaned = redactSecrets(normalize(withoutInjectedBlocks(entry.text)));
+    if (!cleaned || cleaned === lastText) continue;
+    // The transcript carries the user's visible questions and the assistant's
+    // substantive answers, not one-word acknowledgements or tool chatter.
+    if (entry.type === "assistant_message" && !isSubstantiveAnswer(cleaned)) continue;
+    lastText = cleaned;
+    const key = entry.turnId ? `turn:${entry.turnId}` : `solo:${turns.length}`;
+    let index = indexByKey.get(key);
+    if (index === undefined) {
+      index = turns.length;
+      indexByKey.set(key, index);
+      turns.push({ id: entry.turnId ?? null, parts: [] });
     }
-    if (!bestGap) break;
-    const extra = cost(bestGap.middle) + 2;
-    if (used + extra > budget) break;
-    chosen.add(bestGap.middle);
-    used += extra;
+    turns[index].parts.push(`${label}：${clip(cleaned, maxMessageChars)}`);
   }
-  return [...chosen].sort((left, right) => left - right);
+  return turns
+    .map((turn) => {
+      const text = normalize(turn.parts.join("\n"));
+      return { id: turn.id, text, chars: lengthOf(text) };
+    })
+    .filter((turn) => turn.text.length > 0);
 }
 
-/** Evenly spaced indexes over the whole range, always keeping both ends. */
-function sampleIndices(total: number, limit: number): number[] {
-  if (total <= limit) return Array.from({ length: total }, (_, index) => index);
-  const picked: number[] = [];
-  for (let slot = 0; slot < limit; slot += 1) {
-    const index = Math.round((slot * (total - 1)) / (limit - 1));
-    if (picked[picked.length - 1] !== index) picked.push(index);
-  }
-  return picked;
+export function joinTurns(turns: readonly TranscriptTurn[]): string {
+  return turns.map((turn) => turn.text).join("\n\n");
 }
 
 /**
- * Splits the character budget evenly across the selected turns, then lets the
- * leftovers of short turns flow to longer ones. Every evenly sampled period
- * keeps a share, so neither the opening nor the closing turns can take the
- * whole excerpt.
+ * Splits the character budget evenly across turns, then lets the leftovers of
+ * short turns flow to longer ones, so one long answer cannot starve the rest.
  */
 function allocate(sizes: readonly number[], budget: number): number[] {
   const allocation = new Array(sizes.length).fill(0) as number[];
@@ -222,69 +239,82 @@ function allocate(sizes: readonly number[], budget: number): number[] {
 }
 
 /**
- * Builds a bounded excerpt that covers the session's opening, middle and end
- * rather than only the first task and the newest turns. Each selected period
- * keeps its own share of the budget, and a turn's user question is preferred
- * over its assistant answer.
+ * Joins turns verbatim while they fit, then shares the remaining budget evenly
+ * across them. Used for a short session and for the first-question/answer pair
+ * of an automatically named session.
  */
+export function fitTranscript(turns: readonly TranscriptTurn[], maxChars: number): string {
+  if (turns.length === 0) return "";
+  const joined = joinTurns(turns);
+  if (lengthOf(joined) <= maxChars) return joined;
+  const separators = 2 * Math.max(0, turns.length - 1);
+  const allocation = allocate(turns.map((turn) => turn.chars), Math.max(0, maxChars - separators));
+  const text = normalize(
+    turns
+      .map((turn, index) => (allocation[index] > 0 ? clip(turn.text, allocation[index]) : ""))
+      .filter(Boolean)
+      .join("\n\n"),
+  );
+  return lengthOf(text) <= maxChars ? text : Array.from(text).slice(0, maxChars).join("").trim();
+}
+
+/** Bounded excerpt over a list of entries; a short conversation passes through verbatim. */
 export function buildConversationExcerpt(
   entries: readonly ConversationEntry[],
   options: ExcerptOptions = {},
 ): ConversationExcerpt {
   const maxChars = options.maxChars ?? 2_400;
-  const maxTurns = Math.max(3, options.maxTurns ?? 10);
-  // Many selected turns must still fit the overall budget.
-  const maxMessageChars = Math.min(options.maxMessageChars ?? 700, Math.floor(maxChars / 3));
+  const turns = buildTranscriptTurns(entries, {
+    maxMessageChars: Math.min(options.maxMessageChars ?? 1_200, maxChars),
+  });
+  if (turns.length === 0) {
+    return { text: "", turns: 0, segments: [], coveredTurns: 0, coverage: { kind: "full" } };
+  }
+  return {
+    text: fitTranscript(turns, maxChars),
+    turns: turns.length,
+    segments: [joinTurns(turns)],
+    coveredTurns: turns.length,
+    coverage: { kind: "full" },
+  };
+}
 
-  const turns: TurnBucket[] = [];
-  const turnByIndex = new Map<string, TurnBucket>();
-  let lastText = "";
-  for (const entry of entries) {
-    const label = ROLE_LABEL[entry.type];
-    if (!label || typeof entry.text !== "string") continue;
-    const cleaned = redactSecrets(normalize(withoutInjectedBlocks(entry.text)));
-    if (!cleaned || cleaned === lastText) continue;
-    lastText = cleaned;
-    // A turn id groups a user message with the assistant replies it caused;
-    // without one, each message is its own turn.
-    const key = entry.turnId ? `turn:${entry.turnId}` : `message:${turns.length}`;
-    let bucket = turnByIndex.get(key);
-    if (!bucket) {
-      bucket = { parts: [] };
-      turnByIndex.set(key, bucket);
-      turns.push(bucket);
+export interface SegmentPlan {
+  /** Contiguous chronological groups, in order. */
+  segments: TranscriptTurn[][];
+  coveredTurns: number;
+  /** True only when every readable turn is inside some segment. */
+  coversAll: boolean;
+}
+
+/**
+ * Cuts the transcript into contiguous chronological segments that each fit the
+ * model input, up to `maxSegments`. When the session is longer, the plan stops
+ * early and `coversAll` is false: the caller must report partial coverage
+ * instead of claiming a whole-session summary.
+ */
+export function planSegments(
+  turns: readonly TranscriptTurn[],
+  options: { segmentChars?: number; maxSegments?: number } = {},
+): SegmentPlan {
+  const segmentChars = Math.max(500, options.segmentChars ?? 6_000);
+  const maxSegments = Math.max(1, options.maxSegments ?? 3);
+  const segments: TranscriptTurn[][] = [];
+  let current: TranscriptTurn[] = [];
+  let size = 0;
+  for (const turn of turns) {
+    if (segments.length >= maxSegments) break;
+    const extra = turn.chars + (current.length > 0 ? 2 : 0);
+    if (current.length > 0 && size + extra > segmentChars) {
+      segments.push(current);
+      current = [];
+      size = 0;
+      if (segments.length >= maxSegments) break;
     }
-    bucket.parts.push(`${label}：${clip(cleaned, maxMessageChars)}`);
+    current.push(turn);
+    size += turn.chars + (current.length > 1 ? 2 : 0);
   }
-  if (turns.length === 0) return { text: "", turns: 0 };
-
-  // The extra two characters pay for the newline blockFor inserts between a
-  // question and its answer; without them a short turn loses its answer.
-  const sized = turns.map((turn) => Math.min(lengthOf(turnText(turn)) + 2, maxMessageChars * 2 + 2));
-  const sampled = sampleIndices(turns.length, maxTurns);
-  const selected = fillGaps(sampled, turns.length, (index) => sized[index], maxChars);
-  const full = selected.map((index) => turnText(turns[index]));
-  const sizes = selected.map((index) => sized[index]);
-  const separators = 2 * Math.max(0, selected.length - 1);
-  const budget = Math.max(0, maxChars - separators);
-  // Leave a little room for the newline a user/assistant pair adds per block.
-  const allocation = allocate(sizes, Math.max(0, budget - selected.length * 2));
-
-  const blocks = full.map((_, position) => blockFor(turns[selected[position]], allocation[position]));
-  let text = normalize(blocks.filter(Boolean).join("\n\n"));
-
-  if (lengthOf(text) > maxChars) {
-    // Proportional tightening keeps every period represented instead of
-    // dropping the middle again.
-    const scale = maxChars / Math.max(1, lengthOf(text));
-    const tightened = blocks.map((block, position) =>
-      block ? clip(block, Math.max(16, Math.floor(allocation[position] * scale))) : "",
-    );
-    text = normalize(tightened.filter(Boolean).join("\n\n"));
-  }
-  if (lengthOf(text) > maxChars) {
-    text = Array.from(text).slice(0, maxChars).join("").trim();
-  }
-  const kept = blocks.filter(Boolean).length;
-  return { text, turns: kept };
+  if (current.length > 0 && segments.length < maxSegments) segments.push(current);
+  const coveredTurns = segments.reduce((total, segment) => total + segment.length, 0);
+  return { segments, coveredTurns, coversAll: coveredTurns === turns.length };
 }

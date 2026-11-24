@@ -164,20 +164,6 @@ test("the earliest real first task wins, with a deterministic tie break", async 
   assert.equal(pickFirstTask([]), null);
 });
 
-test("generation plan counts session-only once, shared once, competitor twice", async () => {
-  const { planTitleGeneration } = await import("../shared/generation-plan.ts");
-  const sessionOnly = planTitleGeneration({ workspaceEligible: false, agentEligible: true, winnerIsAgent: false });
-  assert.deepEqual(sessionOnly, { workspace: false, agent: "generate" });
-  const sharedWinner = planTitleGeneration({ workspaceEligible: true, agentEligible: true, winnerIsAgent: true });
-  assert.deepEqual(sharedWinner, { workspace: true, agent: "reuse-workspace" });
-  const competitor = planTitleGeneration({ workspaceEligible: true, agentEligible: true, winnerIsAgent: false });
-  assert.deepEqual(competitor, { workspace: true, agent: "generate" });
-  const workspaceOnly = planTitleGeneration({ workspaceEligible: true, agentEligible: false, winnerIsAgent: false });
-  assert.deepEqual(workspaceOnly, { workspace: true, agent: "none" });
-  const none = planTitleGeneration({ workspaceEligible: false, agentEligible: false, winnerIsAgent: false });
-  assert.deepEqual(none, { workspace: false, agent: "none" });
-});
-
 test("plugin data paths cannot escape the plugin directory", async () => {
   const { assertPluginPath, pluginDataDir, safePluginPath } = await import("../server/state.ts");
   const root = pluginDataDir();
