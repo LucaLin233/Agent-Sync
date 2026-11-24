@@ -840,6 +840,146 @@ module.main(sys.argv[2:])
         self.assertEqual(ran(), {"smoke", "host"})
 
 
+    PASEO_SOURCE = ("--ends", "codex", "--codex-global-source", "paseo-append-system-prompt")
+
+    def set_role_startup(self, value):
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        target = next(obj for obj in registry["objects"] if obj["id"] == "prompt/LUNO.md")["ends"]["codex"]
+        if value is None:
+            target.pop("paseoRoleStartup", None)
+        else:
+            target["paseoRoleStartup"] = value
+        registry_file.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
+
+    def expected_role_startup(self):
+        """需求原文独立构造的期望字节：两段启动文本、两个 LF、改写后的唯一职责段锚点。"""
+        source = (self.checkout / "prompt/LUNO.md").read_bytes()
+        marker = "你是 LUNO，".encode("utf-8")
+        self.assertEqual(source.count(b"\n" + marker), 1)
+        index = source.index(marker)
+        head = (
+            "首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时，采用对应角色，"
+            "任务正文紧随其后。没有上述角色行时按 LUNO。\n\n"
+            "角色为 LENS 或 FORGE 时，须在开始任务前完整读取并遵循对应的已部署受管原文。"
+            "LENS 原文位于 `" + str(self.checkout / "subagents/LENS.md") + "`，"
+            "FORGE 原文位于 `" + str(self.checkout / "subagents/FORGE.md") + "`。\n\n"
+        ).encode("utf-8")
+        return (head + source[:index] + "仅当前会话角色为 LUNO 时适用本段。你".encode("utf-8")
+                + source[index + len(marker):])
+
+    def test_role_startup_defaults_to_unchanged_output(self):
+        # A 的兼容面：缺键或显式 false 都不改默认输出，也不改既有显式模式的输出。
+        for value in (None, False):
+            with self.subTest(value=value):
+                self.set_role_startup(value)
+                self.assertEqual(self.call("--apply")[0], 0)
+                self.assertEqual((self.home / ".codex/AGENTS.md").read_bytes(),
+                                 (self.checkout / "prompt/LUNO.md").read_bytes() + b"\n"
+                                 + self.global_file.read_bytes())
+                self.assertEqual(self.call(*self.PASEO_SOURCE, "--apply")[0], 0)
+                self.assertEqual((self.home / ".codex/AGENTS.md").read_bytes(),
+                                 (self.checkout / "prompt/LUNO.md").read_bytes())
+                self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 0)
+
+    def test_role_startup_renders_only_in_explicit_paseo_source_mode(self):
+        self.set_role_startup(True)
+        # 内嵌默认模式仍只拼 prompt、一个 LF 和 GLOBAL，不插入角色启动段。
+        self.assertEqual(self.call("--apply")[0], 0)
+        self.assertEqual((self.home / ".codex/AGENTS.md").read_bytes(),
+                         (self.checkout / "prompt/LUNO.md").read_bytes() + b"\n"
+                         + self.global_file.read_bytes())
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 1)
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--apply")[0], 0)
+        generated = (self.home / ".codex/AGENTS.md").read_bytes()
+        self.assertEqual(generated, self.expected_role_startup())
+        self.assertNotIn("你是 LUNO，".encode("utf-8"), generated)
+        self.assertEqual(generated.count("仅当前会话角色为 LUNO 时适用本段。".encode("utf-8")), 1)
+        # 生成文件仍只经公开入口核归属，内容不含私人 GLOBAL。
+        self.assertNotIn(b"private global fixture", generated)
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 0)
+
+    def test_role_startup_blocks_on_missing_or_duplicated_anchor(self):
+        self.set_role_startup(True)
+        prompt = self.checkout / "prompt/LUNO.md"
+        original = prompt.read_bytes()
+        cases = (("replaced", lambda raw: raw.replace("你是 LUNO，".encode("utf-8"), "你是助手，".encode("utf-8"))),
+                 ("duplicated", lambda raw: raw + "\n你是 LUNO，第二处\n".encode("utf-8")))
+        for label, mutate in cases:
+            with self.subTest(case=label):
+                prompt.write_bytes(mutate(original))
+                before = self.snapshot()
+                for mode in ((), ("--apply",)):
+                    rc, report = self.call(*self.PASEO_SOURCE, *mode)
+                    self.assertEqual(rc, 2)
+                    self.assertIn("role_startup_anchor", [e["code"] for e in report["errors"]])
+                    self.assertEqual(self.snapshot(), before)
+        prompt.write_bytes(original)
+
+    def test_same_blob_registry_enable_updates_only_generated_and_restores(self):
+        # A→B：只改登记开关，安装器 blob 相同；预检只预期一个生成文件，回退恢复原字节。
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--apply")[0], 0)
+        generated = self.home / ".codex/AGENTS.md"
+        a_bytes = generated.read_bytes()
+        self.assertEqual(a_bytes, (self.checkout / "prompt/LUNO.md").read_bytes())
+        baseline = self.snapshot()
+        old = self.git("rev-parse", "HEAD")
+        self.set_role_startup(True)
+        new = self.commit()
+        self.assertEqual(self.git("rev-parse", old + ":tools/link-install.py"),
+                         self.git("rev-parse", new + ":tools/link-install.py"))
+        self.git("checkout", "-q", old)
+        rc, report = self.call(*self.PASEO_SOURCE, "--preflight", new)
+        self.assertEqual((rc, report["status"]), (0, "ready"), report["errors"])
+        changed = [action for action in report["actions"] if action["state"] != "match"]
+        self.assertEqual([(Path(action["path"]).name, action["state"]) for action in changed],
+                         [("AGENTS.md", "update")])
+        self.assertEqual(self.snapshot(), baseline)
+        self.git("checkout", "-q", new)
+        rc, report = self.call(*self.PASEO_SOURCE, "--apply", "--previous", old)
+        self.assertEqual((rc, report["status"], report["retirements"]), (0, "completed", []))
+        enabled = generated.read_bytes()
+        self.assertEqual(enabled, self.expected_role_startup())
+        artifact = ".luno/generated/codex/AGENTS.md"
+        rest = {k: v for k, v in self.snapshot().items() if k != artifact}
+        self.assertEqual(rest, {k: v for k, v in baseline.items() if k != artifact})
+        self.assertEqual(self.snapshot()[".codex/AGENTS.md"], baseline[".codex/AGENTS.md"])
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 0)
+        # B→A：同 blob 反向 apply --previous，唯一生成文件回到 A 的原始字节。
+        self.git("checkout", "-q", old)
+        rc, report = self.call(*self.PASEO_SOURCE, "--apply", "--previous", new)
+        self.assertEqual((rc, report["status"], report["retirements"]), (0, "completed", []))
+        self.assertEqual(generated.read_bytes(), a_bytes)
+        self.assertEqual(self.snapshot(), baseline)
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 0)
+
+    def test_installer_upgrade_with_explicit_source_stays_match(self):
+        # 旧→A：安装器自变、登记未变；显式来源现场用旧工具自己的 check 与 A 投影一致，全程不写。
+        tool = self.checkout / "tools/link-install.py"
+        new_bytes = tool.read_bytes()
+        tool.write_bytes(new_bytes + b"\n# previous installer\n")
+        old = self.commit()
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--apply")[0], 0)
+        baseline = self.snapshot()
+        tool.write_bytes(new_bytes)
+        new = self.commit()
+        self.git("checkout", "-q", old)
+        rc, report = self.call(*self.PASEO_SOURCE, "--check-installer-upgrade", new)
+        self.assertEqual((rc, report["status"], report["errors"]), (0, "match", []))
+        self.assertNotEqual(report["previousInstallerBlob"], report["targetInstallerBlob"])
+        self.assertEqual(self.snapshot(), baseline)
+        self.git("checkout", "-q", new)
+        self.assertEqual(self.call(*self.PASEO_SOURCE, "--check")[0], 0)
+
+    def test_role_startup_rejects_non_boolean_registration(self):
+        self.set_role_startup("true")
+        before = self.snapshot()
+        rc, report = self.call(*self.PASEO_SOURCE, "--apply")
+        self.assertEqual(rc, 2)
+        self.assertIn("registry_end_invalid_role_startup", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), before)
+
+
 class NativeRoleTest(unittest.TestCase):
     """原生 Codex 两角色：TOML 字节、注册只读核对与只读准入；不读真实配置。"""
 
