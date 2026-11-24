@@ -273,38 +273,47 @@ export function isAllowedLatinToken(token: string): boolean {
 }
 
 /**
- * Manual conversation summaries go straight into a workspace title. If the
- * model's answer is longer than the limit, cut at a word or Han boundary
- * instead of slicing an English term in half; a candidate cut that no longer
- * passes the Chinese check is skipped rather than accepted.
+ * Manual conversation summaries go straight into a workspace title. The model
+ * is asked for Simplified Chinese, so this gate checks only that the answer is
+ * usable Chinese text: at least two Han characters and no control characters.
+ * Latin words are not audited one by one, because a summary may legitimately
+ * name a product the automatic word list does not know. If the answer is too
+ * long, cut at a word or Han boundary instead of slicing a term in half; a
+ * candidate cut that no longer passes the Chinese check is skipped.
  */
+function isManualTitle(value: string): boolean {
+  const text = value.trim();
+  return Boolean(text) && !CONTROL.test(text) && countHanChars(text) >= 2;
+}
+
 export function sanitizeConversationTitle(raw: string | null | undefined, maxChars: number): string | null {
   if (typeof raw !== "string") return null;
   const value = cleanModelTitle(raw);
   if (!value || CONTROL.test(value)) return null;
   const chars = Array.from(value);
-  if (chars.length <= maxChars) return isAcceptableTitle(value) ? value : null;
+  if (chars.length <= maxChars) return isManualTitle(value) ? value : null;
   for (let end = maxChars; end >= 2; end -= 1) {
     const next = chars[end] ?? "";
     const previous = chars[end - 1] ?? "";
     const cutsWord = /[A-Za-z0-9_.\-/@#]/u.test(next) && /[A-Za-z0-9_.\-/@#]/u.test(previous);
     if (cutsWord) continue;
     const candidate = chars.slice(0, end).join("").trim().replace(/[\s,;:，。；：、\-/·]+$/u, "");
-    if (candidate && isAcceptableTitle(candidate)) return candidate;
+    if (candidate && isManualTitle(candidate)) return candidate;
   }
   return null;
 }
 
 /**
- * Model output must read as Chinese: at least two Han characters, and every
- * Latin word must be a product name, acronym or identifier.
+ * Automatic model output must read as Chinese: at least two Han characters,
+ * and every Latin word must be a product name, acronym or identifier. This
+ * stricter word-by-word gate stays on the automatic naming path only.
  */
 export function isAcceptableTitle(value: string): boolean {
   const text = value.trim();
   if (!text || CONTROL.test(text)) return false;
   if (countHanChars(text) < 2) return false;
   const words = text.match(LATIN_WORD) ?? [];
-  return words.every(isAllowedLatinToken);
+  return words.every((word) => isAllowedLatinToken(word));
 }
 
 export function sanitizeModelTitle(raw: string | null | undefined, maxChars: number): string | null {

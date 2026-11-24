@@ -98,7 +98,8 @@ test("an empty conversation yields no excerpt and no title", () => {
 
 test("conversation titles are validated and truncated at safe boundaries", () => {
   assert.equal(sanitizeConversationTitle("排查标题中文化插件", 28), "排查标题中文化插件");
-  assert.equal(sanitizeConversationTitle("修复 login bug", 28), null);
+  assert.equal(sanitizeConversationTitle("对比 Exa 与 Keenable 的检索结果", 28), "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(sanitizeConversationTitle("Fix login bug", 28), null);
   assert.equal(sanitizeConversationTitle("", 28), null);
   assert.equal(sanitizeConversationTitle("重构工作区标题的会话摘要生成 pathwayhandling", 12), "重构工作区标题的会话摘要");
   const term = sanitizeConversationTitle("排查 paseo-chinese-titles 插件的手动重生成", 20);
@@ -283,12 +284,12 @@ test("manual conversation titles come only from the model, never from a fallback
   });
   assert.deepEqual(done, { title: "现在概括会话最近讨论的标题问题" });
 
-  const invalid = fakePaseoForModel("修复 login bug");
+  const invalid = fakePaseoForModel("Fix login bug");
   const rejected = await generateConversationTitle(invalid.paseo, settings, {
     transcript: "用户：先排查",
     maxChars: 28,
   });
-  assert.equal(rejected.title, null, "an English title is not a fallback success");
+  assert.equal(rejected.title, null, "a Han-free title is not a fallback success");
   assert.equal(rejected.errorCode, "invalid_title");
 
   const offline = fakePaseoForModel("随便", { ready: false });
@@ -298,6 +299,144 @@ test("manual conversation titles come only from the model, never from a fallback
   });
   assert.equal(unavailable.title, null);
   assert.equal(unavailable.errorCode, "provider_unavailable");
+});
+
+function makeWriteState(workspace, agents) {
+  return { workspace: { ...workspace }, agents: agents.map((agent) => ({ ...agent })), writes: [], sessionWrites: [] };
+}
+
+function makeWritePaseo(state) {
+  return {
+    workspaces: {
+      ref: (id) => ({
+        refresh: async () => (id === state.workspace.id ? { ...state.workspace } : null),
+        setTitle: async (title) => {
+          state.writes.push(title);
+          state.workspace.title = title;
+          return { title };
+        },
+      }),
+    },
+    agents: {
+      ref: (id) => ({
+        refresh: async () => {
+          const agent = state.agents.find((entry) => entry.id === id);
+          return agent ? { agent: { ...agent } } : null;
+        },
+      }),
+    },
+  };
+}
+
+function writeOptionsFor(state, generateConversation, overrides = {}) {
+  return {
+    paseo: makeWritePaseo(state),
+    settings: settingsSchema.parse({}),
+    workspaceId: state.workspace.id,
+    // A single eligible session is preselected; each request names one target.
+    claims: new Set(),
+    agentClaims: new Set(),
+    listAgents: async () => state.agents,
+    readConversation: async () => ({ text: "用户：合成会话内容", turns: 1 }),
+    generateConversation,
+    renameSession: async (agentId, title) => {
+      const agent = state.agents.find((entry) => entry.id === agentId);
+      if (!agent) return { ok: false, failure: "failed" };
+      state.sessionWrites.push(title);
+      agent.title = title;
+      return { ok: true };
+    },
+    ...overrides,
+  };
+}
+
+test("consecutive manual requests keep Exa, Keenable, TS and agent-sync and write only their scope", async () => {
+  const { generateConversationTitle } = await import("../server/helper.ts");
+  const { regenerateWorkspaceTitle } = await import("../server/regenerate.ts");
+  const settings = settingsSchema.parse({});
+
+  const answering = (answer) => {
+    const helper = fakePaseoForModel(answer);
+    return (request, timeoutMs, deadlineAt) =>
+      generateConversationTitle(helper.paseo, settings, request, { timeoutMs, deadlineAt });
+  };
+  const state = makeWriteState(
+    {
+      id: "w1",
+      projectId: "p1",
+      projectDisplayName: "Paseo",
+      workspaceDirectory: "/synthetic/workspace",
+      name: "w1",
+      title: "Extend workspace usage plugin",
+      background: false,
+      metadata: {},
+      archivingAt: null,
+    },
+    [
+      { id: "a1", title: "旧会话标题一" },
+      { id: "a2", title: "旧会话标题二" },
+    ].map((agent) => ({
+      ...agent,
+      workspaceId: "w1",
+      background: false,
+      cwd: "/synthetic/workspace",
+      labels: {},
+      metadata: {},
+      lastUserMessageAt: "2026-11-24T00:00:00.000Z",
+      createdAt: "2026-11-24T00:00:00.000Z",
+      updatedAt: "2026-11-24T00:00:00.000Z",
+    })),
+  );
+  const run = (scope, agentId, answer) => regenerateWorkspaceTitle(writeOptionsFor(state, answering(answer), { scope, agentId }));
+
+  // 1. Both targets: the answer contains two products outside the auto list.
+  assert.deepEqual(await run("both", "a1", "对比 Exa 与 Keenable 的检索结果"), {
+    status: "done", title: "对比 Exa 与 Keenable 的检索结果",
+    workspaceUpdated: true, sessionUpdated: true, agentId: "a1",
+  });
+  assert.equal(state.workspace.title, "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(state.agents[0].title, "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(state.agents[1].title, "旧会话标题二");
+
+  // 2. Switch to the other session: only that session changes.
+  assert.deepEqual(await run("session", "a2", "排查 TS 类型错误"), {
+    status: "done", title: "排查 TS 类型错误",
+    workspaceUpdated: false, sessionUpdated: true, agentId: "a2",
+  });
+  assert.equal(state.workspace.title, "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(state.agents[0].title, "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(state.agents[1].title, "排查 TS 类型错误");
+
+  // 3. Switch to the workspace: the earlier session writes are left alone.
+  assert.deepEqual(await run("workspace", "a2", "整理 agent-sync 提示词与技能"), {
+    status: "done", title: "整理 agent-sync 提示词与技能",
+    workspaceUpdated: true, sessionUpdated: false, agentId: "a2",
+  });
+  assert.equal(state.workspace.title, "整理 agent-sync 提示词与技能");
+  assert.equal(state.agents[0].title, "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(state.agents[1].title, "排查 TS 类型错误");
+  assert.deepEqual(state.writes, [
+    "对比 Exa 与 Keenable 的检索结果",
+    "整理 agent-sync 提示词与技能",
+  ]);
+  assert.deepEqual(state.sessionWrites, [
+    "对比 Exa 与 Keenable 的检索结果",
+    "排查 TS 类型错误",
+  ]);
+});
+
+test("automatic naming still rejects an unknown product token", async () => {
+  const { generateTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const auto = fakePaseoForModel("整理 Exa 提示词");
+  const generated = await generateTitle(auto.paseo, settings, {
+    kind: "workspace",
+    prompt: "整理 Exa 提示词",
+    maxChars: 28,
+  });
+  assert.equal(generated.source, "fallback");
+  assert.equal(generated.title, "整理提示词");
+  assert.equal(generated.title.includes("Exa"), false);
 });
 
 test("automatic first-task naming still returns its Chinese fallback", async () => {
