@@ -6,8 +6,10 @@ import {
   fallbackProjectTitle,
   fallbackTaskTitle,
   hasHan,
+  isAcceptableTitle,
   isProvisional,
   provisionalTitle,
+  sanitizeConversationTitle,
   sanitizeModelTitle,
   titleForPair,
   truncateChars,
@@ -101,6 +103,44 @@ test("ordinary English is rejected with punctuation, caps or hyphens", () => {
   assert.equal(sanitizeModelTitle("优化 Codex 会话", 28), "优化 Codex 会话");
   assert.equal(sanitizeModelTitle("更新 server/engine.ts", 28), "更新 server/engine.ts");
   assert.equal(sanitizeModelTitle("修复 v0.17.3 回归", 28), "修复 v0.17.3 回归");
+});
+
+test("manual titles are gated by Chinese content, not a Latin word list", () => {
+  // Real answers that were rejected only because the product word was absent
+  // from the automatic vocabulary. Manual summaries keep them as written.
+  assert.equal(sanitizeConversationTitle("对比 Exa 与 Keenable 的检索结果", 28), "对比 Exa 与 Keenable 的检索结果");
+  assert.equal(sanitizeConversationTitle("排查 TS 类型错误", 28), "排查 TS 类型错误");
+  assert.equal(sanitizeConversationTitle("整理 agent-sync 提示词与技能", 28), "整理 agent-sync 提示词与技能");
+  assert.equal(sanitizeConversationTitle("整理 agent-sync 提示词与技能", 20), "整理 agent-sync 提示词与技能");
+
+  // An unfamiliar but real proper noun is not rejected just because nobody
+  // added a table entry for it.
+  assert.equal(sanitizeConversationTitle("整理 NimbusDesk 报表", 28), "整理 NimbusDesk 报表");
+  assert.equal(sanitizeConversationTitle("修复 login bug", 28), "修复 login bug");
+
+  // Genuinely unusable answers still fail: no Han, one Han, empty or control.
+  assert.equal(sanitizeConversationTitle("Fix login bug", 28), null);
+  assert.equal(sanitizeConversationTitle("Exa Keenable TS", 28), null);
+  assert.equal(sanitizeConversationTitle("好", 28), null);
+  assert.equal(sanitizeConversationTitle("", 28), null);
+  assert.equal(sanitizeConversationTitle("修复\u0000登录", 28), null);
+
+  // Automatic naming keeps its stricter word-by-word gate.
+  assert.equal(sanitizeModelTitle("修复 login bug", 28), null);
+  assert.equal(sanitizeModelTitle("整理 agent-sync 提示词与技能", 28), null);
+  assert.equal(isAcceptableTitle("整理 agent-sync 提示词与技能"), false);
+  assert.equal(isAcceptableTitle("优化 Codex 会话"), true);
+});
+
+test("manual truncation never cuts a Latin term and still requires Chinese", () => {
+  assert.equal(sanitizeConversationTitle("排查标题中文化插件", 28), "排查标题中文化插件");
+  assert.equal(
+    sanitizeConversationTitle("重构工作区标题的会话摘要生成 pathwayhandling", 12),
+    "重构工作区标题的会话摘要",
+  );
+  const term = sanitizeConversationTitle("排查 paseo-chinese-titles 插件的手动重生成", 20);
+  assert.ok(term === null || !/[A-Za-z]$/u.test(term), String(term));
+  assert.equal(sanitizeConversationTitle("Fix login bug 与 Exa", 4), null);
 });
 
 test("session naming defaults off and provider stays empty for auto detection", () => {
