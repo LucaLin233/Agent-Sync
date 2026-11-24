@@ -44,7 +44,7 @@ MCP 的非秘密配置可在当次授权内按目标支持的现有接口预置�
 
 ## 文件编辑
 
-宿主 MEMORY 新增按 `references/runtime-host.md`〈记忆入口〉走末尾追加。其他文件编辑用 `apply_patch`，补丁上下文须唯一匹配，写后按 core 回读全部目标。
+宿主经验日志的新增（含按日文件和旧 `MEMORY.md`）按 `references/runtime-host.md`〈记忆入口〉执行：既有文件末尾追加，首次按日文件排他创建。其他文件编辑用 `apply_patch`，补丁上下文须唯一匹配，写后按 core 回读全部目标。
 
 ## 截断与压缩
 
