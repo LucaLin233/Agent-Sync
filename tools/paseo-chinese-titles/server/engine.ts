@@ -196,7 +196,7 @@ export class ChineseTitlesEngine {
       generateConversation: (request, timeoutMs, generateDeadlineAt) =>
         generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
       listAgents: () => this.listAgents(paseo),
-      readConversation: (sessionId) => readSessionConversation(paseo, sessionId),
+      readConversation: (sessionId) => readSessionConversation(paseo, sessionId, { deadlineAt }),
       renameSession: async (sessionId, title, timeoutMs) => {
         const renamed = await renameAgentViaCli(settings, sessionId, title, timeoutMs);
         return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };

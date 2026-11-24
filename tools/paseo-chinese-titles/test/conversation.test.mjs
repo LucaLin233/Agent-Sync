@@ -64,17 +64,74 @@ test("obvious credentials are redacted before the excerpt leaves the daemon", ()
   assert.equal(excerpt.text.includes("synthetic_token_value"), false);
 });
 
-test("a long conversation keeps its first task and newest turns, not the old middle", () => {
+/** The reported failure: five turns on the real work, then nine wrap-up turns. */
+function longSessionWithClosing() {
+  const entries = [{ type: "user_message", text: "先看报告，找出问题", turnId: "t0" }];
+  const work = [
+    "报告里的第一个问题：把结论写进提示词规则",
+    "第二个问题：把同一要求写进技能规则，比较适用范围",
+    "第三个问题：让验收标准和恢复义务对齐",
+    "第四个问题：核对跨端同步时的加载边界",
+  ];
+  work.forEach((text, index) => {
+    entries.push({ type: "user_message", text, turnId: `w${index}` });
+    entries.push({ type: "assistant_message", text: `已按第 ${index + 1} 项修改规则`, turnId: `w${index}` });
+  });
+  for (let number = 1; number <= 9; number += 1) {
+    entries.push({ type: "user_message", text: `收尾：确认第 ${number} 项 MEMORY.md 存储安排`, turnId: `c${number}` });
+    entries.push({ type: "assistant_message", text: `第 ${number} 项确认完毕`, turnId: `c${number}` });
+  }
+  return entries;
+}
+
+test("a closing run of wrap-up turns does not displace the work that ran through the session", () => {
+  const excerpt = buildConversationExcerpt(longSessionWithClosing(), { maxChars: 2_400 });
+  assert.ok(excerpt.text.includes("先看报告"), "the opening is kept");
+  assert.ok(
+    /提示词规则|技能规则|验收标准|加载边界/.test(excerpt.text),
+    `the middle work must survive the wrap-up: ${excerpt.text}`,
+  );
+  assert.ok(excerpt.text.includes("MEMORY.md"), "the closing item is still visible as context");
+  assert.ok(Array.from(excerpt.text).length <= 2_400);
+});
+
+test("a tight budget prefers each sampled turn's question over a long answer", () => {
+  const entries = [{ type: "user_message", text: "贯穿主线：把报告问题落实到提示词与技能", turnId: "t0" }];
+  for (let number = 1; number <= 6; number += 1) {
+    entries.push({ type: "user_message", text: `第 ${number} 段问题：${["写进提示词", "写进技能", "对齐验收", "核对加载", "补恢复入口", "整理登记"][number - 1]}`, turnId: `u${number}` });
+    entries.push({ type: "assistant_message", text: `答复 ${"很长的助手输出".repeat(60)}`, turnId: `u${number}` });
+  }
+  const excerpt = buildConversationExcerpt(entries, { maxChars: 700, maxTurns: 6 });
+  assert.ok(excerpt.text.includes("贯穿主线"), excerpt.text);
+  const asked = excerpt.text.match(/第 [0-9] 段问题/gu) ?? [];
+  assert.ok(asked.length >= 3, `each sampled turn keeps its question: ${excerpt.text}`);
+  assert.ok(Array.from(excerpt.text).length <= 700);
+});
+
+test("a long conversation samples its opening, middle and end", () => {
   const entries = [];
   for (let index = 0; index < 40; index += 1) {
     entries.push({ type: "user_message", text: `第 ${index} 轮：中间话题 ${"细节".repeat(60)}`, turnId: `t${index}` });
     entries.push({ type: "assistant_message", text: `第 ${index} 轮答复 ${"说明".repeat(60)}`, turnId: `t${index}` });
   }
-  const excerpt = buildConversationExcerpt(entries, { maxChars: 900, maxTurns: 4 });
+  const excerpt = buildConversationExcerpt(entries, { maxChars: 900, maxTurns: 6 });
   assert.ok(excerpt.text.includes("第 0 轮"), excerpt.text.slice(0, 120));
   assert.ok(excerpt.text.includes("第 39 轮"), "newest turn must survive");
-  assert.ok(excerpt.text.includes("第 20 轮") === false, "old middle turns are dropped first");
+  const middle = [10, 12, 14, 16, 18, 20, 22, 24, 26, 28].filter((index) => excerpt.text.includes(`第 ${index} 轮`));
+  assert.ok(middle.length > 0, "at least one mid-session turn must be represented");
   assert.ok(Array.from(excerpt.text).length <= 900);
+});
+
+test("a short session is passed through nearly verbatim", () => {
+  const excerpt = buildConversationExcerpt([
+    { type: "user_message", text: "把中文标题按钮放到工作区菜单里", turnId: "s1" },
+    { type: "assistant_message", text: "已加头部按钮，点开中文标题面板。", turnId: "s1" },
+    { type: "user_message", text: "再补一个回归用例", turnId: "s2" },
+  ]);
+  assert.ok(excerpt.text.includes("把中文标题按钮放到工作区菜单里"), excerpt.text);
+  assert.ok(excerpt.text.includes("已加头部按钮，点开中文标题面板。"), excerpt.text);
+  assert.ok(excerpt.text.includes("再补一个回归用例"), excerpt.text);
+  assert.equal(excerpt.text.includes("…"), false, "a short session is not clipped");
 });
 
 test("a last-turn tail cut never truncates the newest text from the front", () => {
@@ -194,7 +251,7 @@ function fakeTimeline(entries) {
   };
 }
 
-test("a long session reads its real first task plus the newest turns", async () => {
+test("a long session reads its real first task, a mid-session point and its newest work", async () => {
   const entries = [{ type: "user_message", text: "原始任务：排查标题中文化插件", turnId: "t0", timestamp: "2026-11-20T00:00:00Z" }];
   for (let index = 1; index <= 150; index += 1) {
     entries.push({ type: "assistant_message", text: `较早答复 ${index}`, turnId: `t${index}`, timestamp: "2026-11-21T00:00:00Z" });
@@ -210,6 +267,187 @@ test("a long session reads its real first task plus the newest turns", async () 
   assert.ok(excerpt.text.includes("原始任务：排查标题中文化插件"), "first task must be present");
   assert.ok(excerpt.text.includes("现在改成概括会话最近讨论什么"), "newest turn must be present");
   assert.equal(excerpt.text.includes("隐藏推理"), false);
+});
+
+test("a tool-dense session still reaches its opening and its newest work", async () => {
+  // Only the first turn and the last turn carry conversation; everything in
+  // between is tool traffic. A tail-only read would see the closing lines and
+  // a head-only read would see the opening, but the summary needs both.
+  const entries = [{ type: "user_message", text: "开场主题：报告问题如何落实到提示词和技能", turnId: "t0", timestamp: "2026-11-20T00:00:00Z" }];
+  for (let index = 0; index < 400; index += 1) {
+    entries.push({ type: "tool_call", text: `TOOL-STEP-${index}`, turnId: `x${index}`, timestamp: "2026-11-21T00:00:00Z" });
+  }
+  entries.push({ type: "user_message", text: "结尾：确认 Memory 存储安排", turnId: "t1", timestamp: "2026-11-23T00:00:00Z" });
+  const calls = { tail: 0, head: 0 };
+  const timeline = fakeTimeline(entries);
+  const counted = {
+    refetch: async (options = {}) => {
+      if (options.direction === "after") calls.head += 1;
+      else calls.tail += 1;
+      return timeline.refetch(options);
+    },
+  };
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: counted }) } }, "a1");
+  assert.ok(excerpt);
+  assert.ok(excerpt.text.includes("开场主题"), excerpt.text);
+  assert.ok(excerpt.text.includes("结尾：确认 Memory"), excerpt.text);
+  assert.ok(calls.tail > 0 && calls.head > 0, "both ends are actually read");
+});
+
+test("a page without a cursor stops only its own side and keeps the other side's content", async () => {
+  // The tail says hasOlder=true but returns no startCursor. That is not proof
+  // the timeline start was reached, so the head scan's opening must survive.
+  const entries = [{ type: "user_message", text: "开场：先看报告", turnId: "t0" }];
+  for (let index = 0; index < 300; index += 1) {
+    entries.push({ type: "tool_call", text: `TOOL-${index}`, turnId: `x${index}` });
+  }
+  entries.push({ type: "user_message", text: "结尾：确认收尾", turnId: "t1" });
+  const base = fakeTimeline(entries);
+  const skewed = {
+    refetch: async (options = {}) => {
+      const result = await base.refetch(options);
+      if (options.direction === "tail" || (options.direction ?? "tail") === "tail") {
+        return { ...result, hasOlder: true, startCursor: null };
+      }
+      return result;
+    },
+  };
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: skewed }) } }, "a1");
+  assert.ok(excerpt);
+  assert.ok(excerpt.text.includes("开场：先看报告"), `the head read must not be discarded: ${excerpt.text}`);
+});
+
+test("a tail read that already reached the beginning does not request pages from the head", async () => {
+  const entries = [];
+  for (let index = 0; index < 5; index += 1) {
+    entries.push({ type: "user_message", text: `短会话第 ${index} 轮`, turnId: `s${index}` });
+    entries.push({ type: "assistant_message", text: `短会话答复 ${index}`, turnId: `s${index}` });
+  }
+  const directions = [];
+  const timeline = fakeTimeline(entries);
+  const counted = {
+    refetch: async (options = {}) => {
+      directions.push(options.direction ?? "tail");
+      return timeline.refetch(options);
+    },
+  };
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: counted }) } }, "a1");
+  assert.ok(excerpt);
+  assert.equal(directions.includes("after"), false, `unexpected head reads: ${directions.join(",")}`);
+  assert.deepEqual(directions, ["tail"], "a short session is read with exactly one refetch");
+});
+
+test("the reported 14-turn session keeps the main thread above the closing item", async () => {
+  const entries = [{ type: "user_message", text: "先看报告", turnId: "t0" }];
+  const work = [
+    "报告里第一个问题：要怎么改",
+    "把结论写进提示词规则",
+    "把同一要求写进技能规则，比较适用范围",
+    "对齐验收标准和恢复义务",
+  ];
+  work.forEach((text, index) => {
+    entries.push({ type: "user_message", text, turnId: `w${index}` });
+    entries.push({ type: "assistant_message", text: `处理第 ${index + 1} 项`, turnId: `w${index}` });
+  });
+  for (let number = 1; number <= 9; number += 1) {
+    entries.push({ type: "user_message", text: `收尾：确认第 ${number} 项 MEMORY.md 存储安排`, turnId: `c${number}` });
+  }
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: fakeTimeline(entries) }) } }, "a1");
+  assert.ok(excerpt);
+  assert.ok(excerpt.text.includes("先看报告"), excerpt.text);
+  assert.ok(excerpt.text.includes("提示词规则"), `the main thread's prompt rule must survive: ${excerpt.text}`);
+  assert.ok(excerpt.text.includes("技能规则"), `the main thread's skill rule must survive: ${excerpt.text}`);
+  assert.ok(excerpt.text.includes("MEMORY.md"), "the closing item is still present as context");
+});
+
+test("the prompt asks for the through-line and does not let the last turn take over", async () => {
+  const { CONVERSATION_PROMPT, conversationPrompt } = await import("../server/helper.ts");
+  assert.ok(CONVERSATION_PROMPT.includes("whole excerpt"), CONVERSATION_PROMPT);
+  assert.ok(/runs through/.test(CONVERSATION_PROMPT), CONVERSATION_PROMPT);
+  assert.ok(/wrap-up/.test(CONVERSATION_PROMPT), CONVERSATION_PROMPT);
+  assert.ok(/genuine topic change/.test(CONVERSATION_PROMPT), CONVERSATION_PROMPT);
+  assert.equal(CONVERSATION_PROMPT.includes("MEMORY"), false, "no domain term is hard-coded");
+
+  // The per-request user prompt weighs the whole excerpt rather than the tail.
+  const prompt = conversationPrompt({ transcript: "用户：合成", maxChars: 28 });
+  assert.ok(/whole excerpt/.test(prompt), prompt);
+  assert.ok(prompt.includes("用户：合成"), "the excerpt is carried verbatim");
+});
+
+test("the excerpt that reaches the helper carries the opening, middle and closing", async () => {
+  const { generateConversationTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const entries = [{ type: "user_message", text: "先看报告", turnId: "t0" }];
+  for (let index = 1; index <= 4; index += 1) {
+    entries.push({ type: "user_message", text: `第 ${index} 个问题：写进提示词或技能规则`, turnId: `w${index}` });
+    entries.push({ type: "assistant_message", text: `已处理 ${index}`, turnId: `w${index}` });
+  }
+  for (let number = 1; number <= 9; number += 1) {
+    entries.push({ type: "user_message", text: `收尾：确认第 ${number} 项 MEMORY.md 存储安排`, turnId: `c${number}` });
+  }
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: fakeTimeline(entries) }) } }, "a1");
+  assert.ok(excerpt);
+  let seenPrompt = "";
+  const paseo = {
+    config: { get: async () => ({ config: { providers: { cchp: { extends: "codex", label: "CCHP" } } } }) },
+    providers: {
+      snapshot: async () => ({ entries: [{ provider: "cchp", status: "ready", enabled: true, models: [{ id: "m1", label: "M", isDefault: true }] }] }),
+      listModels: async () => ({ models: [] }),
+    },
+    workspaces: {
+      create: async () => ({
+        agents: {
+          create: async () => ({
+            run: async (prompt) => {
+              seenPrompt = prompt;
+              return { status: "idle", lastMessage: "整理报告问题到提示词与技能" };
+            },
+            archive: async () => ({}),
+          }),
+        },
+        archive: async () => ({}),
+      }),
+    },
+  };
+  const result = await generateConversationTitle(paseo, settings, { transcript: excerpt.text, maxChars: 28 });
+  assert.deepEqual(result, { title: "整理报告问题到提示词与技能" });
+  assert.ok(seenPrompt.includes("先看报告"), "the opening reaches the helper");
+  assert.ok(/提示词或技能规则/.test(seenPrompt), "the middle reaches the helper");
+  assert.ok(seenPrompt.includes("MEMORY.md"), "the closing is present as context");
+});
+
+test("a first-page transport failure is a read failure, not an empty conversation", async () => {
+  const throwing = {
+    agents: {
+      ref: () => ({
+        timeline: {
+          refetch: async () => {
+            throw new Error("socket closed");
+          },
+        },
+      }),
+    },
+  };
+  assert.equal(await readSessionConversation(throwing, "a1"), null);
+});
+test("a failed later page keeps the bounded content already read", async () => {
+  const entries = [{ type: "user_message", text: "开场：先看报告", turnId: "t0" }];
+  for (let index = 0; index < 400; index += 1) {
+    entries.push({ type: "tool_call", text: `TOOL-${index}`, turnId: `x${index}` });
+  }
+  entries.push({ type: "user_message", text: "结尾：补一个回归", turnId: "t1" });
+  const base = fakeTimeline(entries);
+  let calls = 0;
+  const flaky = {
+    refetch: async (options = {}) => {
+      calls += 1;
+      if (calls === 2) return { error: "transport failed", entries: [] };
+      return base.refetch(options);
+    },
+  };
+  const excerpt = await readSessionConversation({ agents: { ref: () => ({ timeline: flaky }) } }, "a1");
+  assert.ok(excerpt, "a later-page failure still yields the first page's content");
+  assert.ok(excerpt.text.includes("开场：先看报告") || excerpt.text.includes("结尾：补一个回归"), excerpt.text);
 });
 
 test("a read error yields no conversation, so nothing can be generated", async () => {
