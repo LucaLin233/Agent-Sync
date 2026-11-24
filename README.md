@@ -164,7 +164,7 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 4. **GLOBAL 副本或 daemon 范围来源**：默认内嵌模式把 Minis `GLOBAL.md` 整份复制到 `<home>/.luno/memory/GLOBAL.md`（属主为运行用户，权限 600）；缺这个文件时安装器在预检阶段报错，不做任何写入。以后 GLOBAL 更新时，复制后再运行一次 `--apply` 与 `--check`，重新生成 Codex 常驻文件。已选 daemon 模式时改用单端选项（见下文〈Codex GLOBAL 来源〉），不再要求私人副本。宿主经验日志的创建、检索和共享见 [宿主端记忆入口](skills/luno-platform/references/runtime-host.md#记忆入口)。
 5. **安装与核对**：以运行用户执行 `python3 -B <checkout>/tools/link-install.py --checkout <checkout> --home <home> --ends codex`。使用 daemon 范围 GLOBAL 时再加 `--codex-global-source paseo-append-system-prompt`。先用默认模式看计划，再加 `--apply` 应用，最后用 `--check` 回读。官方版六个 Profile 共用主 Codex 家目录。既有角色家目录中的会话和登录态由原安装保留。安装器只处理受管入口，遇到占位、非受管软链或 `AGENTS.override.md` 时会停止。中断残留见报告的 `residue`，需核对归属后再处理。
 6. **登录**：两个上游都在主 Codex 家目录中配置。使用 `env_key` 的上游沿用获准的环境注入，使用登录态时以运行用户执行 `codex login`。
-7. **paseo 配置**：按 [Paseo 官方原版部署](platforms/paseo/README.md) 合并 `platforms/paseo/config.example.json` 的 `daemon.mcp` 两项、`daemon.agentProfiles` 和 `agents.providers` 条目，`daemon.appendSystemPrompt` 追加到已有值末尾；替换 `/home/example/codex-home` 和 `<AGENT_SYNC_CHECKOUT>` 占位符。不要把示例整表覆盖现有配置；监听地址、systemd 环境、登录态和其他 MCP 设置保持现值。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
+7. **paseo 配置**：按 [Paseo 官方原版部署](platforms/paseo/README.md) 合并 `platforms/paseo/config.example.json` 的 `daemon.mcp` 两项、`daemon.agentProfiles` 和 `agents.providers` 条目，只替换 `/home/example/codex-home` 占位符；`daemon.appendSystemPrompt` 不来自示例，Codex 单端显式模式下的私人字段按 [sync-host](skills/luno-core/references/sync.md#branch-sync-host) 维护、角色启动段由受管生成入口渲染，派发契约见 [Paseo 派发通道](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。不要把示例整表覆盖现有配置；监听地址、systemd 环境、登录态和其他 MCP 设置保持现值。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
 8. **隔离实例验收**：在隔离实例上确认技能可以列出；逐一核对 CCHP、GDR 两套 LUNO/LENS/FORGE 六个 Profile，按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#派发通道) 回读实际 provider、模型和权限模式。六个 Profile 各发一次初始正式消息，首行写角色行；GDR 的 Ultrafast 按实际 Codex 模型目录声明回读，不能只看配置。草稿 Speed 只查能力。此步不动现役 systemd。
 9. **可恢复切换与回读**：隔离实例验收通过后，在同一维护窗口暂停新会话，把现役实例的 Paseo 配置切到已验证的官方配置；原版程序沿用，不替换成补丁包。reload/重启后回读实际加载的包版本、配置、工作目录及全部已授权接收端，再做最小新会话验收。失败时按 [Paseo 回退说明](platforms/paseo/README.md#隔离与前态) 恢复原配置，以及迁移时退役的原程序入口和共享插件，再重新回读。
 10. **升级与回退**：下文 `LI` 代表第 5 步的安装器命令，`CO` 代表以运行用户执行的 `git -C <checkout>`。安装器不 fetch、不切换 Git、包或 systemd 单元，旧版与新版都要已在本地。
@@ -194,15 +194,20 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 - 回退（升级失败或中断）：`CO reset --keep <旧版>`，再运行 `LI --apply --previous <新版>` 与 `LI --check`，清理新版独有的受管入口并恢复旧版的生成文件。这条只用于已核两版都有宿主端登记（旧版 `tools/sync-targets.json` 里已有 `codex`、`paseo` 端条目）、安装器 blob 相同且共有公开软链目标一致的同布局恢复；不满足这些前提时按上文相应条停在报告并先核实际检出与前态，不把首装撤回用于既有安装。
    - 首次安装的撤回：旧基线里还没有宿主端登记、也没有 `tools/link-install.py` 时，`--previous <旧版>` 表达不出任何退役项，安装器不会删除新版装上的文件，此时直接回退会留下新装与旧基线混合的状态。安全默认是保留新版安装器与已装入口，不撤回；确需撤回时，只按本次 `--apply` 报告 `created` 里 `state=create` 的项逐项核对归属：源链接按登记推导出的精确 target 核，生成文件按仍指向它的公开软链核（生成文件须同 UID、0600 且仍被对应公开软链指向，软链须指向本次生成文件）后删除这些项（先全部核完再删，生成文件在指向它的公开软链仍在时删除；源链接与生成文件分开核），`~/.luno/generated/`、`~/.luno/homes/*`、`~/.luno/memory/GLOBAL.md`、settings 与登录态一律保留；项数或归属对不上就停下交你处理，不删目录、不整目录删除；报告缺失、`created` 为空（例如刚成功的重跑）或无法区分是否本次新增时，只停不删，不拿计划项或前态已有的受管项充当本次新增。
 
-### Codex GLOBAL 来源（可选）
+### Codex GLOBAL 来源与角色启动段（可选）
 
-默认的 `codex-main` 仍生成 `prompt/LUNO.md` 原文、一个 LF 和私人 GLOBAL 副本；其他端不变。只选 Codex 单端时，可显式加 `--codex-global-source paseo-append-system-prompt`：`AGENTS.md` 恰为 `prompt/LUNO.md` 原文，GLOBAL 改由 Paseo daemon 的 `daemon.appendSystemPrompt` 提供（Paseo 设置 → Host → Orchestration → System Prompt）。该选项只接受 `--ends codex`；默认同时选择 `codex`、`paseo` 时，不接受此 GLOBAL 来源选项。安装器不读写这份私人配置；设置与生成文件须在同一受控维护窗口切换，先暂停新会话，切换或回滚后回读再恢复会话。
+默认的 `codex-main` 仍生成 `prompt/LUNO.md` 原文、一个 LF 和私人 GLOBAL 副本；其他端不变。只选 Codex 单端时，可显式加 `--codex-global-source paseo-append-system-prompt`：`AGENTS.md` 由受管生成入口渲染，GLOBAL 改由 Paseo daemon 的 `daemon.appendSystemPrompt` 提供。该选项只接受 `--ends codex`；默认同时选择 `codex`、`paseo` 时，不接受此 GLOBAL 来源选项。私人字段的授权、切换、写后字节回读、实际加载验收、全部接收端覆盖及恢复按 [sync-host](skills/luno-core/references/sync.md#branch-sync-host)；原文同步由用户在 Minis 发起，Paseo 端不连接 Minis。安装器只处理受管生成文件，不读写该字段。
 
-该来源是 daemon 范围，不是单个 provider 的选项：Paseo 0.17.1（固定上游提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`）的 agent-manager 会把 `daemon.appendSystemPrompt` trim 后附加到该 manager 启动的所有会话配置，Codex 作为 developerInstructions 接收。因此同一 daemon 启动的 LUNO、LENS、FORGE 及其他 agent 都在适用范围内，写前授权须覆盖该 daemon 的全部接收端；不要另加 provider 级过滤或自研注入。官方版六个 Profile 通过主 Codex 家目录启动，由首条消息和登记的角色原文确定任务角色。回读时配置值按原始字节核对，实际交付按 trim 后口径理解；文件和配置匹配不等于实际加载，原生 CLI 不经该 daemon，不直接获得这段提示词。
+启用该模式时，安装器另按登记开关 `ends.codex.paseoRoleStartup` 渲染唯一现有 `prompt/LUNO.md`：登记缺省或 `false` 时生成字节仍恰为 LUNO 原文；为 `true` 时在其前加一段角色启动说明（首行精确角色行选择角色，未写按 LUNO；LENS/FORGE 开始前须完整读取对应的已部署受管原文，路径为该次已核候选检出里的 `subagents/LENS.md` 与 `subagents/FORGE.md`），并把唯一行首的「你是 LUNO，」改为「仅当前会话角色为 LUNO 时适用本段。你」。锚点缺失或重复、登记非布尔即阻断。受管 `prompt/LUNO.md` 原文件及其他模式字节不变，GLOBAL 不进入生成文件。若独立原生 CLI 与 daemon 共用同一实际 `CODEX_HOME`，它也会读到该生成物，切换前核入口归属。
 
-首次接入时，安装器 blob 已变，旧的 `--preflight`/`--apply --previous` 跨 blob 尚未支持。现场已经改成 LUNO-only 且仍有旧 GLOBAL 副本时，用旧、新可信安装器对同一安装根和除来源选项外相同的入口参数只读 `--check`：旧安装器只把 `AGENTS.md` 列为 update，新安装器带 `--ends codex --codex-global-source paseo-append-system-prompt` 应全部 match；目标登记与 `prompt/LUNO.md` 均未变时，快进检出后只跑带选项的 `--check`，不运行 `--apply`。仍内嵌的现场沿用原版升级路径，但仅在该路径满足同布局前提（两版安装器 blob 相同、共有公开软链目标不变）时可用；从含 Claude Code 登记的旧版跨到退役版不满足该前提，按上文〈升级与回退〉的运行端退役条处理，不用作本次跨退役迁移。已迁移入口后续换版沿用同 blob 的 `--preflight`/`--apply --previous`（带同一来源选项），只重生成受管文件，不改安装器。
+#### A→B：先兼容安装器，再启用登记
 
-回滚时显式运行 `--ends codex --apply --codex-global-source agents-md` 与 `--check`，要求私人 GLOBAL 副本仍在；同一窗口恢复 daemon 设置，再核对旧组合。
+版本 A 只发布兼容安装器与必要测试：新增可选登记读取、角色启动段渲染和默认兼容，`ends.codex` 登记和 `prompt/`、`skills/`、`subagents/`、`platforms/paseo/` 均不变，旧装现场沿用 `--check-installer-upgrade` 只读准入。版本 B 与 A 安装器 blob 相同，只把 `prompt/LUNO.md` 的 `ends.codex` 登记开关设为 `true`，并更新说明与文档。
+
+1. **旧→A**：旧版 `--preflight` 报 `installer_changed` 时，用 A 的安装器原字节在干净旧版检出上按实际参数（含 `--ends`、`--codex-home`、`--codex-global-source`）逐套跑 `--check-installer-upgrade`，全部 rc0 才在同一维护窗口只快进一次，再逐套用 A `--check`；此路径不运行 `--apply`，失败按原规则恢复旧检出。
+2. **A→B**：B 与 A 的安装器字节相同。快进前暂停常规新会话，确认旧字段可恢复，在 A 上跑 `--preflight B`，预期只有生成 `AGENTS.md` 一项 `update`、其余 `match`，无退役项；只看不写。随后快进到 B，复核 A 现场前态后运行 `--apply --previous A` 与 `--check`，先验证角色入口生成正确（启动段在前、职责段改写、路径为该实际检出）。
+3. **字段同步与验收**：由用户在 Minis 发起完整 `GLOBAL.md` 字段同步；Paseo 端按 [sync-host](skills/luno-core/references/sync.md#branch-sync-host) 回读保存字段字节，再在获准的新会话验收实际加载，覆盖已有六个 Profile 的桌面与 MCP 启动以及其他接收端。
+4. **回退**：以 A 与其原完整字段为一对恢复。先确认生成物是 A 或 B：B 字节时在同一 blob 上反向 `--apply --previous B`，已为 A 只跑 `--check`；出现第三态就停相关写入交用户核对。同一来源模式和原历史留存不变。
 
 ## 独立原生 Codex（0.170.0）
 
