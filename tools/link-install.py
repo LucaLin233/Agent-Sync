@@ -202,6 +202,30 @@ def toml_string(value):
     return "".join(out)
 
 
+ROLE_STARTUP_ANCHOR = "你是 LUNO，"
+ROLE_STARTUP_REPLACEMENT = "仅当前会话角色为 LUNO 时适用本段。你"
+ROLE_STARTUP_HEAD = (
+    "首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时，采用对应角色，"
+    "任务正文紧随其后。没有上述角色行时按 LUNO。\n\n"
+    "角色为 LENS 或 FORGE 时，须在开始任务前完整读取并遵循对应的已部署受管原文。"
+    "LENS 原文位于 `{lens}`，FORGE 原文位于 `{forge}`。\n\n"
+)
+
+
+def role_startup_text(source_text, checkout, source):
+    """显式 Paseo 来源模式：角色启动段在前，LUNO 职责段改为按当前角色适用。
+
+    锚点必须恰有一个行首；缺失或重复即停止，不猜共享提示词形态。
+    """
+    hits = [match.start() for match in re.finditer("(?m)^" + re.escape(ROLE_STARTUP_ANCHOR), source_text)]
+    if len(hits) != 1:
+        raise InstallError("role_startup_anchor", source)
+    head = ROLE_STARTUP_HEAD.format(lens=checkout / "subagents/LENS.md",
+                                    forge=checkout / "subagents/FORGE.md")
+    index = hits[0]
+    return head + source_text[:index] + ROLE_STARTUP_REPLACEMENT + source_text[index + len(ROLE_STARTUP_ANCHOR):]
+
+
 def render(obj, target, checkout, home, tree, read, codex_global_source="agents-md"):
     renderer = target["renderer"]
     source = checkout / obj["source"]
@@ -219,7 +243,13 @@ def render(obj, target, checkout, home, tree, read, codex_global_source="agents-
         return None, text.encode("utf-8")
     if renderer == "codex-main":
         if codex_global_source == "paseo-append-system-prompt":
-            return home / ".luno/generated/codex/AGENTS.md", text_bytes(source, read)
+            content = text_bytes(source, read)
+            role_startup = target.get("paseoRoleStartup", False)
+            if not isinstance(role_startup, bool):
+                raise InstallError("registry_end_invalid_role_startup", source)
+            if role_startup:
+                content = role_startup_text(content.decode("utf-8"), checkout, source).encode("utf-8")
+            return home / ".luno/generated/codex/AGENTS.md", content
         memory = home / ".luno/memory/GLOBAL.md"
         info = tree.stat(memory)
         if info is None or not stat.S_ISREG(info.st_mode):
@@ -334,6 +364,11 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
             present = target.get("present") if isinstance(target, dict) else None
             if not isinstance(present, bool):
                 errors.append({"code": "registry_end_invalid_present", "path": str(registry_path),
+                               "object": obj["id"], "end": end})
+                continue
+            if target.get("renderer") == "codex-main" and "paseoRoleStartup" in target \
+                    and not isinstance(target["paseoRoleStartup"], bool):
+                errors.append({"code": "registry_end_invalid_role_startup", "path": str(registry_path),
                                "object": obj["id"], "end": end})
                 continue
             if not present or end not in ends:
