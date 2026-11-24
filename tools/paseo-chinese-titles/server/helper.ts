@@ -247,6 +247,9 @@ export async function generateConversationTitle(
   request: ConversationRequest,
   options: GenerateOptions = {},
 ): Promise<ConversationGenerationResult> {
+  // The model is asked for Simplified Chinese; the manual gate checks only
+  // that the answer is Chinese and fits the length, so a real product name the
+  // automatic word list does not know is not rejected.
   return runTitleModel(paseo, settings, {
     projectId: request.projectId,
     prompt: conversationPrompt(request),
