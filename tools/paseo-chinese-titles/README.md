@@ -149,7 +149,7 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 
 ## 验收与限制
 
-**本次候选（会话自动命名与全量连续摘要）只做了离线验证**：`npm run typecheck`、`npm test`，以及用本机 Paseo 0.17.4 自带插件编译器对候选目录做的一次真实打包检查（入口解析、manifest、server/client bundle 均成功；该检查在内存中完成，不安装、不加载、不写现役）。全程使用合成输入与独占 `/tmp`，无真实模型调用、无生产写入、未提交、未推送、**未热加载到现役 daemon**。真实 daemon 上的会话命名 `agent.turn.after` 行为、CLI `agent update --name` 实写、20 秒 hook 与 22 秒 RPC 的实际时限都尚未黑盒验证。
+**本次候选（会话自动命名与全量连续摘要）的验证是离线的**：`npm run typecheck`、`npm test`，以及用 Paseo 0.17.4 自带插件编译器对候选目录做的真实打包检查（入口解析、manifest、server/client bundle 均成功；该检查在内存中完成，不安装、不加载）。测试全程使用合成输入与独占临时目录，无真实模型调用、未读取任何真实会话正文。候选内容在运行 Paseo 0.17.4 的宿主 daemon 上以 `plugin reload` 加载成功（`enabled`、`status: "running"`、`Plugin ready`，无报错行）。真实 daemon 上的会话命名 `agent.turn.after` 行为、CLI `agent update --name` 实写、20 秒 hook 与 22 秒 RPC 的实际时限仍尚未黑盒验证。
 
 下面这一组 0.17.3 隔离 daemon 黑盒结果来自**更早的构建**，不是本次候选的运行结果，只保留作为基础安装/命名背景，不能当作本版本的逐字输出或行为证据。那次 E2E 只覆盖安装/running、`workspace-sessions` RPC 接线与无会话时的可识别状态，不包含真实模型、真实会话摘要、会话改名或 30 秒传输。
 
