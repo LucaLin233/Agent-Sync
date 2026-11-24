@@ -38,10 +38,12 @@ export default function contribute(server: PluginServerContext) {
     await engine.onAgentCreated(agent.id, context.paseo);
   });
   server.addHook("agent.turn.before", async ({ agent, turnId }, context) => {
-    await engine.onTurn(agent.id, turnId, context.paseo);
+    await engine.onTurnBefore(agent.id, turnId, context.paseo);
   });
-  server.addHook("agent.turn.after", async ({ agent }, context) => {
-    await engine.onTurn(agent.id, null, context.paseo);
+  server.addHook("agent.turn.after", async ({ agent, turnId, outcome }, context) => {
+    // Only a completed turn is evidence of a finished answer; a failed or
+    // canceled turn must not spend the session's one retry.
+    await engine.onTurnAfter(agent.id, turnId, context.paseo, outcome?.kind === "completed");
   });
   server.handle(reconcileRpc, async (_input, { paseo }) => engine.reconcile(paseo));
   server.handle(listWorkspaceSessionsRpc, async ({ workspaceId }, { paseo }) => ({

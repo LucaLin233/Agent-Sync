@@ -286,6 +286,45 @@ function isManualTitle(value: string): boolean {
   return Boolean(text) && !CONTROL.test(text) && countHanChars(text) >= 2;
 }
 
+/**
+ * Used by the formal manual-summary entry. A model may answer with a title that
+ * is over the limit, or with a fragment that was cut mid-phrase and lost its
+ * main object. Those are not silently truncated into the sidebar: the caller
+ * gets a `rewrite` verdict and may ask the same helper session for one semantic
+ * shortening. Anything without usable Chinese is rejected outright.
+ *
+ * Only shapes with direct evidence of a cut are treated as incomplete. Ending a
+ * Chinese title on 地/得/和/与 is normal (本地, 应纳税所得, 趋于饱和), so those are
+ * not signals on their own. What is left is either a structural 的 at the very
+ * end — with the closed set of lexicalised 的-words excluded (目的, 标的) — or a
+ * particle standing after a Latin/identifier token and a space, which cannot be
+ * part of a Chinese word.
+ */
+const LEXICAL_DE_TAIL = /(?:目的|标的|端的|似的|是的|有的|别的|什么的)$/u;
+const LATIN_PARTICLE_TAIL = /[A-Za-z0-9_.\-/@#)\]]\s+[的地得和与及或而但并]$/u;
+
+function hasCutEvidence(value: string): boolean {
+  if (LATIN_PARTICLE_TAIL.test(value)) return true;
+  return value.endsWith("的") && !LEXICAL_DE_TAIL.test(value);
+}
+
+export type ConversationSummaryCheck =
+  | { kind: "ok"; title: string }
+  | { kind: "rewrite"; reason: "too_long" | "incomplete" }
+  | { kind: "invalid" };
+
+export function checkConversationSummaryTitle(
+  raw: string | null | undefined,
+  maxChars: number,
+): ConversationSummaryCheck {
+  if (typeof raw !== "string") return { kind: "invalid" };
+  const value = cleanModelTitle(raw);
+  if (!value || CONTROL.test(value) || !isManualTitle(value)) return { kind: "invalid" };
+  if (Array.from(value).length > maxChars) return { kind: "rewrite", reason: "too_long" };
+  if (hasCutEvidence(value)) return { kind: "rewrite", reason: "incomplete" };
+  return { kind: "ok", title: value };
+}
+
 export function sanitizeConversationTitle(raw: string | null | undefined, maxChars: number): string | null {
   if (typeof raw !== "string") return null;
   const value = cleanModelTitle(raw);
@@ -298,6 +337,8 @@ export function sanitizeConversationTitle(raw: string | null | undefined, maxCha
     const cutsWord = /[A-Za-z0-9_.\-/@#]/u.test(next) && /[A-Za-z0-9_.\-/@#]/u.test(previous);
     if (cutsWord) continue;
     const candidate = chars.slice(0, end).join("").trim().replace(/[\s,;:，。；：、\-/·]+$/u, "");
+    // The automatic path keeps the long-standing rule: cut at the nearest word
+    // or Han boundary. The stricter judgement lives only in the manual entry.
     if (candidate && isManualTitle(candidate)) return candidate;
   }
   return null;

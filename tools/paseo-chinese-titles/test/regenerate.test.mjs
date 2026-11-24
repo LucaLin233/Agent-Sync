@@ -464,6 +464,24 @@ test("a model failure writes neither target", async () => {
   }
 });
 
+test("an unfixable summary title reports rewrite_failed and writes nothing", async () => {
+  for (const reason of ["rewrite_failed", "timeout"]) {
+    for (const scope of SCOPES) {
+      const state = makeState();
+      const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+        scope,
+        generateConversation: async () => ({ title: null, errorCode: reason }),
+      }));
+      assert.equal(result.status, "error");
+      assert.equal(result.reason, reason);
+      assert.equal(result.workspaceUpdated, false);
+      assert.equal(result.sessionUpdated, false);
+      assert.deepEqual(state.writes, []);
+      assert.deepEqual(state.sessionWrites, []);
+    }
+  }
+});
+
 test("a manual workspace rename during generation protects both targets", async () => {
   const state = makeState();
   const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
@@ -577,6 +595,42 @@ test("a second click is busy for the same workspace and the same session", async
   const held = optionsFor(makePaseo(state), state, { scope: "session", agentClaims });
   assert.equal((await regenerateWorkspaceTitle(held)).status, "busy");
   assert.deepEqual(state.sessionWrites, ["修复登录问题"]);
+});
+
+test("a partly read session still writes, and reports why coverage is incomplete", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "session",
+    readConversation: async () => ({
+      text: "用户：开场\n\n助手：部分结论",
+      turns: 9,
+      segments: ["用户：开场\n\n助手：部分结论"],
+      coveredTurns: 3,
+      coverage: { kind: "partial", reason: "reset" },
+    }),
+    generateConversation: async () => ({ title: "概括已读到的会话部分" }),
+  }));
+  assert.equal(result.status, "done");
+  assert.equal(result.sessionUpdated, true);
+  assert.deepEqual(result.coverage, { kind: "partial", reason: "reset", turns: 3 });
+  assert.deepEqual(state.sessionWrites, ["概括已读到的会话部分"]);
+});
+
+test("a full read carries no coverage caveat", async () => {
+  const state = makeState();
+  const result = await regenerateWorkspaceTitle(optionsFor(makePaseo(state), state, {
+    scope: "session",
+    readConversation: async () => ({
+      text: "用户：完整会话",
+      turns: 1,
+      segments: ["用户：完整会话"],
+      coveredTurns: 1,
+      coverage: { kind: "full" },
+    }),
+    generateConversation: async () => ({ title: "完整会话标题" }),
+  }));
+  assert.equal(result.status, "done");
+  assert.equal(result.coverage, undefined);
 });
 
 test("a timeout before the writes leaves every title untouched", async () => {

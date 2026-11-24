@@ -11,6 +11,14 @@ export interface EntityTitleState {
   previousTitle?: string | null;
   at: string;
   error?: string;
+  /** How many automatic model attempts this entity has already spent. */
+  attempts?: number;
+  /** The completed turn of the last attempt; a duplicate event on it never retries. */
+  lastTurnId?: string | null;
+  /** True once the one-time repair of a legacy done+model_failed entry was spent. */
+  repairUsed?: boolean;
+  /** The agent's workspace, recorded so a finished agent can skip untouched turns. */
+  workspaceId?: string;
 }
 
 export interface ChineseTitlesState {

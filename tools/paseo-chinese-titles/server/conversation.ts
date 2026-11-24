@@ -1,17 +1,47 @@
 import type { PaseoApi } from "./paseo-types";
-import { buildConversationExcerpt, type ConversationEntry, type ConversationExcerpt } from "../shared/transcript.ts";
+import {
+  buildTranscriptTurns,
+  fitTranscript,
+  isSubstantiveAnswer,
+  joinTurns,
+  planSegments,
+  type ConversationEntry,
+  type ConversationExcerpt,
+  type TranscriptCoverage,
+} from "../shared/transcript.ts";
 
 /**
- * Bounded two-ended reads. Page counts limit requests and a deadline is
- * checked before each page; neither is a hard timeout for a single refetch,
- * because the timeline RPC accepts no cancellation.
+ * Chronological page budget. The scan walks forward from the head so every
+ * readable turn is covered in order; it never samples. Page count, visible
+ * entries, characters and a page-level deadline all bound the work.
  */
-const PAGE_LIMIT = 50;
-const MAX_PAGES_PER_SIDE = 8;
-const GOAL_VISIBLE = 48;
-/** Leave the rest of the RPC budget to the title model and the two writes. */
+const PAGE_LIMIT = 100;
+const MAX_PAGES = 40;
+const MAX_VISIBLE_ENTRIES = 3_000;
+const MAX_TRANSCRIPT_CHARS = 30_000;
+/** Leave the rest of the RPC budget to the model runs and the two writes. */
 const SCAN_BUDGET_MS = 5_000;
 const MODEL_RESERVE_MS = 4_000;
+/**
+ * Model input per contiguous segment and how many segments one title may use.
+ * Two 15k-character parts usually hold the whole 30k read budget, so an
+ * ordinary session is not cut again after being read. A turn-dense read whose
+ * labels push it past the segment budget is reported as `segment_cap` partial,
+ * never presented as a complete summary.
+ */
+const SEGMENT_CHARS = 15_000;
+const MAX_SEGMENTS = 2;
+/**
+ * Per-message clip for the manual summary. Long answers matter, but a session
+ * is covered by how many turns fit, not by one giant message: this keeps a
+ * 30 000-character read to roughly a dozen substantive turns.
+ */
+const MESSAGE_CHARS = 1_000;
+
+/** A session title needs only the opening question and the answer that followed. */
+const NAMING_PAGE_LIMIT = 100;
+const NAMING_MAX_PAGES = 10;
+const NAMING_MAX_ENTRIES = 400;
 
 export interface ReadConversationOptions {
   /** Absolute epoch milliseconds for the whole RPC; caps the scan window. */
@@ -23,6 +53,20 @@ interface RawEntry {
   turnId?: string | null;
   timestamp?: string;
   seqStart?: number;
+}
+
+/**
+ * Paseo 0.17.4's timeline store answers a stale cursor or a sequence gap by
+ * resetting the page to the tail. Such a page can end with `hasNewer: false`
+ * even though earlier items were skipped, so a discontinuity is never treated
+ * as a completed forward scan.
+ */
+export function isDiscontinuous(page: {
+  reset?: boolean;
+  staleCursor?: boolean;
+  gap?: boolean;
+}): boolean {
+  return page.reset === true || page.staleCursor === true || page.gap === true;
 }
 
 function itemText(item: unknown): string | null {
@@ -45,29 +89,16 @@ function visibleEntry(entry: RawEntry): ConversationEntry | null {
   };
 }
 
-/** Page extents come from every item, so tool-only pages still advance a cursor. */
-function seqRange(entries: readonly RawEntry[]): { first?: number; last?: number } {
-  let first: number | undefined;
-  let last: number | undefined;
-  for (const entry of entries) {
-    if (typeof entry.seqStart !== "number") continue;
-    if (first === undefined || entry.seqStart < first) first = entry.seqStart;
-    if (last === undefined || entry.seqStart > last) last = entry.seqStart;
-  }
-  return { first, last };
-}
-
 /**
- * Reads one agent's timeline from both ends, alternating pages so neither side
- * can spend the whole scan before the other starts. It stops on the per-side
- * page cap, the visible-entry goal, a proven timeline edge, a page that came
- * back without a cursor, the point where both scans meet, or a deadline that
- * has passed before the next page. Only `hasOlder`/`hasNewer` false counts as
- * reaching an edge; a missing cursor stops just that side.
+ * Reads one agent's timeline from the start in chronological order until the
+ * end, a page/entry/character cap or the scan deadline. The excerpt carries
+ * `coverage`: `full` only when the read proved it reached the newest item and
+ * every readable turn fits the segment budget. A long or partially readable
+ * session is reported as `partial` with a reason instead of being sampled and
+ * presented as complete.
  *
- * This is a bounded, evenly sampled excerpt: a very long session can still
- * have an unread stretch between the scans, and the result never claims to be
- * the full transcript.
+ * This is a page-level deadline, not a hard cancellation: the timeline refetch
+ * accepts no signal, so a page already sent may finish after the deadline.
  */
 export async function readSessionConversation(
   paseo: PaseoApi,
@@ -81,131 +112,91 @@ export async function readSessionConversation(
     : Math.min(startedAt + SCAN_BUDGET_MS, options.deadlineAt - MODEL_RESERVE_MS);
   const outOfTime = () => Date.now() >= windowEnd;
 
-  // Newest first: a tail page, then older pages prepended.
-  const tail: ConversationEntry[] = [];
-  let tailVisible = 0;
-  let tailOldestSeq: number | undefined;
-  let tailPages = 0;
-  let tailCursor: { epoch: string; seq: number } | undefined;
-  /** Only a real `hasOlder: false` proves the scan reached the first item. */
-  let tailReachedStart = false;
-  /** A missing cursor ends this side without proving anything about the edge. */
-  let tailStopped = false;
+  const entries: ConversationEntry[] = [];
+  let cursor: { epoch: string; seq: number } | undefined;
+  let pages = 0;
+  let chars = 0;
+  let reachedEnd = false;
+  let coverage: TranscriptCoverage = { kind: "full" };
+  const partial = (reason: TranscriptCoverage["reason"]) => {
+    coverage = { kind: "partial", reason };
+  };
 
-  // Oldest first: the opening turns, which a tail-only read may never reach.
-  const head: ConversationEntry[] = [];
-  let headVisible = 0;
-  let headNewestSeq: number | undefined;
-  let headPages = 0;
-  let headCursor: { epoch: string; seq: number } | undefined;
-  /** Only a real `hasNewer: false` proves the scan reached the last item. */
-  let headReachedEnd = false;
-  let headStopped = false;
-
-  let readAttempted = 0;
-  let firstPageFailed = false;
-
-  const mayReadTail = () =>
-    !tailReachedStart && !tailStopped && tailPages < MAX_PAGES_PER_SIDE && tailVisible < GOAL_VISIBLE;
-  const mayReadHead = () =>
-    !headReachedEnd && !headStopped && headPages < MAX_PAGES_PER_SIDE && headVisible < GOAL_VISIBLE;
-
-  for (let round = 0; round < MAX_PAGES_PER_SIDE * 2; round += 1) {
-    // A scan that proved it reached a timeline edge has seen the whole
-    // timeline; a side merely stopped for a missing cursor has not.
-    if (tailReachedStart || headReachedEnd) break;
-    const canTail = mayReadTail();
-    const canHead = mayReadHead();
-    if (!canTail && !canHead) break;
-    if (headNewestSeq !== undefined && tailOldestSeq !== undefined && headNewestSeq >= tailOldestSeq - 1) break;
-    if (outOfTime()) break;
-    // Alternate, so both sides get their first page within the first two calls.
-    const takeTail = canTail && (!canHead || round % 2 === 0);
-    const pageIsFirst = readAttempted === 0;
-    try {
-      if (takeTail) {
-        readAttempted += 1;
-        const result = await timeline.refetch({
-          direction: tailPages === 0 ? "tail" : "before",
-          projection: "projected",
-          limit: PAGE_LIMIT,
-          ...(tailCursor ? { cursor: tailCursor } : {}),
-        });
-        // A failed first page means the timeline could not be read at all;
-        // a failed later page keeps the bounded content already read.
-        if (result.error) {
-          if (pageIsFirst) {
-            firstPageFailed = true;
-            return null;
-          }
-          break;
-        }
-        const raw = (result.entries ?? []) as RawEntry[];
-        const entries = raw.map(visibleEntry).filter((entry): entry is ConversationEntry => entry !== null);
-        // Pages arrive oldest-to-newest, so a newer one belongs after the older ones.
-        if (tailPages === 0) tail.push(...entries);
-        else tail.unshift(...entries);
-        tailVisible += entries.length;
-        tailPages += 1;
-        const oldest = seqRange(raw).first;
-        if (oldest !== undefined) tailOldestSeq = oldest;
-        if (!result.hasOlder) {
-          tailReachedStart = true;
-        } else if (result.startCursor) {
-          tailCursor = { epoch: result.startCursor.epoch, seq: result.startCursor.seq };
-        } else {
-          // No cursor cannot continue this side, but it proves nothing about
-          // the start of the timeline; keep whatever the head side read.
-          tailStopped = true;
-        }
-      } else {
-        readAttempted += 1;
-        const result = await timeline.refetch({
-          direction: "after",
-          projection: "projected",
-          limit: PAGE_LIMIT,
-          ...(headCursor ? { cursor: headCursor } : {}),
-        });
-        // A failed later page keeps what was already read; a failed first page
-        // is a read failure, not an empty conversation.
-        if (result.error) {
-          if (pageIsFirst) firstPageFailed = true;
-          break;
-        }
-        const raw = (result.entries ?? []) as RawEntry[];
-        const entries = raw.map(visibleEntry).filter((entry): entry is ConversationEntry => entry !== null);
-        head.push(...entries);
-        headVisible += entries.length;
-        headPages += 1;
-        const newest = seqRange(raw).last;
-        if (newest !== undefined) headNewestSeq = newest;
-        if (!result.hasNewer) {
-          headReachedEnd = true;
-        } else if (result.endCursor) {
-          headCursor = { epoch: result.endCursor.epoch, seq: result.endCursor.seq };
-        } else {
-          // Same as the tail side: stop this scan, do not claim an edge.
-          headStopped = true;
-        }
-      }
-    } catch {
-      // A rejected page ends the scan with what is already known; a rejected
-      // first page is a read failure, not an empty conversation.
-      if (pageIsFirst) firstPageFailed = true;
+  for (;;) {
+    if (pages >= MAX_PAGES) {
+      partial("page_cap");
       break;
     }
+    if (entries.length >= MAX_VISIBLE_ENTRIES) {
+      partial("entry_cap");
+      break;
+    }
+    if (outOfTime()) {
+      partial("deadline");
+      break;
+    }
+    const pageIsFirst = pages === 0;
+    let result: Awaited<ReturnType<typeof timeline.refetch>>;
+    try {
+      result = await timeline.refetch({
+        direction: "after",
+        projection: "projected",
+        limit: PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+    } catch {
+      // A failed first page is a read failure, not an empty conversation.
+      if (pageIsFirst) return null;
+      partial("read_error");
+      break;
+    }
+    if (result.error) {
+      if (pageIsFirst) return null;
+      partial("read_error");
+      break;
+    }
+    // The daemon reset or skipped ahead and served a tail page. Its
+    // `hasNewer: false` says nothing about earlier items, and the page is not
+    // contiguous with what was read before, so pages read so far stay the
+    // content and the read is reported as partial. Only a first-page reset,
+    // where nothing earlier is readable at all, uses that tail page itself.
+    const discontinuous = isDiscontinuous(result);
+    if (!discontinuous || pageIsFirst) {
+      for (const entry of (result.entries ?? []) as RawEntry[]) {
+        const visible = visibleEntry(entry);
+        if (!visible) continue;
+        entries.push(visible);
+        chars += visible.text?.length ?? 0;
+        if (entries.length >= MAX_VISIBLE_ENTRIES || chars >= MAX_TRANSCRIPT_CHARS) break;
+      }
+    }
+    pages += 1;
+    if (discontinuous) {
+      partial(result.gap === true ? "gap" : "reset");
+      break;
+    }
+    if (entries.length >= MAX_VISIBLE_ENTRIES) {
+      partial("entry_cap");
+      break;
+    }
+    if (chars >= MAX_TRANSCRIPT_CHARS) {
+      partial("char_cap");
+      break;
+    }
+    if (!result.hasNewer) {
+      reachedEnd = true;
+      break;
+    }
+    if (!result.endCursor) {
+      // No cursor cannot continue, and it proves nothing about the tail.
+      partial("cursor_missing");
+      break;
+    }
+    cursor = { epoch: result.endCursor.epoch, seq: result.endCursor.seq };
   }
-  if (firstPageFailed) return null;
-  // An edge proof means the whole timeline is already in memory; otherwise
-  // combine both bounded samples and let duplicate seq values collapse below.
-  const entries = tailReachedStart
-    ? tail
-    : headReachedEnd
-      ? head
-      : [...head, ...tail];
-  if (entries.length === 0) return buildConversationExcerpt([]);
-  // The daemon exposes a stable seq, so sort by it and drop anything the head
-  // and tail reads both returned.
+
+  if (!reachedEnd && coverage.kind === "full") partial("cursor_missing");
+  // The daemon exposes a stable seq; drop duplicates in case a page overlaps.
   const seen = new Set<string>();
   const unique = entries.filter((entry) => {
     const key = `${entry.seq ?? ""}:${entry.type}:${entry.text ?? ""}`;
@@ -213,15 +204,163 @@ export async function readSessionConversation(
     seen.add(key);
     return true;
   });
-  const timeOf = (value: string | null | undefined) => {
-    const parsed = Date.parse(value ?? "");
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
   unique.sort((left, right) => {
     if (typeof left.seq === "number" && typeof right.seq === "number" && left.seq !== right.seq) {
       return left.seq - right.seq;
     }
+    const timeOf = (value: string | null | undefined) => {
+      const parsed = Date.parse(value ?? "");
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
     return timeOf(left.timestamp) - timeOf(right.timestamp);
   });
-  return buildConversationExcerpt(unique);
+
+  const turns = buildTranscriptTurns(unique, { maxMessageChars: MESSAGE_CHARS });
+  if (turns.length === 0) {
+    // Nothing readable and the read was cut short: that is a read failure, not
+    // an empty conversation. A clean read of an empty timeline stays empty.
+    if (coverage.kind === "partial") return null;
+    return { text: "", turns: 0, segments: [], coveredTurns: 0, coverage };
+  }
+  const plan = planSegments(turns, { segmentChars: SEGMENT_CHARS, maxSegments: MAX_SEGMENTS });
+  const segments = plan.segments.map((segment) => joinTurns(segment));
+  // A read that reached the end but not the segment budget still lost turns;
+  // never report that as full coverage.
+  if (coverage.kind === "full" && !plan.coversAll) partial("segment_cap");
+  return {
+    text: segments.join("\n\n"),
+    turns: turns.length,
+    segments,
+    coveredTurns: plan.coveredTurns,
+    coverage,
+  };
+}
+
+export interface NamingMaterial {
+  /** The session's first visible user question, redacted and clipped. */
+  question: string;
+  /** The substantive assistant answer of the completed turn, or null. */
+  answer: string | null;
+  /** The turn whose answer this material carries. */
+  turnId: string | null;
+}
+
+/**
+ * Reads just enough of the opening to name a session: the first user question
+ * and the assistant answer to the turn that triggered naming. A turn with no
+ * substantive answer (tool-only, failed, canceled) yields `answer: null`, so
+ * the caller keeps its provisional title and spends no naming attempt.
+ *
+ * The scan walks forward from the opening and stops once the named turn has an
+ * answer and the next user message is reached, or at the page/deadline cap.
+ */
+export async function readSessionNamingMaterial(
+  paseo: PaseoApi,
+  agentId: string,
+  options: { turnId?: string | null; deadlineAt?: number } = {},
+): Promise<NamingMaterial | null> {
+  const timeline = paseo.agents.ref(agentId).timeline;
+  const startedAt = Date.now();
+  const windowEnd = options.deadlineAt === undefined
+    ? startedAt + SCAN_BUDGET_MS
+    : Math.min(startedAt + SCAN_BUDGET_MS, options.deadlineAt - MODEL_RESERVE_MS);
+  const targetTurn = options.turnId ?? null;
+
+  const entries: ConversationEntry[] = [];
+  let cursor: { epoch: string; seq: number } | undefined;
+  let openingTurn: string | null | undefined;
+  let answered = false;
+
+  for (let page = 0; page < NAMING_MAX_PAGES; page += 1) {
+    let result: Awaited<ReturnType<typeof timeline.refetch>>;
+    try {
+      result = await timeline.refetch({
+        direction: "after",
+        projection: "projected",
+        limit: NAMING_PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+    } catch {
+      if (page === 0) return null;
+      break;
+    }
+    if (result.error) {
+      if (page === 0) return null;
+      break;
+    }
+    // A reset or gap page jumps to the tail; its first user message is not the
+    // session's opening, so it cannot be used as naming material.
+    if (isDiscontinuous(result)) return null;
+
+    let stop = false;
+    // All assistant prose of the target turn is naming material; a preamble
+    // before a tool call must not hide the turn's real final answer.
+    for (const raw of (result.entries ?? []) as RawEntry[]) {
+      const visible = visibleEntry(raw);
+      if (!visible) continue;
+      if (visible.type === "user_message" && openingTurn === undefined) {
+        openingTurn = visible.turnId ?? null;
+      }
+      const target = targetTurn ?? openingTurn ?? null;
+      // Once the target answer is in hand, the first visible row belonging to
+      // any other turn closes the material; nothing later can belong to it.
+      if (answered && target !== null && (visible.turnId ?? null) !== target) {
+        stop = true;
+        break;
+      }
+      entries.push(visible);
+      if (visible.type === "assistant_message") {
+        const turn = visible.turnId ?? null;
+        const ofTarget = targetTurn === null ? turn === (openingTurn ?? null) : turn === targetTurn;
+        if (ofTarget && isSubstantiveAnswer(visible.text)) answered = true;
+      }
+      if (entries.length >= NAMING_MAX_ENTRIES) {
+        stop = true;
+        break;
+      }
+    }
+    if (stop || !result.hasNewer || !result.endCursor) break;
+    cursor = { epoch: result.endCursor.epoch, seq: result.endCursor.seq };
+    if (Date.now() >= windowEnd) break;
+  }
+
+  // A tool-dense opening can exhaust the forward page budget before the
+  // answer. The completed turn is usually the newest one, so one bounded tail
+  // read recovers just that turn; if a newer turn already started the page
+  // holds nothing for this turn and the material stays answer-less.
+  if (!answered && targetTurn !== null && Date.now() < windowEnd) {
+    try {
+      const tail = await timeline.refetch({ direction: "tail", projection: "projected", limit: 1, wholeTurns: true });
+      if (!tail.error) {
+        for (const raw of (tail.entries ?? []) as RawEntry[]) {
+          const visible = visibleEntry(raw);
+          if (!visible || visible.type !== "assistant_message") continue;
+          if ((visible.turnId ?? null) === targetTurn && isSubstantiveAnswer(visible.text)) {
+            entries.push(visible);
+            answered = true;
+            break;
+          }
+        }
+      }
+    } catch {
+      // Keep whatever the forward scan found; no attempt is spent without an answer.
+    }
+  }
+
+  const firstUser = entries.find((entry) => entry.type === "user_message");
+  if (!firstUser || !firstUser.text?.trim()) return null;
+  const questionTurns = buildTranscriptTurns([firstUser], { maxMessageChars: 1_200 });
+  const question = questionTurns[0]?.text.replace(/^用户：/u, "") ?? "";
+  if (!question.trim()) return null;
+
+  const turn = targetTurn ?? openingTurn ?? null;
+  if (turn === null) return { question, answer: null, turnId: null };
+  const answers = entries.filter((entry) =>
+    entry.type === "assistant_message" && (entry.turnId ?? null) === turn && isSubstantiveAnswer(entry.text));
+  const answerTurns = buildTranscriptTurns(answers, { maxMessageChars: 1_800 })
+    .map((entry) => ({ id: entry.id, text: entry.text.replace(/^助手：/u, ""), chars: entry.chars }));
+  // All answer parts of the completed turn, in order: a short preamble must not
+  // be the only thing the naming model sees.
+  const answer = fitTranscript(answerTurns, 1_800).trim();
+  return { question, answer: answer ? answer : null, turnId: turn };
 }

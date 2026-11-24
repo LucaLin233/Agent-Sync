@@ -12,10 +12,27 @@ type Scope = "both" | "workspace" | "session";
 type Phase =
   | { kind: "idle" }
   | { kind: "running" }
-  | { kind: "done"; title: string; workspace: boolean; session: boolean }
+  | { kind: "done"; title: string; workspace: boolean; session: boolean; coverage?: string }
   | { kind: "partial"; title: string; workspace: boolean; session: boolean; message: string }
   | { kind: "busy" }
   | { kind: "error"; message: string };
+
+const COVERAGE_REASONS: Record<string, string> = {
+  page_cap: "会话过长，超过单次读取页数上限",
+  entry_cap: "会话条目过多，超过单次读取条目上限",
+  char_cap: "会话文本过长，达到单次读取字数上限",
+  deadline: "读取会话已接近本次请求时限",
+  cursor_missing: "分页游标缺失，没能读完整个会话",
+  read_error: "读取会话中途失败，只用了已读到的部分",
+  segment_cap: "会话超过本次可分段提炼的分段上限",
+  reset: "会话历史游标已重置，只用了重置前读到的部分",
+  gap: "会话历史出现断层，只用了断层前读到的部分",
+};
+
+function coverageNote(coverage: { reason?: string; turns: number }): string {
+  const why = coverage.reason ? COVERAGE_REASONS[coverage.reason] ?? "会话未能完整读取" : "会话未能完整读取";
+  return `${why}；标题只概括了已读取的 ${coverage.turns} 轮，可重试。`;
+}
 
 type SessionList =
   | { kind: "loading" }
@@ -47,6 +64,7 @@ const MESSAGES: Record<string, string> = {
   provider_unavailable: "标题模型不可用，未修改原标题；检查插件设置里的 provider 后重试。",
   model_failed: "标题模型未返回可用结果，未修改原标题；可以重试。",
   invalid_title: "模型结果不是合格的中文标题，未修改原标题；可以重试。",
+  rewrite_failed: "模型标题过长或断句不完整，缩写后仍不合格，未修改原标题；可以重试。",
   empty_conversation: "所选会话没有可概括的用户或助手文本，未修改原标题。",
   conversation_unavailable: "读取所选会话失败，未修改原标题；可以重试。",
   no_session: "这个工作区还没有可选的普通会话，未修改原标题。",
@@ -162,14 +180,21 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         const workspace = result.workspaceUpdated;
         const session = result.sessionUpdated;
         if (result.status === "done") {
-          setPhase({ kind: "done", title, workspace, session });
+          setPhase({
+            kind: "done",
+            title,
+            workspace,
+            session,
+            ...(result.coverage ? { coverage: coverageNote(result.coverage) } : {}),
+          });
         } else if (result.status === "partial") {
           setPhase({
             kind: "partial",
             title,
             workspace,
             session,
-            message: `只更新了${writtenTargets(workspace, session)}；${MESSAGES[result.reason ?? ""] ?? "另一处未写入。"}可以重试。`,
+            message: `只更新了${writtenTargets(workspace, session)}；${MESSAGES[result.reason ?? ""] ?? "另一处未写入。"}可以重试。` +
+              (result.coverage ? ` ${coverageNote(result.coverage)}` : ""),
           });
         } else if (result.status === "busy") {
           setPhase({ kind: "busy" });
@@ -270,6 +295,9 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       {phase.kind === "running" ? <Text style={styles.running}>正在读取所选会话并生成中文标题…</Text> : null}
       {phase.kind === "done" ? (
         <Text style={styles.done}>已更新{writtenTargets(phase.workspace, phase.session)}为「{phase.title}」。</Text>
+      ) : null}
+      {phase.kind === "done" && phase.coverage ? (
+        <Text style={styles.hint}>{phase.coverage}</Text>
       ) : null}
       {phase.kind === "partial" ? (
         <Text style={styles.error}>{phase.message}</Text>
