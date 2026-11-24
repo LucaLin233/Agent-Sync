@@ -66,6 +66,11 @@ class InstallTest(unittest.TestCase):
         self.git("-c", "user.name=test", "-c", "user.email=test@local", "commit", "-qm", "fixture change")
         return self.git("rev-parse", "HEAD")
 
+    def commit_if_dirty(self):
+        """登记已是目标形态时不再造空提交：夹具基线必须保持可提交的确定状态。"""
+        if self.git("status", "--porcelain"):
+            self.commit()
+
     def test_plan_is_read_only_and_install_is_idempotent(self):
         before = self.snapshot()
         rc, report = self.call()
@@ -790,11 +795,10 @@ module.main(sys.argv[2:])
                              "ultrafast" if upstream == "gdr" else "default")
             self.assertNotIn("notes", entry)
 
-        prompt = config["daemon"]["appendSystemPrompt"]
-        for needle in ("角色：LUNO", "角色：LENS", "角色：FORGE",
-                       "<AGENT_SYNC_CHECKOUT>/subagents/LENS.md",
-                       "<AGENT_SYNC_CHECKOUT>/subagents/FORGE.md"):
-            self.assertIn(needle, prompt)
+        # 角色启动段改由受管生成入口渲染：示例不再承载私人或其他正文，也不留占位路径。
+        self.assertNotIn("appendSystemPrompt", config["daemon"])
+        self.assertEqual(set(config["daemon"]), {"mcp", "agentProfiles"})
+        self.assertNotIn("<AGENT_SYNC_CHECKOUT>", json.dumps(config))
         self.assertNotIn("paseo_role", json.dumps(config))
         self.assertNotIn("paseo_upstream", json.dumps(config))
         self.assertFalse((ROOT / "platforms/paseo/plugin").exists())
@@ -918,6 +922,8 @@ module.main(sys.argv[2:])
 
     def test_same_blob_registry_enable_updates_only_generated_and_restores(self):
         # A→B：只改登记开关，安装器 blob 相同；预检只预期一个生成文件，回退恢复原字节。
+        self.set_role_startup(None)
+        self.commit_if_dirty()
         self.assertEqual(self.call(*self.PASEO_SOURCE, "--apply")[0], 0)
         generated = self.home / ".codex/AGENTS.md"
         a_bytes = generated.read_bytes()
@@ -955,6 +961,8 @@ module.main(sys.argv[2:])
 
     def test_installer_upgrade_with_explicit_source_stays_match(self):
         # 旧→A：安装器自变、登记未变；显式来源现场用旧工具自己的 check 与 A 投影一致，全程不写。
+        self.set_role_startup(None)
+        self.commit_if_dirty()
         tool = self.checkout / "tools/link-install.py"
         new_bytes = tool.read_bytes()
         tool.write_bytes(new_bytes + b"\n# previous installer\n")

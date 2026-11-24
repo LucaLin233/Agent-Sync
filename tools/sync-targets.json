@@ -39,7 +39,8 @@
           "paths": [
             "~/.codex/AGENTS.md"
           ],
-          "renderer": "codex-main"
+          "renderer": "codex-main",
+          "paseoRoleStartup": true
         },
         "paseo": {
           "present": false
