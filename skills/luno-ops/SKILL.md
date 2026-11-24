@@ -25,7 +25,7 @@ Debian/Linux、Shell、Docker/Compose、部署、服务、网络和代理（Surg
 
 ## 方法
 
-- **取证有界**：区分执行设备和目标环境，先确认工作目录、拓扑、版本、症状和成功标准，再按需取证，不做无目标的全量采集；最小修改，分项验证。读容器、主机环境和配置文件时只核声明的指定键，命令模板见 `references/service-runtime.md`〔分支 service-runtime〕。
+- **取证有界**：区分执行设备和目标环境，先明确拓扑、症状和成功标准，再按需取证，不做无目标的全量采集；最小修改，分项验证。操作涉及仓库、候选目录、CLI 或权限时，只核对应的项：确认实际目标仓库及其根（目标仓库可能在工作区子目录），确认后用显式路径执行 Git；要做版本或实例操作时另核当前版本与实例。命令可用性、路径存在性和权限分别探测并各自保留退出码，不以一项的结果推断另一项。入口或前态变化时重新核对。`command -v` 未命中只表示当前环境未解析到，不据此判断未安装，命令定位按 `references/service-runtime.md`〔分支 ssh〕〈命令定位〉。读容器、主机环境和配置文件时只核声明的指定键，命令模板见 `references/service-runtime.md`〔分支 service-runtime〕。
 - **lint**：按项目入口和 shebang 选 lint；ShellCheck 不支持 zsh，zsh 脚本不能声称已通过 ShellCheck。
 - **批量替换**：先暂存并校验全部源和备份，再逐项切换，失败显式退出并按授权恢复。禁止先删后复制，不依赖 `set -e` 或循环末尾的 `||` 兜底。
 - **验证数据不失真**：NUL 分隔的数据（如 `git diff --name-only -z`）不经过 shell 变量或命令替换，改用管道或 Python `subprocess` 的 bytes 输入；解析 JSON 前分开捕获 stdout、stderr 和退出码，确认 stdout 只有预期的 JSON。做不到就不能据下游结果判定验证通过。
