@@ -35,6 +35,25 @@ pr-meta 仅九字段，不含 CI 或签名验收。自洽不证明与 Git 一致
 
 专项：sh tests/run-tests.sh case test-auth-call.py，默认不进 full。新增同族测试是因为既有 body/privacy 套件不覆盖固定认证动作；设计预算见 test-authoring，耗时以实跑为准。
 
+## 观测台窄入口
+
+`tools/paseo-observatory.py` 只做 Agent Observatory 报告的读取与按条目反馈，以固定入口替代反复内联 Node；仅标准库，由 `node` 子进程经官方 `@getpaseo/client` 调用。
+
+```sh
+python3 -B tools/paseo-observatory.py --paseo-cli <@getpaseo/cli 包根> \
+  --target 127.0.0.1:<port> --server-id <已核 serverId> report list
+```
+
+动作固定为 `report list|show`、`finding dry-run|close|verify`、`suggestion dry-run|close|verify`，RPC 方法另有白名单；finding 与建议的状态枚举各自校验，不混用。`dry-run` 只发读调用；`close` 由显式动作、条目与目标状态表达意图，写入后按原 ID 回读并输出 `verified`，回执不明也只回读不重写；已是目标状态时按幂等成功且不写。
+
+门禁：目标必须是 loopback；从 `--paseo-cli` 解析并同时核 `@getpaseo/cli` 与 `@getpaseo/client` 的包名、版本（当前均为 `0.17.4`）和 `dist/node/index.js` 入口，版本管理器转发 shim 不算包根；连接后核 daemon `serverId` 必须等于 `--server-id`，不符即停。
+
+凭据只按名从环境取 `PASEO_PASSWORD`，仅在通过上述版本与入口校验后，才作为连接参数交给已核 loopback 目标的官方 SDK；子进程环境由零重建、仅含 `PATH` 与该变量，不继承父环境，值不进 argv；请求经 stdin 传给桥接进程。输出为一行 JSON，只含 ID、状态、时间、公开枚举和计数，不回显报告正文、证据、配置、连接或 SDK 错误原文。
+
+退出码：`0` 成功且已核实、`1` 输入不合法、`2` 环境（CLI/SDK/Node/方法白名单）不合格、`3` 需认证或认证失败、`4` daemon 身份不符、`5` 写入后回读不符或不明。回退：删除该工具与测试、`tests/test_paths.py` 与 `tests/run-tests.sh` 的登记行即可，不影响其它入口。
+
+专项：`sh tests/run-tests.sh case test-paseo-observatory.py`（离线合成夹具，默认不进 full）。实际 daemon 读写仍须按当次授权在现场验收，工具通过不代表观测台条目已核。
+
 ## Minis 本端只读验收
 
 `tools/minis-verify.py` 将所选 Minis受管对象与指定提交比较；只读，不采集配置、不联网、不修复或 chmod。

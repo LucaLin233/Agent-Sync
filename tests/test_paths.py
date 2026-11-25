@@ -20,6 +20,8 @@ PATHS_RULES = (
      ('case', 'test-auth-call.py'), '固定认证读取 → auth'),
     (('tools/cchp-session-reuse.py',),
      ('case', 'cchp-session-reuse.py'), 'CCHP 会话复用工具或自检 → cchp'),
+    (('tools/paseo-observatory.py', 'tests/test-paseo-observatory.py'),
+     ('case', 'test-paseo-observatory.py'), '观测台窄入口工具或测试 → observatory'),
     (('tools/check-rules.py', 'tools/sync-targets.json',
       'tests/test-check-rules.sh'),
      ('group', 'gate'), '结构守卫或边登记 → gate'),
@@ -53,6 +55,8 @@ PATHS_RULES = (
      ('group', 'minis-verify'), '运行器、选路表或 CI 测试 workflow → minis-verify 消费者'),
     (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
      ('group', 'cchp'), '运行器、选路表或 CI 测试 workflow → cchp 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('case', 'test-paseo-observatory.py'), '运行器、选路表或 CI 测试 workflow → observatory 消费者'),
     # 拆出的运行器行为回归与按需包内校验入口：各自只由自身、运行器/选路表/workflow 变更命中。
     (('tests/test-runner.sh',),
      ('case', 'test-runner.sh'), '运行器、信号与选路回归 → runner'),

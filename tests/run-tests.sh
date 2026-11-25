@@ -16,6 +16,7 @@
 #   宿主安装器、目标登记与入口配置 → host
 #   固定认证读取 → auth
 #   CCHP 会话复用工具或自检 → cchp
+#   观测台窄入口工具或测试 → observatory
 #   结构守卫或边登记 → gate
 #   正文契约及既有用例 → body
 #   Surge 包内文件、登记或包态测试 → surge 包态
@@ -29,6 +30,7 @@
 #   运行器、选路表或 CI 测试 workflow → identity 消费者
 #   运行器、选路表或 CI 测试 workflow → minis-verify 消费者
 #   运行器、选路表或 CI 测试 workflow → cchp 消费者
+#   运行器、选路表或 CI 测试 workflow → observatory 消费者
 #   运行器、信号与选路回归 → runner
 #   按需包内校验（结构守卫＋技能包校验）与运行器变更 → 包内校验
 #   运行器、选路表或 CI 测试 workflow → runner 消费者
@@ -48,6 +50,7 @@ esac
 CASES='
 test-auth-call.py|auth|cd tests && python3 -B -m unittest -v test-auth-call|0
 cchp-session-reuse.py|cchp|python3 -B tools/cchp-session-reuse.py --self-test|0
+test-paseo-observatory.py|observatory|cd tests && python3 -B -m unittest -v test-paseo-observatory|0
 check-rules.py|smoke|python3 -B tools/check-rules.py|1
 test-check-rules.sh|gate|sh tests/test-check-rules.sh|1
 test-runner.sh|runner|sh tests/test-runner.sh|1
