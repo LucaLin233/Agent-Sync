@@ -1,5 +1,6 @@
 import {
   type AgentRef,
+  type PluginButtonContentProps,
   type PluginWorkspacePanelProps,
   useSubscription,
   useAgent,
@@ -389,8 +390,10 @@ function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRev
   );
 }
 
-function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspacePanelProps) {
-  const compact = layout.compact;
+type WorkspaceMetricsProps = Pick<PluginWorkspacePanelProps, "workspaceId" | "host" | "layout" | "theme">;
+
+function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: WorkspaceMetricsProps & { sheet?: boolean }) {
+  const compact = sheet || layout.compact;
   const workspaceTitle = useWorkspace(workspaceId, (workspace) => workspace.title);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const refs = useAgents({
@@ -692,11 +695,8 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
     </Card>
   );
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.surface0 }}
-      contentContainerStyle={{ paddingHorizontal: compact ? 14 : 32, paddingTop: compact ? 16 : 24, paddingBottom: compact ? 24 : 32, gap: compact ? 14 : 20 }}
-    >
+  const content = (
+    <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: compact ? 10 : 13 }}>
         <View
           style={{
@@ -776,10 +776,26 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme }: PluginWorkspaceP
           ))}
         </View>
       </View>
+    </>
+  );
+
+  // Paseo's sheet already scrolls the content. A nested ScrollView can hide lower sections.
+  if (sheet) return <View style={{ gap: 14 }}>{content}</View>;
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.surface0 }}
+      contentContainerStyle={{ paddingHorizontal: compact ? 14 : 32, paddingTop: compact ? 16 : 24, paddingBottom: compact ? 24 : 32, gap: compact ? 14 : 20 }}
+    >
+      {content}
     </ScrollView>
   );
 }
 
 export function MetricsPanel(props: PluginWorkspacePanelProps) {
   return <WorkspaceMetrics key={JSON.stringify([props.host.id, props.workspaceId])} {...props} />;
+}
+
+export function MetricsSheet(props: PluginButtonContentProps) {
+  return <WorkspaceMetrics key={JSON.stringify([props.host.id, props.workspaceId])} {...props} sheet />;
 }
