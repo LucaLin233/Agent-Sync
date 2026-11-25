@@ -1,83 +1,64 @@
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useSettings } from "@getpaseo/plugin/client";
-import { SettingsCard, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
-import { Pressable, Text, View } from "react-native";
+import { SettingsAction, SettingsCard, SettingsRow, SettingsSection, SettingsSelect, SettingsSwitch } from "@getpaseo/plugin/client/ui";
 import { INTERVAL_OPTIONS, monitorSettings, parseInterval } from "../shared/settings.ts";
 
 /**
  * Settings → Plugins → 宿主机资源. Values live in the selected daemon's
  * host-scoped document, so every client connected to that daemon sees the same
  * cadence and footer switch.
+ *
+ * Everything is built from the native settings primitives: `SettingsSection`
+ * renders the heading, `SettingsCard` gives each child the standard row
+ * padding/border, and `SettingsSelect`/`SettingsSwitch`/`SettingsAction` keep
+ * the label on the left and the control on the right. Hand-built rows inside a
+ * card lose that padding, which is what pushed the previous copy to the edge.
  */
-export function SettingsScreen({ theme }: PluginSurfaceProps) {
-  const colors = theme.colors;
+export function SettingsScreen(_props: PluginSurfaceProps) {
   const state = useSettings(monitorSettings);
 
   if (state.status === "loading") {
     return (
-      <SettingsCard>
-        <Text style={{ color: colors.foregroundMuted, fontSize: 13 }}>正在读取此 daemon 的插件设置…</Text>
-      </SettingsCard>
+      <SettingsSection title="宿主机资源">
+        <SettingsCard>
+          <SettingsRow label="读取设置…" hint="正在向当前 daemon 请求插件设置。" />
+        </SettingsCard>
+      </SettingsSection>
     );
   }
 
   if (state.status === "error" || state.status === "invalid") {
     return (
-      <SettingsCard>
-        <View style={{ gap: 8 }}>
-          <Text style={{ color: colors.statusDanger, fontSize: 13, fontWeight: "600" }}>无法读取宿主机资源设置</Text>
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            {state.status === "invalid"
-              ? "已保存的设置不符合当前版本格式，可重试读取或恢复默认值。"
-              : "请确认当前 daemon 连接正常后重试。"}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
+      <SettingsSection title="宿主机资源">
+        <SettingsCard>
+          <SettingsRow
+            label="无法读取设置"
+            hint={
+              state.status === "invalid"
+                ? "已保存的设置不符合当前版本格式，可重试读取。"
+                : "请确认当前 daemon 连接正常后重试。"
+            }
+            error={state.status === "invalid" ? "设置格式无效。" : "读取失败。"}
+          />
+          <SettingsAction
+            label="重新读取"
+            hint="重新向当前 daemon 请求设置。"
+            actionLabel="重试"
             onPress={() => void state.reload()}
-            style={({ pressed }) => ({
-              alignSelf: "flex-start",
-              paddingHorizontal: 10,
-              paddingVertical: 6,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: colors.border,
-              backgroundColor: pressed ? colors.surface2 : colors.surface1,
-            })}
-          >
-            <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>重试</Text>
-          </Pressable>
-        </View>
-      </SettingsCard>
+          />
+        </SettingsCard>
+      </SettingsSection>
     );
   }
 
   const values = state.values;
-  const failure = state.saveError ? "设置未保存，请重试。" : null;
 
   return (
-    <View style={{ gap: 12 }}>
-      <SettingsSection
-        title="作用范围"
-        info={
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-            调整为当前 daemon 安装（host）的设置，影响所有连接该 daemon 的客户端；其他主机各有自己的设置。
-          </Text>
-        }
-      >
-        <SettingsCard>
-          <View style={{ gap: 4 }}>
-            <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>宿主机资源</Text>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-              数据由 daemon 读取所在主机的 CPU、内存与磁盘，设置只影响采样节奏和底部一行，不改动主机配置。
-            </Text>
-          </View>
-        </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection title="采样">
+    <SettingsSection title="宿主机资源">
+      <SettingsCard>
         <SettingsSelect
           label="采样间隔"
-          hint="CPU、内存与网速的刷新节拍；磁盘仍约 30 秒刷新一次。切换后立即生效，无需重载插件。"
+          hint="仅作用于当前 daemon 安装，连接它的客户端共用；磁盘仍约 30 秒刷新一次。"
           value={String(values.intervalMs)}
           options={INTERVAL_OPTIONS}
           disabled={state.saving}
@@ -87,20 +68,18 @@ export function SettingsScreen({ theme }: PluginSurfaceProps) {
         />
         <SettingsSwitch
           label="在底栏显示网速"
-          hint="关闭只影响侧栏底部一行；详情中的下行、上行与曲线仍然显示。侧栏太窄时也会自动收起。"
+          hint="关闭只影响侧栏底部一行；详情与曲线仍显示，侧栏过窄时也会自动收起。"
           value={values.showNetworkInFooter}
           disabled={state.saving}
           onValueChange={(next) => {
             void state.save({ ...values, showNetworkInFooter: next }, state.revision);
           }}
         />
-      </SettingsSection>
-
-      {state.saving ? (
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>正在保存…</Text>
-      ) : failure ? (
-        <Text style={{ color: colors.statusDanger, fontSize: 12 }}>{failure}</Text>
-      ) : null}
-    </View>
+        {state.saving ? <SettingsRow label="正在保存…" hint="等待当前 daemon 确认新设置。" /> : null}
+        {state.saveError ? (
+          <SettingsRow label="设置未保存" error="更改尚未作用于当前 daemon，请重试。" />
+        ) : null}
+      </SettingsCard>
+    </SettingsSection>
   );
 }

@@ -198,7 +198,9 @@ async function tick(): Promise<HostResources | null> {
     const { withinCadence, windowMs: elapsed } = deltaWindow(previous?.atMono ?? null, nowMono, maxDeltaMs());
     const comparable = withinCadence && previous !== null && cpu !== null && previous.source === cpu.source;
     const hostTicks = comparable && previous !== null ? cpu.times.total - previous.times.total : 0;
-    const windowMs = comparable ? elapsed : 0;
+    // The RPC contract types these windows as whole milliseconds; the
+    // monotonic delta itself is fractional.
+    const windowMs = comparable ? Math.round(elapsed) : 0;
     const memoryUsedBytes = memory.availableBytes === null ? null : Math.max(0, memory.totalBytes - memory.availableBytes);
     // Root disk comes from the same 30 s pass; it is not re-read every 2 s.
     const diskUse = disks.root ? diskUsage(disks.root) : null;

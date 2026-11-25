@@ -52,20 +52,28 @@ function useSample(hostId: string, intervalMs: number) {
   useEffect(() => {
     if (!awake) return;
     let cancelled = false;
+    let reportedFailure = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const run = async () => {
       try {
         const value = await sample({});
         if (cancelled || !mounted.current) return;
+        reportedFailure = false;
         const age = Date.now() - Date.parse(value.sampledAt);
         // Same three-interval tolerance the daemon uses to drop a stale payload.
         const old = Number.isFinite(age) && age > intervalMs * 3;
         setState({ hostId, value });
         setStatus(old ? "stale" : "live");
         setFailing(old);
-      } catch {
+      } catch (error) {
         if (cancelled || !mounted.current) return;
+        // One line per failure streak, never per poll: enough to tell a schema
+        // rejection from a transport drop without leaking payloads or hosts.
+        if (!reportedFailure) {
+          reportedFailure = true;
+          console.warn("[daemon-monitor] host-resources.sample failed:", error instanceof Error ? error.name : "unknown");
+        }
         setFailing(true);
         setStatus("failed");
       } finally {
