@@ -34,6 +34,12 @@ import {
 } from "../shared/session-naming.ts";
 import { planWorkspaceTitleSeed, seededWorkspaceTitle, type WorkspaceMetadata, type WorkspaceSeedPlan } from "./seed.ts";
 import {
+  isRecordedFallback,
+  pickFirstTaskOwner,
+  planWorkspaceRepair,
+  planWorkspaceRetry,
+} from "../shared/workspace-repair.ts";
+import {
   regenerateWorkspaceTitle as runWorkspaceRegeneration,
   RPC_DEADLINE_MS,
   type RegenerateResult,
@@ -42,6 +48,17 @@ import {
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state.ts";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
+/**
+ * The workspace fallback retry runs inside the same turn hook as session
+ * naming. Session naming may already have spent most of the 30 s hook budget,
+ * so the retry gets its own short, fixed budget: model + write + verify.
+ */
+const WORKSPACE_RETRY_BUDGET_MS = 8_000;
+const WORKSPACE_RETRY_MODEL_MS = 6_000;
+const WORKSPACE_RETRY_WRITE_RESERVE_MS = 1_500;
+/** Passive repair sweep bounds: a reconcile tick must stay short. */
+const SWEEP_BUDGET_MS = 20_000;
+const SWEEP_WORKSPACE_CAP = 5;
 /**
  * A session gets the first naming attempt after its first substantive answer
  * and at most one more on a later completed turn. Exhausting both stops.
@@ -94,6 +111,28 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/**
+ * The sessions that can own a workspace's first task, judged from list
+ * metadata only. Archived sessions stay in: an archived session may have owned
+ * the first task, and dropping it would hand ownership to a later one. Only
+ * background sessions, sub-agents and this plugin's own helpers are never user
+ * tasks.
+ */
+function ownershipCandidates<T extends {
+  id: string;
+  workspaceId?: string;
+  cwd: string;
+  background?: boolean;
+  labels?: Readonly<Record<string, string>>;
+}>(agents: readonly T[], workspaceId: string): T[] {
+  return agents.filter((candidate) =>
+    candidate.workspaceId === workspaceId &&
+    !candidate.background &&
+    !isSubagent(candidate) &&
+    !isHelperAgent(candidate) &&
+    !isInsideDirectory(candidate.cwd, helperDirectory()));
+}
+
 function isSubagent(agent: { labels?: Readonly<Record<string, string>> }): boolean {
   const parent = agent.labels?.["paseo.parent-agent-id"];
   return typeof parent === "string" && parent.length > 0;
@@ -108,6 +147,8 @@ export class ChineseTitlesEngine {
   private reconciling = false;
   private readonly processingProjects = new Set<string>();
   private readonly processingWorkspaces = new Set<string>();
+  /** Workspaces already swept for a stuck placeholder in this process. */
+  private readonly repairScanned = new Set<string>();
   private readonly processingAgents = new Set<string>();
   private readonly bootstrapWorkspaceIds = new Set<string>();
   private bootstrapSucceeded = false;
@@ -419,6 +460,8 @@ export class ChineseTitlesEngine {
         if (before === "pending" && this.state.agents[agent.id]?.status !== "pending") agents += 1;
       }
 
+      if (settings.autoNameWorkspaces) await this.repairPlaceholderWorkspaces(paseo, settings, allAgents);
+
       await saveState(this.state);
       return { ok: true, projects, workspaces, agents };
     } catch {
@@ -582,11 +625,17 @@ export class ChineseTitlesEngine {
     if (prior && prior.status !== "pending" && prior.status !== "error" &&
       !isUnrepairedLegacyEntry(prior)) {
       // Nothing left to name for this session. Only a workspace still waiting
-      // for its own first task can need this turn, and an unknown workspace
-      // (an older state file) falls through once to record it.
-      const workspacePending = prior.workspaceId !== undefined &&
-        this.state.workspaces[prior.workspaceId]?.status === "pending";
-      if (prior.workspaceId !== undefined && !workspacePending) return;
+      // for its own first task, or one stuck on our fallback while this session
+      // already holds a verified title, can need this turn. The cheap state
+      // check avoids extra reads on ordinary later turns; the live title and
+      // first-task ownership are verified again before any write.
+      const workspaceId = prior.workspaceId;
+      const workspacePending = workspaceId !== undefined &&
+        this.state.workspaces[workspaceId]?.status === "pending";
+      const repairable = workspaceId !== undefined &&
+        this.needsTurnRepair(this.state.workspaces[workspaceId]) &&
+        (prior.status === "done" || prior.status === "skipped");
+      if (workspaceId !== undefined && !workspacePending && !repairable) return;
     }
     // Claim before any await so two hooks cannot both pass the state check.
     this.processingAgents.add(agentId);
@@ -628,7 +677,18 @@ export class ChineseTitlesEngine {
 
       // A session is named only after a completed turn produced a real answer,
       // from the first question and that answer together.
+      const attemptsBeforeNaming = this.state.agents[agentId]?.attempts ?? 0;
       await this.nameSession(paseo, settings, agent, workspace, prompt, turnId, phase, completed);
+      // A session that now has a verified title can unstick a workspace whose
+      // own first-task naming ended on a fallback. Adoption is free. The
+      // fallback's model retry must not add a second model call to a hook that
+      // session naming already spent one in, so it waits for a later turn in
+      // that case (and is unaffected when session naming is disabled).
+      const sessionNamingSpentModel = (this.state.agents[agentId]?.attempts ?? 0) > attemptsBeforeNaming;
+      if (settings.autoNameWorkspaces) {
+        const allowModelRetry = phase === "after" && completed && !sessionNamingSpentModel;
+        await this.repairWorkspaceFromSession(paseo, settings, agent, prompt, turnId, allowModelRetry);
+      }
     } catch {
       if (this.state) {
         this.state.agents[agentId] = { ...this.state.agents[agentId], status: "error", at: now(), error: "internal_failed" };
@@ -896,6 +956,262 @@ export class ChineseTitlesEngine {
       };
       await saveState(this.state);
     }
+  }
+
+  /**
+   * Adopts a verified session title for a workspace that the plugin itself left
+   * on a fallback, but only when that session owns the workspace's first task
+   * and the workspace is still showing exactly the placeholder written. Every
+   * other case leaves the workspace alone; the panel's manual action remains
+   * the explicit way to name anything else.
+   */
+  private async repairWorkspaceFromSession(
+    paseo: PaseoApi,
+    settings: ChineseTitlesSettings,
+    agent: PaseoAgent,
+    /** This session's own first prompt, when its own hook supplied it. */
+    ownPrompt: { text: string; turnId: string | null; at: string } | null,
+    turnId: string | null,
+    allowModelRetry: boolean,
+  ): Promise<boolean> {
+    if (!this.state || !agent.workspaceId) return false;
+    const workspaceId = agent.workspaceId;
+    const workspaceState = this.state.workspaces[workspaceId];
+    if (!workspaceState || !this.adoptableFallback(workspaceState)) return false;
+    if (this.processingWorkspaces.has(workspaceId)) return false;
+    this.processingWorkspaces.add(workspaceId);
+    try {
+      const workspace = await paseo.workspaces.ref(workspaceId).refresh();
+      if (!workspace || workspace.background || workspace.archivingAt ||
+        isInsideDirectory(workspace.workspaceDirectory, helperDirectory())) return false;
+      // The same turn may have just renamed the session, so the caller's copy
+      // can still hold the provisional title. Read the live one.
+      const session = (await paseo.agents.ref(agent.id).refresh())?.agent;
+      if (!session || session.archivedAt || session.workspaceId !== workspaceId) return false;
+      // Cheap metadata pre-check: a session created after the fallback was
+      // recorded cannot own the task that produced it, so its later turns skip
+      // this path without listing the workspace's sessions at all.
+      const sessionCreatedAt = Date.parse(session.createdAt ?? "");
+      const fallbackAt = Date.parse(workspaceState.at);
+      if (Number.isFinite(sessionCreatedAt) && Number.isFinite(fallbackAt) && sessionCreatedAt > fallbackAt) return false;
+      // The title this run is allowed to replace, as confirmed by the first
+      // read. Everything below must still match it before any write.
+      const expectedTitle = workspace.title ?? null;
+      // Ownership comes from list metadata only: this path never reads another
+      // session's messages. A session created after the fallback was recorded
+      // cannot have owned the task that produced it, and an unprovable owner
+      // leaves the placeholder alone.
+      const owner = await this.firstTaskOwnerOf(paseo, workspaceId, workspaceState.at);
+      const isOwner = owner.kind === "owner" && owner.id === agent.id;
+      const firstTask = isOwner ? ownPrompt?.text ?? null : null;
+      const decision = planWorkspaceRepair({
+        workspaceState: this.state.workspaces[workspaceId],
+        liveTitle: workspace.title,
+        firstTask,
+        sessionTitle: session.title,
+        sessionState: this.state.agents[agent.id],
+        firstTaskOwner: isOwner,
+        idle: true,
+        maxChars: settings.titleMaxChars,
+      });
+      if (decision.kind !== "repair") {
+        // No verified session title to adopt. The fallback itself still gets
+        // its one model retry, but only from the session that owns the first
+        // task and only on a provably later completed turn: repeating the same
+        // failing call on the turn that just produced the fallback would only
+        // spend tokens. A later conversation can never re-title the workspace.
+        const laterTurn = turnId !== null && ownPrompt !== null && turnId !== ownPrompt.turnId;
+        if (allowModelRetry && isOwner && laterTurn && firstTask !== null && planWorkspaceRetry({
+          workspaceState: this.state.workspaces[workspaceId],
+          liveTitle: workspace.title,
+        }).kind === "retry") {
+          return await this.retryWorkspaceFallback(paseo, settings, workspace, firstTask);
+        }
+        return false;
+      }
+      // Ownership lookup (and the model retry path) reads the daemon more than
+      // once, so a manual rename can land in between. Re-read both objects
+      // immediately before the only write: the workspace must still exist, be
+      // writable in the same form, and still show exactly the placeholder this
+      // run confirmed; the donating session must still be live and unchanged.
+      const current = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
+      if (!current || current.background || current.archivingAt ||
+        isInsideDirectory(current.workspaceDirectory, helperDirectory())) return false;
+      if ((current.title ?? null) !== expectedTitle || expectedTitle !== workspaceState.title?.trim()) return false;
+      const liveSession = (await paseo.agents.ref(agent.id).refresh().catch(() => null))?.agent;
+      if (!liveSession || liveSession.archivedAt || liveSession.workspaceId !== workspaceId) return false;
+      if (liveSession.title?.trim() !== decision.title) return false;
+      const previous = expectedTitle;
+      try {
+        await paseo.workspaces.ref(workspaceId).setTitle(decision.title);
+      } catch {
+        // A failed write leaves the recorded fallback in place, so a later
+        // turn or process may try once more; nothing else is changed.
+        return false;
+      }
+      const verified = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
+      if (verified?.title !== decision.title) {
+        this.state.workspaces[workspaceId] = { status: "error", at: now(), error: "verification_failed", previousTitle: previous };
+        return false;
+      }
+      this.state.workspaces[workspaceId] = {
+        status: "done",
+        at: now(),
+        title: decision.title,
+        previousTitle: previous,
+        repairUsed: true,
+      };
+      await saveState(this.state);
+      return true;
+    } finally {
+      this.processingWorkspaces.delete(workspaceId);
+    }
+  }
+
+  /**
+   * The fallback's single model retry. It runs only from the first-task owner
+   * and only on a later completed turn, inside its own short budget, and writes
+   * nothing when the model has no usable title: the recorded fallback stays.
+   */
+  private async retryWorkspaceFallback(
+    paseo: PaseoApi,
+    settings: ChineseTitlesSettings,
+    workspace: PaseoWorkspace,
+    firstTask: string,
+  ): Promise<boolean> {
+    if (!this.state) return false;
+    const entry = this.state.workspaces[workspace.id];
+    if (!entry) return false;
+    // Spending the retry closes the turn path: later turns must not re-read
+    // this workspace's timelines on every prompt. A verified session title that
+    // appears later is still adopted by the reconcile sweep.
+    this.state.workspaces[workspace.id] = { ...entry, retryUsed: true };
+    await saveState(this.state);
+    const deadlineAt = Date.now() + WORKSPACE_RETRY_BUDGET_MS;
+    const generated = await generateTitle(paseo, settings, {
+      kind: "workspace",
+      prompt: firstTask,
+      projectName: workspace.projectDisplayName,
+      baseName: workspace.name,
+      projectId: workspace.projectId,
+      maxChars: settings.titleMaxChars,
+    }, {
+      timeoutMs: WORKSPACE_RETRY_MODEL_MS,
+      deadlineAt: deadlineAt - WORKSPACE_RETRY_WRITE_RESERVE_MS,
+    });
+    const current = await paseo.workspaces.ref(workspace.id).refresh().catch(() => null);
+    // A manual rename (or any other writer) during the model call wins.
+    if (!current || current.title !== entry.title) return false;
+    if (!generated.title || generated.errorCode) return false;
+    if (Date.now() >= deadlineAt - WORKSPACE_RETRY_WRITE_RESERVE_MS) return false;
+    const finalTitle = distinctWorkspaceTitle(generated.title, firstTask, settings.titleMaxChars);
+    try {
+      await paseo.workspaces.ref(workspace.id).setTitle(finalTitle);
+    } catch {
+      return false;
+    }
+    const verified = await paseo.workspaces.ref(workspace.id).refresh().catch(() => null);
+    if (verified?.title !== finalTitle) {
+      this.state.workspaces[workspace.id] = { ...entry, status: "error", at: now(), error: "verification_failed", retryUsed: true };
+      await saveState(this.state);
+      return false;
+    }
+    this.state.workspaces[workspace.id] = {
+      status: "done",
+      at: now(),
+      title: finalTitle,
+      previousTitle: entry.title ?? null,
+      retryUsed: true,
+    };
+    await saveState(this.state);
+    return true;
+  }
+
+  /**
+   * One bounded sweep for workspaces that were stuck before this process
+   * started. Without a hook for their old sessions nothing else would revisit
+   * them. Each workspace is attempted once per process; later sessions are
+   * handled by their own turn hook. The sweep has a deadline and a workspace
+   * cap so a passive reconcile can never turn into a long background scan.
+   */
+  private async repairPlaceholderWorkspaces(
+    paseo: PaseoApi,
+    settings: ChineseTitlesSettings,
+    allAgents: readonly PaseoAgent[],
+  ): Promise<void> {
+    if (!this.state) return;
+    const deadlineAt = Date.now() + SWEEP_BUDGET_MS;
+    let budget = SWEEP_WORKSPACE_CAP;
+    for (const [workspaceId, entry] of Object.entries(this.state.workspaces)) {
+      if (budget <= 0 || Date.now() >= deadlineAt) break;
+      if (!this.adoptableFallback(entry) || this.repairScanned.has(workspaceId)) continue;
+      const owners = ownershipCandidates(allAgents, workspaceId);
+      // Only the one session metadata proves to own the first task may donate,
+      // and only when this plugin already verified its title. No message text
+      // is read: the sweep has no session hook to supply a prompt.
+      const owner = pickFirstTaskOwner(
+        owners.map((candidate) => ({
+          id: candidate.id,
+          createdAt: candidate.createdAt,
+          lastUserMessageAt: candidate.lastUserMessageAt,
+        })),
+        entry.at,
+      );
+      // Nothing is settled while the owner has no verified title yet: naming
+      // may finish in a later tick. Deciding ownership costs no I/O because the
+      // agent list is already in hand, so an unknown owner is simply retried.
+      if (owner.kind !== "owner") continue;
+      const donor = owners.find((candidate) => candidate.id === owner.id);
+      const donorState = donor ? this.state.agents[donor.id] : undefined;
+      if (!donor || !donorState || donorState.status !== "done" || donorState.error ||
+        donorState.title?.trim() !== donor.title?.trim()) continue;
+      this.repairScanned.add(workspaceId);
+      budget -= 1;
+      if (Date.now() >= deadlineAt) break;
+      // The sweep never spends a model call: it only adopts an existing
+      // verified session title, and it has no prompt to compare it against.
+      await this.repairWorkspaceFromSession(paseo, settings, donor, null, null, false);
+    }
+  }
+
+  /** A workspace still showing the fallback this plugin wrote, not yet adopted. */
+  private adoptableFallback(entry: ChineseTitlesState["workspaces"][string]): boolean {
+    return isRecordedFallback(entry) && entry.repairUsed !== true;
+  }
+
+  /**
+   * Whether an ordinary turn should revisit this workspace at all. A spent
+   * model retry closes the turn path; the cheaper reconcile sweep still adopts
+   * a verified session title that appears afterwards.
+   */
+  private needsTurnRepair(entry: ChineseTitlesState["workspaces"][string]): boolean {
+    return this.adoptableFallback(entry) && entry.retryUsed !== true;
+  }
+
+  /**
+   * The workspace's first-task owner, from agent list metadata only.
+   *
+   * The repair path must not read another session's messages, so it cannot use
+   * the timeline-based `pickWorkspaceFirstTask`. Only metadata decides: the
+   * session must have received a user message, it must have existed when the
+   * fallback was recorded, and it must be the only such session. Two possible
+   * owners cannot be separated without reading text, so the workspace is left
+   * alone rather than attributed to a guess.
+   */
+  private async firstTaskOwnerOf(
+    paseo: PaseoApi,
+    workspaceId: string,
+    fallbackRecordedAt: string,
+  ): Promise<ReturnType<typeof pickFirstTaskOwner>> {
+    const agents = ownershipCandidates(await this.listAgents(paseo), workspaceId);
+    return pickFirstTaskOwner(
+      agents.map((candidate) => ({
+        id: candidate.id,
+        createdAt: candidate.createdAt,
+        lastUserMessageAt: candidate.lastUserMessageAt,
+      })),
+      fallbackRecordedAt,
+    );
   }
 
   private async pickWorkspaceFirstTask(
