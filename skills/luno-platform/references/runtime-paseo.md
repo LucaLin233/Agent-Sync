@@ -19,6 +19,11 @@ Paseo 的查询、管理、配置或恢复，先按目标 daemon 和预期结果
 - **事实优先与生效判定。**文档、帮助输出和实际状态不一致时，以现场已核证据为准，并按证据描述行为，不把个例命令当作通用能力。证据按层级表述：配置或登记回读只能报已配置或已登记，获准探测成功只能报该入口可用，只有目标会话的对应调用记录才可报该会话实际使用；按当次授权覆盖的阶段报对象、确定版本、结果和证据，未验阶段明确写未验证。配置或异步操作要区分受理回执、明确的生效结果和等待超时。返回信息未能确定实际结果时，回读目标状态，按目标当前的托管方式和实际运行状态判断是已落盘、已热加载、待重启还是任务仍在途，重试与继续等待按 `luno-core` 的规则处理。
 - **观测台关项证据。**判断观测台（Agent Observatory）报告里的问题能否关闭时，按报告的 jobId 和报告内 finding id 定位（即 `observatory.insights.report`、`observatory.insights.feedback` 的输入字段）；界面没显示 ID 时，记下能唯一定位该报告与发现的 agent、生成时间和标题，不为此多设关项门禁。关项说明要给足以达到原问题关闭条件的可核证据和实际结果，证据可以是原始时间线、仓库、现场回读或实测；只写「已处理」或指向另一份总结不足以关项。改进建议按该建议记录单独验收。原始发现按各自的报告、发现和原关闭条件单独核对。改进建议完成、其他报告的状态和仓库合并，都不能代替原始发现的实际验收。遇同类复发，仍按对应原关闭条件和现场证据判断。证据沿用本分支的分层，配置回读不冒充实际执行，未测阶段写未验证。改进建议和原始发现的反馈都只在既有授权内写入，分别写进该建议自身的反馈入口和报告自带的 finding 反馈，并逐项回读。不另建账本、流程产物或普通状态关口。
 
+- **观测台插件 RPC。**当现有官方入口无法完成观测台反馈或回读时，可在当次授权覆盖的本地环境使用已安装的官方 `@getpaseo/client`。从现场确认的 Paseo CLI 实际入口解析其 SDK 依赖，核对 daemon、SDK 与 Agent Observatory 的版本及插件接口。以下接口于 2026-11-25 核对，适用于 Paseo 和 SDK v0.17.4、Agent Observatory v2.20.0，版本变化时重核。由获准的可信进程用 `@getpaseo/client/node` 的 `createHostClient` 创建指向已核目标的客户端，调用 `client.connect()` 后确认 `client.getLastServerInfoMessage()?.serverId` 与目标一致，再用 `client.invokePluginRpc("agent-observatory", method, input)`。凭据只用当次明确授权且已注入的指定变量，禁止从配置或保存态取用。遇到 `Password required` 且缺少获准凭据时，暂停依赖调用并报告。
+  - 按 agent 定位报告时调用 `observatory.insights.list`，传 `{ agentId }`，从 `jobs[].id` 取报告 `jobId`。用 `observatory.insights.report` 传 `{ jobId }`，在 `job.report.findings` 定位 `findingId`。按既有关闭条件和实际证据确定状态，已有写入授权时，用 `observatory.insights.feedback` 传 `{ jobId, findingId, status }`，状态取值为 `open`、`resolved`、`false_positive`。在同一 daemon 用原 `jobId` 重查报告，逐项核对 `job.findingFeedback[findingId].status`。
+  - 用 `observatory.insights.suggestions` 传建议自身的 `{ jobId }`，在 `job.report.actions` 定位 `actionId`。获准写入时，用 `observatory.insights.action-feedback` 传 `{ jobId, actionId, status }`，状态取值为 `open`、`adopted`、`done`、`dismissed`。在同一 daemon 用原建议 `jobId` 重查建议，逐项核对 `job.feedback[actionId].status`。
+  - 两个反馈接口只接收任务 ID、条目 ID 和状态。在可信进程内只投影所需的非秘密字段。关项证据、实际结果及逐项回读覆盖情况沿用本分支的口径向用户报告。写入回执不明时先回读原条目，再按总控规则处理。
+
 入口与语义参考：[文档索引](https://paseo.sh/llms.txt) · [MCP](https://paseo.sh/docs/mcp) · [CLI](https://paseo.sh/docs/cli.md)。
 <!-- END paseo-operations -->
 
