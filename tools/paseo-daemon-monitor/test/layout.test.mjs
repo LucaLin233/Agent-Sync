@@ -7,6 +7,8 @@ import {
   FOOTER_BORDER_X,
   FOOTER_COL_PAD_X,
   FOOTER_ICON_GAP,
+  FOOTER_COMPACT_RATE_FALLBACK,
+  FOOTER_COMPACT_TAIL_PAD,
   FOOTER_ICON_SIZE,
   FOOTER_METER_MIN,
   FOOTER_METER_MIN_WIDTH,
@@ -99,10 +101,11 @@ test("narrow rows keep the icons and the full percentages, meters and tail hidde
   }
   // 200 DP is below the 248 DP meter cutoff and inside the stacked icon tier.
   assert.equal(chooseFooterPlan({ ...base, width: 200, textWidths: widest }).mode, "stacked");
-  // The host's compact layout retracts meters even when the width would fit.
+  // The host's compact layout no longer bans meters by itself: leftover space
+  // in a phone row is used, and the compact tier still needs 14 DP of leftover.
   const compact = chooseFooterPlan({ ...base, width: 900, compact: true, textWidths: widest });
-  assert.equal(compact.showMeters, false);
-  assert.equal(compact.meterWidth, 0);
+  assert.equal(compact.showMeters, true);
+  assert.ok(compact.meterWidth >= FOOTER_METER_MIN);
   assert.equal(compact.showIcons, true);
   // Past the design's 248 DP container threshold the meter comes back even
   // though the track is only a dozen DP long; it then grows with the row.
@@ -145,4 +148,127 @@ test("the layout derives column width consistently for callers", () => {
   }
   assert.ok(FOOTER_METER_MIN_WIDTH < FOOTER_TIME_MIN_WIDTH);
   assert.equal(chooseFooterPlan({ ...base, width: FOOTER_METER_MIN_WIDTH - 1, textWidths: widest }).showMeters, false);
+});
+
+// --- Compact (phone) four-zone footer ---------------------------------------
+// No live measurement is used for the budget; it comes from the fixed label
+// size and the font scale, so a changing reading cannot re-flow the row.
+const compactBase = { networkAvailable: true, showNetworkSetting: true, compact: true };
+const RATE_TAIL = FOOTER_COMPACT_RATE_FALLBACK + FOOTER_COMPACT_TAIL_PAD; // reserved rate + separator
+
+test("phone widths 350/368/390/424 show both rates and keep icon + full number", () => {
+  for (const width of [350, 365, 368, 390, 400, 424]) {
+    const plan = chooseFooterPlan({ ...compactBase, width, textWidths: widest });
+    assert.equal(plan.showTail, true, `tail at ${width}`);
+    assert.equal(plan.tail, "network", `rates at ${width}`);
+    assert.equal(plan.tailStacked, true, `rates stack on two lines at ${width}`);
+    assert.equal(plan.tailWidth, RATE_TAIL, `tail budget at ${width}`);
+    assert.equal(plan.showIcons, true, `icons at ${width}`);
+    assert.equal(plan.mode, "row", `one line at ${width}`);
+    // Space between chrome, the tail and the three equal columns.
+    const expected = (width - FOOTER_PAD_X * 2 - FOOTER_BORDER_X - RATE_TAIL) / FOOTER_SLOTS;
+    assert.ok(Math.abs(plan.columnWidth - expected) < 1e-9, `columns at ${width}`);
+    assert.ok(plan.meterWidth >= FOOTER_METER_MIN, `meter at ${width}`);
+  }
+});
+
+test("the phone footer drops the rate group before it would clip a percentage", () => {
+  // Largest width that still fits icon + number in every column with the tail.
+  const needs = FOOTER_ICON_SIZE + FOOTER_ICON_GAP + 40;
+  const minWithTail = FOOTER_PAD_X * 2 + FOOTER_BORDER_X + RATE_TAIL + FOOTER_SLOTS * (needs + FOOTER_COL_PAD_X * 2);
+  const at = chooseFooterPlan({ ...compactBase, width: minWithTail + 0.5, textWidths: widest });
+  const below = chooseFooterPlan({ ...compactBase, width: minWithTail - 0.5, textWidths: widest });
+  assert.equal(at.tail, "network");
+  assert.equal(at.mode, "row");
+  assert.equal(below.tail, "none");
+  assert.equal(below.tailWidth, 0);
+  assert.equal(below.showTail, false);
+  // With the tail gone the space goes back to the three columns, never an
+  // empty reserve: columns are strictly wider and the numbers still fit.
+  assert.ok(below.columnWidth > at.columnWidth);
+  assert.equal(below.mode, "row");
+});
+
+test("phone: switch off or no sample returns the tail space, and never a clock", () => {
+  const on = chooseFooterPlan({ ...compactBase, width: 400, textWidths: widest });
+  const off = chooseFooterPlan({ ...compactBase, width: 400, showNetworkSetting: false, textWidths: widest });
+  const none = chooseFooterPlan({ ...compactBase, width: 400, networkAvailable: false, textWidths: widest });
+  for (const plan of [off, none]) {
+    assert.equal(plan.tail, "none");
+    assert.equal(plan.tailWidth, 0);
+    assert.equal(plan.showTail, false);
+    assert.ok(plan.columnWidth > on.columnWidth);
+    // A phone never shows the sample time in the footer; it lives in detail.
+    assert.notEqual(plan.tail, "time");
+  }
+});
+
+test("a large font scale widens the phone rate budget and can drop it", () => {
+  const fs1 = chooseFooterPlan({ ...compactBase, width: 400, textWidths: widest, fontScale: 1 });
+  const fs2 = chooseFooterPlan({ ...compactBase, width: 400, textWidths: widest, fontScale: 2 });
+  assert.equal(fs1.tail, "network");
+  assert.equal(fs1.tailWidth, FOOTER_COMPACT_RATE_FALLBACK + FOOTER_COMPACT_TAIL_PAD);
+  assert.ok(fs2.tailWidth >= fs1.tailWidth);
+  assert.equal(fs2.tailWidth, FOOTER_COMPACT_RATE_FALLBACK * 2 + FOOTER_COMPACT_TAIL_PAD);
+  // The budget depends only on the font scale, never on the digits drawn, so a
+  // reading changing from `9.1K` to `2.4M` (or back) cannot move the columns.
+  const again = chooseFooterPlan({ ...compactBase, width: 400, textWidths: widest, fontScale: 1 });
+  assert.equal(again.tailWidth, fs1.tailWidth);
+  assert.equal(again.columnWidth, fs1.columnWidth);
+});
+
+test("desktop keeps its anchors and never stacks rates", () => {
+  const at480 = chooseFooterPlan({ ...base, width: 480, textWidths: widest });
+  assert.equal(at480.tail, "network");
+  assert.equal(at480.tailStacked, false);
+  assert.equal(at480.tailWidth, 112);
+  const at416 = chooseFooterPlan({ ...base, width: 416, textWidths: widest });
+  assert.equal(at416.tail, "time");
+  assert.equal(at416.tailStacked, false);
+});
+
+test("the phone rate group's exact minimum width is reported and monotone", () => {
+  // Smallest outer width where the three groups still fit icon + full number
+  // next to the two-line rate group, at the widest 40 DP label and 36 DP rate.
+  const needs = FOOTER_ICON_SIZE + FOOTER_ICON_GAP + 40;
+  const min = FOOTER_PAD_X * 2 + FOOTER_BORDER_X + RATE_TAIL + FOOTER_SLOTS * (needs + FOOTER_COL_PAD_X * 2);
+  assert.ok(min < 350, `min ${min} must sit below the smallest phone width`);
+  const atMin = chooseFooterPlan({ ...compactBase, width: min, textWidths: widest });
+  assert.equal(atMin.tail, "network");
+  assert.equal(atMin.mode, "row");
+  assert.equal(atMin.showMeters, false); // exactly enough for numbers, no meter
+  assert.equal(chooseFooterPlan({ ...compactBase, width: min - 1, textWidths: widest }).tail, "none");
+  // At 350 DP there is real meter room left over.
+  assert.ok(chooseFooterPlan({ ...compactBase, width: 350, textWidths: widest }).meterWidth >= FOOTER_METER_MIN);
+});
+
+test("desktop keeps the clock when two inline rates cannot fit the font-scaled budget", () => {
+  // 2 x 56 DP labels + gap + padding needs 127 DP; the 112 DP cap cannot hold it.
+  const big = chooseFooterPlan({ width: 900, textWidths: widest, networkAvailable: true, showNetworkSetting: true, compact: false, fontScale: 1.5 });
+  assert.equal(big.tailWidth, FOOTER_TAIL_MAX);
+  assert.equal(big.tail, "time");
+  // Normal scale fits with room to spare.
+  const normal = chooseFooterPlan({ width: 900, textWidths: widest, networkAvailable: true, showNetworkSetting: true, compact: false, fontScale: 1 });
+  assert.equal(normal.tail, "network");
+  assert.equal(normal.tailStacked, false);
+});
+
+test("phone at an extreme font scale drops the rates instead of clipping numbers", () => {
+  const bigLabels = [80, 80, 80];
+  const plan = chooseFooterPlan({ width: 350, textWidths: bigLabels, networkAvailable: true, showNetworkSetting: true, compact: true, fontScale: 2 });
+  assert.equal(plan.tail, "none");
+  assert.equal(plan.tailWidth, 0);
+  assert.equal(plan.showIcons, true);
+  assert.notEqual(plan.mode, "content");
+  // The space went back to the columns rather than staying reserved.
+  assert.ok(plan.columnWidth > (350 - FOOTER_PAD_X * 2 - FOOTER_BORDER_X) / FOOTER_SLOTS - 1e-9);
+});
+
+test("phone: a moderately larger font still shows both rates at 390 DP", () => {
+  const labels = [52, 52, 52]; // 1.3x of the 40 DP reference label
+  const plan = chooseFooterPlan({ width: 390, textWidths: labels, networkAvailable: true, showNetworkSetting: true, compact: true, fontScale: 1.3 });
+  assert.equal(plan.tail, "network");
+  assert.equal(plan.mode, "row");
+  assert.equal(plan.showIcons, true);
+  assert.equal(plan.tailWidth, Math.ceil(40 * 1.3) + FOOTER_COMPACT_TAIL_PAD);
 });

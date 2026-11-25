@@ -17,6 +17,13 @@ test("footer rates use short binary units and the detail keeps the unit", () => 
   assert.equal(shortRate(1024), "1.0K");
   assert.equal(shortRate(640 * 1024), "640K");
   assert.equal(shortRate(2.4 * 1024 * 1024), "2.4M");
+  assert.equal(shortRate(50 * 1024 ** 3), "50G");
+  assert.equal(shortRate(2 * 1024 ** 3), "2G");
+  // Even an absurd rate cannot stretch the footer label past a fixed bound.
+  assert.equal(shortRate(1e15), "9990G");
+  assert.equal(shortRate(1024 ** 2), "1.0M");
+  // The widest short label stays bounded: arrow + 5 characters.
+  assert.ok(shortRate(9.9 * 1024 ** 3).length <= 5);
   assert.equal(rateText(640 * 1024), "640 KiB/s");
   assert.equal(rateText(2.4 * 1024 * 1024), "2.4 MiB/s");
 });

@@ -202,7 +202,10 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
   const { fontScale } = useWindowDimensions();
   const [width, setWidth] = useState<number | null>(null);
   const [textWidths, setTextWidths] = useState<(number | null)[]>([null, null, null]);
-  const networkAvailable = Boolean(value?.network && (value.network.rxBytesPerSecond !== null || value.network.txBytesPerSecond !== null));
+  // A real 0 B/s is a measurement, not a missing sample: only null disables it.
+  const networkAvailable = Boolean(
+    value?.network && (value.network.rxBytesPerSecond !== null || value.network.txBytesPerSecond !== null),
+  );
 
   // Before the first measurement, reserve for the widest plausible label at the
   // user's own font scale so the tier choice is not optimistic.
@@ -210,12 +213,13 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
   const plan = chooseFooterPlan({
     width,
     textWidths: textWidths.map((value) => value ?? fallbackText),
-    // At very large text sizes the two rates cannot share the tail track; fall
-    // back to the clock there rather than clipping them. The label still
-    // carries both rates for assistive tech.
-    networkAvailable: networkAvailable && fontScale <= 1.4,
+    // The plan decides from the measured percentages plus a font-scaled rate
+    // budget: if the fourth group would squeeze a percentage out of one line it
+    // is not drawn at all, and its space returns to the three columns.
+    networkAvailable,
     showNetworkSetting: networkEnabled,
     compact: layout.compact,
+    fontScale,
   });
 
   const recordTextWidth = (index: number, measured: number) => {
@@ -329,11 +333,24 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
           }}
         >
           {plan.tail === "network" ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"] }}>
+            <View
+              style={{
+                flexDirection: plan.tailStacked ? "column" : "row",
+                alignItems: plan.tailStacked ? "flex-end" : "center",
+                justifyContent: "flex-end",
+                gap: plan.tailStacked ? 1 : 6,
+              }}
+            >
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"], flexShrink: 0 }}
+              >
                 ↓{shortRate(value?.network?.rxBytesPerSecond)}
               </Text>
-              <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"] }}>
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"], flexShrink: 0 }}
+              >
                 ↑{shortRate(value?.network?.txBytesPerSecond)}
               </Text>
             </View>

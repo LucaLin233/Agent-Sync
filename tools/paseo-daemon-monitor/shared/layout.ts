@@ -38,6 +38,18 @@ export const FOOTER_NETWORK_MIN_WIDTH = 480;
 export const FOOTER_METER_MIN_WIDTH = 248;
 /** Minimum meter length worth drawing; the number always comes first. */
 export const FOOTER_METER_MIN = 14;
+/**
+ * Compact (phone) footer: the three resource groups share the row with a
+ * fourth right-hand group holding ↓ and ↑ on two stacked lines. Its width is
+ * the widest rate label plus this separator/padding allowance. There is no
+ * 368/416/480 anchor on this layout; the tail exists only while a rate is
+ * actually available and the switch is on, so its space returns to the three
+ * columns otherwise.
+ */
+export const FOOTER_COMPACT_RATE_FALLBACK = 40;
+export const FOOTER_COMPACT_TAIL_PAD = 9;
+/** Desktop keeps the clock above this font scale: two inline rates no longer fit. */
+export const FOOTER_NETWORK_MAX_FONT_SCALE = 1.4;
 
 export const FOOTER_ICON_SIZE = 12;
 export const FOOTER_ICON_SIZE_STACKED = 11;
@@ -59,8 +71,16 @@ export interface FooterPlanInput {
   networkAvailable: boolean;
   /** The host-scoped "show network in footer" switch. */
   showNetworkSetting: boolean;
-  /** The host reports its narrow/compact layout; meters stay retracted there. */
+  /** The host reports its narrow/compact layout (phone / narrow window). */
   compact: boolean;
+  /**
+   * Optional override for the compact rate budget, already in DP. The default
+   * derives it from the fixed 9 px label and the user's font scale, so the
+   * budget never depends on the digits currently drawn.
+   */
+  rateTextWidth?: number | null;
+  /** User font scale, used only for the compact rate fallback before measuring. */
+  fontScale?: number;
 }
 
 export interface FooterPlan {
@@ -82,6 +102,8 @@ export interface FooterPlan {
   iconSize: number;
   iconGap: number;
   columnPadX: number;
+  /** Compact tail stacks ↓ over ↑; desktop keeps them inline. */
+  tailStacked: boolean;
 }
 
 export function tailBudget(width: number): number {
@@ -97,20 +119,65 @@ export function columnWidthFor(width: number): number {
   return Math.max(0, width - FOOTER_PAD_X * 2 - FOOTER_BORDER_X - tailBudget(width)) / FOOTER_SLOTS;
 }
 
+/** Equal column width for the outer row minus chrome and a given tail. */
+function columnWidthWithout(width: number, tailWidth: number): number {
+  return Math.max(0, width - FOOTER_PAD_X * 2 - FOOTER_BORDER_X - tailWidth) / FOOTER_SLOTS;
+}
+
 export function chooseFooterPlan(input: FooterPlanInput): FooterPlan {
   const measured = input.width !== null;
   const width = input.width ?? 0;
   const labels = labelWidths(input.textWidths);
   const widest = Math.max(...labels);
 
-  const tailWidth = measured ? tailBudget(width) : 0;
-  const columnWidth = measured ? columnWidthFor(width) : 0;
-  const usable = Math.max(0, columnWidth - FOOTER_COL_PAD_X * 2);
-
   const rowNeeds = FOOTER_ICON_SIZE + FOOTER_ICON_GAP + widest;
-  // A meter adds one more gap before it, so it only gets what remains after that.
-  const meterRoom = usable - rowNeeds - FOOTER_ICON_GAP;
   const stackedNeeds = Math.max(widest, FOOTER_ICON_SIZE_STACKED);
+  // A meter adds one more gap before it, so it only gets what remains after that.
+  const meterRoomFor = (column: number) => Math.max(0, column - FOOTER_COL_PAD_X * 2) - rowNeeds - FOOTER_ICON_GAP;
+  const usableFor = (column: number) => Math.max(0, column - FOOTER_COL_PAD_X * 2);
+
+  // One budget for the widest label the short formatter can print (e.g.
+  // `↓51200M`) at the user's font scale. Deriving it from the scale instead of
+  // the live digits means a reading changing from `9.1K` to `2.4M` cannot
+  // re-flow the three columns, and it can never get stuck on a past maximum.
+  const rateReserve = Math.ceil(input.rateTextWidth ?? FOOTER_COMPACT_RATE_FALLBACK * (input.fontScale ?? 1));
+  const networkWanted = input.networkAvailable && input.showNetworkSetting;
+
+  let tailWidth = 0;
+  let tail: FooterTail = "none";
+
+  if (measured && input.compact) {
+    // Four zones: three resource groups plus a two-line rate group. It only
+    // takes space when there is a real rate to show, and it is dropped if the
+    // three groups would no longer fit icon + full number side by side.
+    if (networkWanted) {
+      const candidate = rateReserve + FOOTER_COMPACT_TAIL_PAD;
+      const column = columnWidthWithout(width, candidate);
+      if (usableFor(column) >= rowNeeds) {
+        tailWidth = candidate;
+        tail = "network";
+      }
+    }
+  } else if (measured) {
+    // Desktop keeps the fixed anchor/cap so 416 and 480 never re-flow the row.
+    tailWidth = tailBudget(width);
+    if (width >= FOOTER_TIME_MIN_WIDTH && tailWidth > 0) {
+      // Two rates sit side by side in this tail; past the documented font
+      // scale they no longer fit, so the clock stays exactly as before.
+      tail =
+        networkWanted &&
+        width >= FOOTER_NETWORK_MIN_WIDTH &&
+        (input.fontScale ?? 1) <= FOOTER_NETWORK_MAX_FONT_SCALE
+          ? "network"
+          : "time";
+    }
+  }
+
+  const columnWidth = measured ? columnWidthWithout(width, tailWidth) : 0;
+  const usable = usableFor(columnWidth);
+  const meterRoom = meterRoomFor(columnWidth);
+  const meterEligible =
+    measured && meterRoom >= FOOTER_METER_MIN && (input.compact || width >= FOOTER_METER_MIN_WIDTH);
 
   let mode: FooterMode = "row";
   let showIcons = true;
@@ -121,7 +188,7 @@ export function chooseFooterPlan(input: FooterPlanInput): FooterPlan {
 
   if (!measured) {
     // First frame: icons and columns only, never a meter or tail text yet.
-  } else if (!input.compact && width >= FOOTER_METER_MIN_WIDTH && meterRoom >= FOOTER_METER_MIN) {
+  } else if (meterEligible) {
     showMeters = true;
   } else if (usable >= rowNeeds) {
     // Icons plus the full number on one line; the meter is retracted.
@@ -137,12 +204,7 @@ export function chooseFooterPlan(input: FooterPlanInput): FooterPlan {
     iconGap = 0;
   }
 
-  const showTail = measured && width >= FOOTER_TIME_MIN_WIDTH && tailWidth > 0;
-  const tail: FooterTail = !showTail
-    ? "none"
-    : input.networkAvailable && input.showNetworkSetting && width >= FOOTER_NETWORK_MIN_WIDTH
-      ? "network"
-      : "time";
+  const showTail = measured && tailWidth > 0 && tail !== "none";
 
   return {
     measured,
@@ -158,5 +220,6 @@ export function chooseFooterPlan(input: FooterPlanInput): FooterPlan {
     iconSize,
     iconGap,
     columnPadX: FOOTER_COL_PAD_X,
+    tailStacked: input.compact,
   };
 }

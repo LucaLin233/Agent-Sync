@@ -19,7 +19,11 @@ export function bytesText(value: number | null | undefined): string {
 export function shortRate(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   const kib = value / 1024;
-  if (kib >= 1024) return `${(kib / 1024).toFixed(kib >= 10240 ? 0 : 1)}M`;
+  const mib = kib / 1024;
+  // A gigabyte tier keeps the label short and bounded: at most `9990G`, so the
+  // widest label stays arrow + 5 characters and the footer budget can rely on it.
+  if (mib >= 1024) return `${Math.min(9990, Math.round(mib / 1024))}G`;
+  if (kib >= 1024) return `${mib.toFixed(mib >= 10 ? 0 : 1)}M`;
   if (kib >= 10) return `${kib.toFixed(0)}K`;
   if (kib >= 0.1) return `${kib.toFixed(1)}K`;
   return `${Math.round(value)}B`;
