@@ -34,6 +34,16 @@ function bytesText(value: number | null | undefined): string {
   return `${(value / 1024 ** 2).toFixed(0)} MiB`;
 }
 
+/** Short rate text: `12.3 KB/s`. Unknown stays an em dash, never a fake 0. */
+function rateText(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  const kb = value / 1000;
+  if (kb >= 1000) return `${(kb / 1000).toFixed(1)} MB/s`;
+  if (kb >= 10) return `${kb.toFixed(0)} KB/s`;
+  if (kb >= 0.1) return `${kb.toFixed(1)} KB/s`;
+  return `${value.toFixed(0)} B/s`;
+}
+
 function timeText(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
@@ -114,13 +124,24 @@ function effectiveStatus(status: Status, value: HostResources | null, connection
   return status;
 }
 
-function Meter({ percent, tone, colors }: { percent: number | null; tone: string; colors: Colors }) {
+/**
+ * Track takes the spare width of its column; the filled part stays a true
+ * percentage of that track, so a wide sidebar shows a long bar at 30% rather
+ * than a short fixed stub floating in empty space.
+ */
+function Meter({ percent, tone, colors, grow }: { percent: number | null; tone: string; colors: Colors; grow: boolean }) {
   const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ height: 3, width: 22, borderRadius: 3, backgroundColor: colors.border, overflow: "hidden" }}
+      style={{
+        height: 3,
+        borderRadius: 3,
+        backgroundColor: colors.border,
+        overflow: "hidden",
+        ...(grow ? { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 22, maxWidth: 96 } : { width: 22 }),
+      }}
     >
       <View style={{ width: `${width}%`, height: "100%", borderRadius: 3, backgroundColor: tone }} />
     </View>
@@ -171,7 +192,7 @@ function Reading({ icon, percent, tone, showMeter, showIcon, grow, stacked, icon
       >
         {percentText(percent)}
       </Text>
-      {showMeter ? <Meter percent={percent ?? null} tone={tone} colors={colors} /> : null}
+      {showMeter ? <Meter percent={percent ?? null} tone={tone} colors={colors} grow={grow} /> : null}
     </View>
   );
 }
@@ -212,7 +233,7 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`宿主机资源：CPU ${cpu}，内存 ${memory}，硬盘 ${disk}，${hostStatusLabels[connection] ?? connection}${anomaly ? `，${anomaly}` : ""}`}
+      accessibilityLabel={`宿主机资源：CPU ${cpu}，内存 ${memory}，硬盘 ${disk}，${hostStatusLabels[connection] ?? connection}${plan.showNetwork ? `，下行 ${rateText(value?.network?.rxBytesPerSecond)}，上行 ${rateText(value?.network?.txBytesPerSecond)}` : ""}${anomaly ? `，${anomaly}` : ""}`}
       accessibilityHint="打开宿主机资源详情"
       onPress={() => openPopover(Popover)}
       onLayout={(event) => {
@@ -271,6 +292,20 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         colors={colors}
         onTextWidth={(width) => recordTextWidth(2, width)}
       />
+      {plan.showNetwork ? (
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={{ flexShrink: 0, alignItems: "flex-end", gap: 1, minWidth: 84 }}
+        >
+          <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
+            ↓ {rateText(value?.network?.rxBytesPerSecond)}
+          </Text>
+          <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
+            ↑ {rateText(value?.network?.txBytesPerSecond)}
+          </Text>
+        </View>
+      ) : null}
       {anomaly && plan.showAnomalyText ? (
         <Text
           numberOfLines={1}
@@ -415,6 +450,24 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
             </>
           ) : (
             <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>系统盘容量暂不可读，CPU 与内存读数不受影响。</Text>
+          )}
+        </Card>
+
+        <Card title="宿主机网络" icon="Network" tone={colors.accent} colors={colors}>
+          {value?.network ? (
+            <>
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <Fact label="下行" value={rateText(value.network.rxBytesPerSecond)} colors={colors} strong />
+                <Fact label="上行" value={rateText(value.network.txBytesPerSecond)} colors={colors} strong />
+              </View>
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+                {value.platform === "linux"
+                  ? "取自 daemon 宿主 /proc/net/dev 累计字节的差值；已跳过 loopback 与 veth、docker、bridge 等虚拟接口，不产生流量。"
+                  : "此平台没有可用的 /proc/net/dev，网络速率不可用。"}
+              </Text>
+            </>
+          ) : (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>网络速率暂不可读；CPU、内存与磁盘读数不受影响。</Text>
           )}
         </Card>
 

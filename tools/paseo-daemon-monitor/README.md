@@ -25,7 +25,8 @@ paseo plugin reload daemon-monitor
 - 内存：Linux 已用 = 总量 − `/proc/meminfo` `MemAvailable`；其他平台退到 `os.totalmem()`/`os.freemem()`，并在详情标明该平台没有 MemAvailable。
 - 系统盘：`fs.statfs` 读系统根所在文件系统（`/`，Windows 为 `C:\`），只算这一个挂载点；已用按 `blocks - bfree`，可用按 `bavail`。
 - daemon 主进程（仅 Linux，可选）：进程 CPU、RSS、PID 读自插件父进程 `/proc`。启动时固定 ppid，IPC 断开或 ppid 变化即停止上报，绝不用插件子进程冒充。
-- 轮询 5 秒一次，仅组件挂载且应用在前台时进行；服务端另有 1 秒缓存，避免同一时刻的重复读取。
+- 网络（仅 Linux）：`/proc/net/dev` 累计字节的差值，不跑命令、不产生流量。跳过 loopback，以及 veth/docker/bridge 等已知虚拟接口，避免容器两端重复计数；接口集合变化或计数回退时该次速率记为未知，不是 0。
+- 轮询 5 秒一次，仅组件挂载且应用在前台时进行；服务端另有 1 秒缓存，避免同一时刻的重复读取。网络速率沿用同一采样与缓存，不新增后台循环。
 
 ## 状态
 

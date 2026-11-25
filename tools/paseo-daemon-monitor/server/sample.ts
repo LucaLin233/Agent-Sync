@@ -4,12 +4,14 @@ import {
   cpuUsagePercent,
   diskUsage,
   memoryUsagePercent,
+  netRates,
   processCpuPercent,
   readCpuTimes,
   type CpuTimes,
+  type NetTotals,
 } from "../shared/aggregate.ts";
 import type { HostResources } from "../shared/contract.ts";
-import { readMemory, readProcStatCpu, readProcess, readSystemDisk } from "./proc.ts";
+import { readMemory, readNetDev, readProcStatCpu, readProcess, readSystemDisk } from "./proc.ts";
 
 const CACHE_MS = 1_000;
 const PRIME_MS = 250;
@@ -23,6 +25,8 @@ interface CpuBaseline {
   at: number;
   /** Present only for a /proc baseline, where process ticks share the same counter. */
   process: ProcessBaseline | null;
+  /** Counter baseline for host-wide network rates; null when unavailable. */
+  network: NetTotals | null;
 }
 
 interface ProcessBaseline {
@@ -68,8 +72,9 @@ function buildValue(input: {
   process: Awaited<ReturnType<typeof readDaemonProcess>>;
   memory: { totalBytes: number; availableBytes: number | null; basis: "available" | "free" };
   disk: Awaited<ReturnType<typeof readSystemDisk>> | null;
+  network: NetTotals | null;
 }): HostResources {
-  const { previous, cpu, process: daemon, memory, disk } = input;
+  const { previous, cpu, process: daemon, memory, disk, network } = input;
   // A delta is only meaningful between two readings of the same counter.
   const comparable = previous !== null && cpu !== null && previous.source === cpu.source;
   const hostTicks = comparable ? cpu.times.total - previous.times.total : 0;
@@ -92,6 +97,24 @@ function buildValue(input: {
     };
   }
 
+  // Rates are a delta over the same monotonic window as the CPU reading. A
+  // missing baseline, changed interface set or backwards counter yields nulls
+  // rather than a fabricated 0 or spike.
+  const networkValue: HostResources["network"] =
+    network === null
+      ? null
+      : (() => {
+          const rates =
+            previous?.network != null
+              ? netRates(previous.network, network, Date.now() - previous.at)
+              : { rxBytesPerSecond: null, txBytesPerSecond: null };
+          return {
+            rxBytesPerSecond: rates.rxBytesPerSecond,
+            txBytesPerSecond: rates.txBytesPerSecond,
+            windowMs: previous?.network != null ? Math.max(0, Date.now() - previous.at) : 0,
+          };
+        })();
+
   return {
     sampledAt: new Date().toISOString(),
     platform: process.platform,
@@ -111,6 +134,7 @@ function buildValue(input: {
           percent: diskUse.percent,
         }
       : null,
+    network: networkValue,
     process: processValue,
   };
 }
@@ -121,6 +145,8 @@ async function sample(): Promise<HostResources> {
   const firstProcess = await readDaemonProcess();
   const memory = await readMemorySnapshot();
   const disk = await readSystemDisk().catch(() => null);
+  // Network reads are isolated: a failure here must not null out CPU, memory or disk.
+  const network = await readNetDev().catch(() => null);
 
   // Without an earlier reading there is no delta to report. Take a second reading
   // inside this call so a freshly started daemon never shows a fabricated 0%.
@@ -135,8 +161,9 @@ async function sample(): Promise<HostResources> {
       process: firstProcess
         ? { pid: firstProcess.pid, startTicks: firstProcess.startTicks, ticks: firstProcess.ticks }
         : null,
+      network: null,
     };
-    const value = buildValue({ previous: primed, cpu: secondCpu, process: secondProcess, memory, disk });
+    const value = buildValue({ previous: primed, cpu: secondCpu, process: secondProcess, memory, disk, network });
     const stored = secondCpu ?? firstCpu;
     baseline = {
       source: stored.source,
@@ -145,12 +172,13 @@ async function sample(): Promise<HostResources> {
       process: secondProcess
         ? { pid: secondProcess.pid, startTicks: secondProcess.startTicks, ticks: secondProcess.ticks }
         : null,
+      network,
     };
     return value;
   }
 
   const previous = baseline;
-  const value = buildValue({ previous, cpu: firstCpu, process: firstProcess, memory, disk });
+  const value = buildValue({ previous, cpu: firstCpu, process: firstProcess, memory, disk, network });
   if (firstCpu) {
     baseline = {
       source: firstCpu.source,
@@ -159,6 +187,7 @@ async function sample(): Promise<HostResources> {
       process: firstProcess
         ? { pid: firstProcess.pid, startTicks: firstProcess.startTicks, ticks: firstProcess.ticks }
         : null,
+      network,
     };
   }
   return value;

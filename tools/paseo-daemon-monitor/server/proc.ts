@@ -2,7 +2,7 @@
 
 import { statfs } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
-import { parseMeminfo, parseProcStat, parseProcStatCpu, parseVmRss, type CpuTimes } from "../shared/aggregate.ts";
+import { parseMeminfo, parseProcNetDev, parseProcStat, parseProcStatCpu, parseVmRss, type CpuTimes, type NetTotals } from "../shared/aggregate.ts";
 
 export async function readProcStatCpu(): Promise<CpuTimes | null> {
   return parseProcStatCpu(await readFile("/proc/stat", "utf8"));
@@ -26,4 +26,10 @@ export async function readProcess(pid: number): Promise<{ pid: number; ticks: nu
 export async function readSystemDisk() {
   const stats = await statfs(process.platform === "win32" ? "C:\\" : "/");
   return { blocks: stats.blocks, bfree: stats.bfree, bavail: stats.bavail, bsize: stats.bsize };
+}
+
+/** Aggregate rx/tx counters of physical interfaces. Linux only; no traffic generated. */
+export async function readNetDev(): Promise<NetTotals | null> {
+  if (process.platform !== "linux") return null;
+  return parseProcNetDev(await readFile("/proc/net/dev", "utf8"));
 }

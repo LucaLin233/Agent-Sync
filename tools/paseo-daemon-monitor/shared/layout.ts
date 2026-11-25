@@ -35,6 +35,9 @@ export const FOOTER_ICON_GAP_TIGHT = 2;
 export const FOOTER_METER_COST = 26; // 4 px gap + 22 px meter
 export const FOOTER_ANOMALY_GAP = 9;
 export const FOOTER_ANOMALY_DOT = 8;
+/** Two-line down/up rate group; the arrow, unit and digits need this much. */
+export const FOOTER_NETWORK_WIDTH = 92;
+export const FOOTER_NETWORK_GAP = 10;
 
 export interface FooterLayoutInput {
   /** Outer width of the footer row (onLayout frame width), or null before the first pass. */
@@ -62,6 +65,8 @@ export interface FooterLayout {
   iconGap: number;
   /** Content mode only: squeeze the inter-reading gap. */
   tightGap: boolean;
+  /** Host-wide ↓/↑ rates are shown beside the three resource columns. */
+  showNetwork: boolean;
   /** The words `旧样本` / `读取失败`; falls back to the dot when too narrow. */
   showAnomalyText: boolean;
   /** Status dot. Hidden only when even a dot would push a number out. */
@@ -165,6 +170,9 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
       iconSize: FOOTER_ICON_SIZE,
       iconGap: FOOTER_ICON_GAP,
       tightGap: false,
+      // Unmeasured rows are assumed narrow: the rate group joins only once the
+      // real width confirms room for the three columns plus it.
+      showNetwork: false,
       showAnomalyText: anomaly,
       showAnomalyMark: anomaly,
     };
@@ -174,21 +182,38 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
   const tiers = compact ? ROW_STYLES.filter((style) => !style.meter) : ROW_STYLES;
   for (const style of tiers) {
     const base = rowWidth(textWidths, style);
-    const edge = anomalyEdgeFor(anomaly, need - base, anomalyTextWidth, style.columnGap);
-    if (need >= base + anomalyCost(anomaly, edge, anomalyTextWidth, style.columnGap)) {
-      return {
-        mode: style.stacked ? "stacked" : "row",
-        showMeters: style.meter,
-        showIcons: true,
-        stacked: style.stacked,
-        paddingX: style.paddingX,
-        columnGap: style.columnGap,
-        iconSize: style.iconSize,
-        iconGap: style.iconGap,
-        tightGap: false,
-        showAnomalyText: edge === "text",
-        showAnomalyMark: edge !== "none",
-      };
+    // Rates ride beside the widest tier only, and only after the three columns
+    // and any anomaly badge have their full share. Otherwise the columns win.
+    const candidates = style.meter
+      ? [
+          { base: base + FOOTER_NETWORK_GAP + FOOTER_NETWORK_WIDTH, network: true },
+          { base, network: false },
+        ]
+      : [{ base, network: false }];
+    for (const candidate of candidates) {
+      if (need < candidate.base) continue;
+      const edge = anomalyEdgeFor(anomaly, need - candidate.base, anomalyTextWidth, style.columnGap);
+      // The rate group is optional decoration: it may not eat into the anomaly
+      // badge's room. The three readings and their number always rank first.
+      if (candidate.network && anomaly && need < candidate.base + style.columnGap + FOOTER_ANOMALY_GAP + anomalyTextWidth) {
+        continue;
+      }
+      if (need >= candidate.base + anomalyCost(anomaly, edge, anomalyTextWidth, style.columnGap)) {
+        return {
+          mode: style.stacked ? "stacked" : "row",
+          showMeters: style.meter,
+          showIcons: true,
+          stacked: style.stacked,
+          paddingX: style.paddingX,
+          columnGap: style.columnGap,
+          iconSize: style.iconSize,
+          iconGap: style.iconGap,
+          tightGap: false,
+          showNetwork: candidate.network,
+          showAnomalyText: edge === "text",
+          showAnomalyMark: edge !== "none",
+        };
+      }
     }
   }
 
@@ -208,6 +233,7 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
     iconSize: FOOTER_ICON_SIZE_TIGHT,
     iconGap: FOOTER_ICON_GAP_TIGHT,
     tightGap,
+    showNetwork: false,
     showAnomalyText: edge === "text",
     showAnomalyMark: edge !== "none",
   };

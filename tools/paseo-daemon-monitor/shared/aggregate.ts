@@ -117,3 +117,61 @@ export function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, Math.round(value * 10) / 10));
 }
+
+/** Virtual/container interfaces that duplicate the physical counters. */
+const VIRTUAL_IFACE = /^(lo|veth.+|docker.+|br-.+|virbr.+|cni.+|flannel.+|tunl.+|vxlan.+|kube.+|cali.+|weave.+|podman.+|lxc.+|lxd.+|dummy.+|ifb.+|docker0|br0)$/;
+
+export interface NetTotals {
+  rxBytes: number;
+  txBytes: number;
+  /** Sorted interface names that contributed; a change voids the baseline. */
+  interfaces: string[];
+}
+
+/**
+ * Sum rx/tx byte counters from /proc/net/dev for physical interfaces only.
+ * Loopback and known virtual/bridge devices are skipped so a container veth is
+ * not counted a second time alongside its host-side peer.
+ */
+export function parseProcNetDev(text: string): NetTotals | null {
+  const interfaces: string[] = [];
+  let rxBytes = 0;
+  let txBytes = 0;
+  for (const raw of text.split("\n")) {
+    const colon = raw.indexOf(":");
+    if (colon < 0) continue;
+    const name = raw.slice(0, colon).trim();
+    if (!name || name === "Inter-|" || name === "face") continue;
+    if (VIRTUAL_IFACE.test(name)) continue;
+    const fields = raw.slice(colon + 1).trim().split(/\s+/).map(Number);
+    if (fields.length < 9) continue;
+    const [rx, , , , , , , , tx] = fields;
+    if (!Number.isFinite(rx) || !Number.isFinite(tx) || rx < 0 || tx < 0) continue;
+    interfaces.push(name);
+    rxBytes += rx;
+    txBytes += tx;
+  }
+  if (interfaces.length === 0) return { rxBytes: 0, txBytes: 0, interfaces: [] };
+  interfaces.sort();
+  return { rxBytes, txBytes, interfaces };
+}
+
+/**
+ * Per-second rates between two counter readings over a monotonic window.
+ * A changed interface set or a backwards counter means the old baseline is
+ * void: rates stay null instead of reporting a fabricated spike.
+ */
+export function netRates(
+  previous: NetTotals,
+  current: NetTotals,
+  windowMs: number,
+): { rxBytesPerSecond: number | null; txBytesPerSecond: number | null } {
+  const sameInterfaces =
+    previous.interfaces.length === current.interfaces.length &&
+    previous.interfaces.every((name, index) => name === current.interfaces[index]);
+  if (!sameInterfaces || !(windowMs > 0)) return { rxBytesPerSecond: null, txBytesPerSecond: null };
+  const rx = current.rxBytes - previous.rxBytes;
+  const tx = current.txBytes - previous.txBytes;
+  if (rx < 0 || tx < 0) return { rxBytesPerSecond: null, txBytesPerSecond: null };
+  return { rxBytesPerSecond: (rx * 1000) / windowMs, txBytesPerSecond: (tx * 1000) / windowMs };
+}

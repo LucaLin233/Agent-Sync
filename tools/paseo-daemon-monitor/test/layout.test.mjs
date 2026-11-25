@@ -140,3 +140,40 @@ test("an anomaly never displaces the main reading: words, then dot, then nothing
   assert.equal(none.showAnomalyMark, false);
   assert.notEqual(none.mode, "content");
 });
+
+test("network rates join only when the three widest columns and the group both fit", () => {
+  const style = FOOTER_STYLES[0]; // meters
+  const threeColumns = rowWidth(widest, style);
+  const withNet = threeColumns + 10 + 92;
+  const at = chooseFooterLayout({ ...base, availableWidth: withNet, textWidths: widest });
+  assert.equal(at.showNetwork, true);
+  assert.equal(at.showMeters, true);
+  const below = chooseFooterLayout({ ...base, availableWidth: withNet - 0.1, textWidths: widest });
+  assert.equal(below.showNetwork, false);
+  // The three readings never lose their meter tier to make room for rates.
+  assert.equal(below.showMeters, true);
+});
+
+test("a 480 DP sidebar reaches the rate tier while the narrow tiers never do", () => {
+  const narrow = chooseFooterLayout({ ...base, availableWidth: 200, textWidths: widest });
+  assert.equal(narrow.showNetwork, false);
+  assert.equal(narrow.showIcons, true);
+  const wide = chooseFooterLayout({ ...base, availableWidth: 480, textWidths: widest });
+  assert.equal(wide.showNetwork, true);
+  assert.equal(wide.showMeters, true);
+});
+
+test("an anomaly takes precedence over the rate group at equal width", () => {
+  const style = FOOTER_STYLES[0];
+  const threeColumns = rowWidth(widest, style);
+  const words = 30;
+  const need = threeColumns + 10 + 92;
+  const plan = chooseFooterLayout({ ...base, availableWidth: need, textWidths: widest, anomaly: true, anomalyTextWidth: words });
+  // Either both fit, or rates drop so the badge keeps its room; never clipped.
+  if (plan.showNetwork) {
+    assert.ok(need >= threeColumns + 10 + 92 + style.columnGap + FOOTER_ANOMALY_GAP + words);
+  } else {
+    assert.ok(need >= threeColumns + style.columnGap + FOOTER_ANOMALY_GAP + words);
+  }
+  assert.equal(plan.showAnomalyText, true);
+});

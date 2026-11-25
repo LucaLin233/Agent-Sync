@@ -8,7 +8,9 @@ import {
   parseMeminfo,
   parseProcStat,
   parseProcStatCpu,
+  parseProcNetDev,
   parseVmRss,
+  netRates,
   processCpuPercent,
 } from "../shared/aggregate.ts";
 
@@ -53,4 +55,33 @@ test("disk share uses statfs blocks and keeps bavail separate", () => {
   assert.equal(usage.availableBytes, 250 * 1024);
   assert.equal(usage.percent, 70);
   assert.equal(diskUsage({ blocks: 0, bfree: 0, bavail: 0, bsize: 4096 }).percent, null);
+});
+
+test("/proc/net/dev sums physical interfaces and skips loopback and virtual peers", () => {
+  const text = [
+    "Inter-|   Receive                                                |  Transmit",
+    " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed",
+    "    lo: 5000 1 0 0 0 0 0 0 5000 1 0 0 0 0 0 0",
+    "  eth0: 1000 1 0 0 0 0 0 0 2000 1 0 0 0 0 0 0",
+    "  eth1: 300 1 0 0 0 0 0 0 400 1 0 0 0 0 0 0",
+    "veth12ab: 9999 1 0 0 0 0 0 0 9999 1 0 0 0 0 0 0",
+    "docker0: 8888 1 0 0 0 0 0 0 8888 1 0 0 0 0 0 0",
+    "br-abc123: 7777 1 0 0 0 0 0 0 7777 1 0 0 0 0 0 0",
+  ].join("\n");
+  assert.deepEqual(parseProcNetDev(text), { rxBytes: 1300, txBytes: 2400, interfaces: ["eth0", "eth1"] });
+});
+
+test("network rates use the monotonic window and refuse unusable baselines", () => {
+  const before = { rxBytes: 1000, txBytes: 2000, interfaces: ["eth0"] };
+  const after = { rxBytes: 3000, txBytes: 2500, interfaces: ["eth0"] };
+  assert.deepEqual(netRates(before, after, 2000), { rxBytesPerSecond: 1000, txBytesPerSecond: 250 });
+  // Idle is a real zero, not unknown.
+  assert.deepEqual(netRates(before, before, 5000), { rxBytesPerSecond: 0, txBytesPerSecond: 0 });
+  // Counter reset and interface change invalidate the delta.
+  assert.deepEqual(netRates(after, before, 1000), { rxBytesPerSecond: null, txBytesPerSecond: null });
+  assert.deepEqual(netRates(before, { ...after, interfaces: ["eth0", "eth1"] }, 1000), {
+    rxBytesPerSecond: null,
+    txBytesPerSecond: null,
+  });
+  assert.deepEqual(netRates(before, after, 0), { rxBytesPerSecond: null, txBytesPerSecond: null });
 });

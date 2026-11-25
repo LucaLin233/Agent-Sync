@@ -30,6 +30,18 @@ export const hostResourcesRpc = defineRpc({
         percent: z.number().min(0).max(100).nullable(),
       })
       .nullable(),
+    /**
+     * Host-wide network rates from /proc/net/dev. Null when the platform has no
+     * counter or the previous baseline is not comparable; a zero rate is a real
+     * measurement and is reported as 0.
+     */
+    network: z
+      .object({
+        rxBytesPerSecond: z.number().nonnegative().nullable(),
+        txBytesPerSecond: z.number().nonnegative().nullable(),
+        windowMs: z.number().int().nonnegative(),
+      })
+      .nullable(),
     /** Present only when the daemon parent process is verifiable through /proc. */
     process: z
       .object({
