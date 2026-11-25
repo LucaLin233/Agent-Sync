@@ -4,14 +4,11 @@ import {
   addTurn,
   averageFirstTokenMs,
   emptyTurnTotals,
-  formatCachePillLabel,
   formatCacheRate,
   formatPillLabel,
   formatPillTitle,
-  formatRecentPillLabel,
+  formatTokenSpeed,
   formatTokenSpeedNumber,
-  formatTokenSpeedValue,
-  formatTurnPillLabel,
   latestCompletedTurn,
   mergeTurnTotals,
   tokensPerSecond,
@@ -34,7 +31,7 @@ test("pill rate is weighted, not averaged, across visible conversations", () => 
     codex("b", "w", 400, 392),
   ]).get("w");
   assert.deepEqual(summary, { input: 1_000, cached: 982, covered: 2, rate: 0.982 });
-  assert.equal(formatCachePillLabel(summary.rate), "缓存 98.2%");
+  assert.equal(formatCacheRate(summary.rate), "98.2%");
 });
 
 test("an input update replaces that conversation's previous sample", () => {
@@ -44,14 +41,14 @@ test("an input update replaces that conversation's previous sample", () => {
   live.set("a", codex("a", "w", 6_000, 100));
   const summary = workspaceCacheSummaries(live.values()).get("w");
   assert.deepEqual(summary, { input: 6_400, cached: 492, covered: 2, rate: 0.076875 });
-  assert.equal(formatCachePillLabel(summary.rate), "缓存 7.7%");
+  assert.equal(formatCacheRate(summary.rate), "7.7%");
 });
 
 test("archived conversations leave the pill total and lose their pill", () => {
   const archived = codex("b", "w", 400, 392, { archivedAt: "2026-11-22T00:00:00Z" });
   const summary = workspaceCacheSummaries([codex("a", "w", 600, 590), archived]).get("w");
   assert.deepEqual(summary, { input: 600, cached: 590, covered: 1, rate: 0.9833333333333333 });
-  assert.equal(formatCachePillLabel(summary.rate), "缓存 98.3%");
+  assert.equal(formatCacheRate(summary.rate), "98.3%");
   assert.equal(pillTargetFor(archived), null);
 });
 
@@ -62,7 +59,7 @@ test("missing or non-Codex samples show no rate instead of zero", () => {
     lastUsage: { inputTokens: 100, cachedInputTokens: 50 },
   });
   assert.equal(workspaceCacheSummaries([missing, claude]).get("w"), undefined);
-  assert.equal(formatCachePillLabel(undefined), "缓存 —");
+  assert.equal(formatCacheRate(undefined), "—");
   assert.equal(formatCacheRate(null), "—");
 });
 
@@ -97,7 +94,6 @@ test("pill and panel share one-decimal percentage formatting", () => {
   assert.equal(formatCacheRate(0.982), "98.2%");
   assert.equal(formatCacheRate(1), "100.0%");
   assert.equal(formatCacheRate(0), "0.0%");
-  assert.equal(formatCachePillLabel(0.982), "缓存 98.2%");
 });
 
 test("the panel and pill share one scope policy, closed unless opted in", () => {
@@ -111,29 +107,56 @@ const turn = (completedAt, outputTokens, elapsedMs, firstTokenMs = null) => ({
   completedAt, outputTokens, elapsedMs, firstTokenMs,
 });
 
-test("cache and speed share the pill; missing values keep their own semantics", () => {
-  assert.equal(formatTurnPillLabel(22.72), "近轮 22.7 t/s");
-  assert.equal(formatTurnPillLabel(null), "近轮 —");
-  // Cache first, then the compact speed; shared words are omitted.
-  assert.equal(formatPillLabel(0.982, 12.53), "98.2% · 12.5 t/s");
-  assert.equal(formatPillLabel(0.982, 22.72), "98.2% · 22.7 t/s");
-  assert.equal(formatPillLabel(0.982, null), "缓存 98.2%");
-  assert.equal(formatPillLabel(0.982, undefined), "缓存 98.2%");
-  // Zero is a real measurement, not a missing value.
-  assert.equal(formatPillLabel(0, 0), "0.0% · 0.0 t/s");
-  assert.equal(formatPillLabel(0, null), "缓存 0.0%");
-  // A missing cache leaves only the independently valid speed on the line.
-  assert.equal(formatPillLabel(null, 12.53), "12.5 t/s");
-  assert.equal(formatPillLabel(undefined, 0), "0.0 t/s");
-  assert.equal(formatPillLabel(null, null), "缓存 —");
-  assert.equal(formatRecentPillLabel(undefined), "最近 —");
-  // Large values stay inside the same line.
-  assert.equal(formatPillLabel(0.99, 1_250), "99.0% · 1.3k t/s");
-  // Only the 160 px pill shortens; panel values keep the full one-decimal number.
-  assert.equal(formatTokenSpeedValue(12_500), "12.5k");
-  assert.equal(formatTokenSpeedNumber(12_500), "12,500.0");
-  assert.equal(tokensPerSecond(400, 0), null);
-  assert.equal(tokensPerSecond(null, 2_000), null);
+const ready = (rate) => ({ kind: "ready", rate });
+const loading = { kind: "loading" };
+const off = { kind: "unavailable", reason: "累计统计已关闭" };
+
+test("the pill always carries the cumulative and recent rates, never a speed", () => {
+  // The two slots are independent readings, so different numbers both show.
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "累计 94.9% · 最近 81.2%");
+  // Equal readings still print both, because they come from different bases.
+  assert.equal(formatPillLabel(ready(0.5), ready(0.5)), "累计 50.0% · 最近 50.0%");
+  // Real zero is a measurement, not a missing value.
+  assert.equal(formatPillLabel(ready(0), ready(1)), "累计 0.0% · 最近 100.0%");
+  // The pill line never contains a token rate any more.
+  for (const label of [
+    formatPillLabel(ready(0.949), ready(0.812)),
+    formatPillLabel(loading, ready(null)),
+    formatPillLabel(off, ready(0.4)),
+  ]) {
+    assert.doesNotMatch(label, /t\/s|token/i);
+  }
+});
+
+test("each pill slot keeps its own placeholder and never borrows the other", () => {
+  assert.equal(formatPillLabel(loading, ready(0.812)), "累计 … · 最近 81.2%");
+  assert.equal(formatPillLabel(off, ready(0.812)), "累计 — · 最近 81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(null)), "累计 94.9% · 最近 —");
+  assert.equal(formatPillLabel(off, loading), "累计 — · 最近 …");
+  // A missing cumulative rate is never filled from the recent sample.
+  assert.equal(formatPillLabel(ready(null), ready(0.812)), "累计 — · 最近 81.2%");
+  assert.equal(formatPillLabel({ kind: "unavailable", reason: "累计读取失败" }, ready(0.812)),
+    "累计 — · 最近 81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(undefined)), "累计 94.9% · 最近 —");
+});
+
+test("the pill title names both bases and explains a missing cumulative rate", () => {
+  assert.equal(formatPillTitle(ready(0.949), ready(0.812)),
+    "打开工作区用量 · 累计缓存 94.9% · 最近样本 81.2%");
+  assert.equal(formatPillTitle(off, ready(0.812)),
+    "打开工作区用量 · 累计缓存 —（累计统计已关闭） · 最近样本 81.2%");
+  assert.equal(formatPillTitle({ kind: "unavailable", reason: "不在本机累计名单" }, ready(0.4)),
+    "打开工作区用量 · 累计缓存 —（不在本机累计名单） · 最近样本 40.0%");
+  assert.equal(formatPillTitle({ kind: "unavailable", reason: "累计读取失败：累计用量读取失败" }, ready(null)),
+    "打开工作区用量 · 累计缓存 —（累计读取失败：累计用量读取失败） · 最近样本 —（尚无有效最近样本）");
+  assert.equal(formatPillTitle(loading, ready(0.4)),
+    "打开工作区用量 · 累计缓存 … · 最近样本 40.0%");
+  // A finished cumulative read with no valid snapshot says so instead of showing a number.
+  assert.equal(formatPillTitle(ready(null), ready(0.4)),
+    "打开工作区用量 · 累计缓存 —（尚无有效累计快照） · 最近样本 40.0%");
+  // Real zero prints as a value in both the line and the title.
+  assert.equal(formatPillTitle(ready(0), ready(0)),
+    "打开工作区用量 · 累计缓存 0.0% · 最近样本 0.0%");
 });
 
 test("the newest completed turn wins even when it has no speed", () => {
@@ -142,6 +165,22 @@ test("the newest completed turn wins even when it has no speed", () => {
   assert.equal(latestCompletedTurn(fast, newerMissing), newerMissing);
   assert.equal(latestCompletedTurn(newerMissing, fast), newerMissing);
   assert.equal(latestCompletedTurn(null, null), null);
+});
+
+test("the panel keeps distinct recent and cumulative speeds while the pill carries only rates", () => {
+  let totals = emptyTurnTotals();
+  const recentTurn = turn(1000, 900, 1000); // 900 t/s on its own
+  totals = addTurn(totals, recentTurn);
+  totals = addTurn(totals, turn(2000, 10, 10_000)); // weighted down by a slow turn
+  const recentSpeed = tokensPerSecond(recentTurn.outputTokens, recentTurn.elapsedMs);
+  const cumulativeSpeed = weightedTurnSpeed(totals);
+  assert.equal(recentSpeed, 900);
+  assert.equal(cumulativeSpeed, 910_000 / 11_000);
+  // The two panel readings stay visibly different…
+  assert.equal(formatTokenSpeed(recentSpeed), "900.0 t/s");
+  assert.equal(formatTokenSpeed(cumulativeSpeed), "82.7 t/s");
+  // …and neither leaks into the composer pill, which shows the two cache rates.
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "累计 94.9% · 最近 81.2%");
 });
 
 test("cumulative speed is weighted by whole-turn duration, not averaged", () => {
@@ -167,11 +206,4 @@ test("turns without an output delta or a positive duration keep separate denomin
   assert.equal(averageFirstTokenMs(totals), 200);
   assert.equal(mergeTurnTotals(totals, totals).completed, 6);
   assert.equal(mergeTurnTotals(totals, totals).firstTokenSamples, 4);
-});
-
-test("the pill title keeps the open action, cache rate and near-turn basis", () => {
-  assert.equal(formatPillTitle(0.982, 22.72), "打开工作区用量 · 缓存 98.2% · 近轮 22.7 t/s");
-  assert.equal(formatPillTitle(0.982, null), "打开工作区用量 · 缓存 98.2% · 近轮 —");
-  assert.equal(formatPillTitle(null, 12), "打开工作区用量 · 缓存 — · 近轮 12.0 t/s");
-  assert.equal(formatPillTitle(0.982, 22.72, "recent"), "打开工作区用量 · 最近 98.2% · 近轮 22.7 t/s");
 });
