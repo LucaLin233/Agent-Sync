@@ -16,6 +16,7 @@
 #   宿主安装器、目标登记与入口配置 → host
 #   固定认证读取 → auth
 #   CCHP 会话复用工具或自检 → cchp
+#   观测台窄入口工具或测试 → observatory
 #   结构守卫或边登记 → gate
 #   正文契约及既有用例 → body
 #   Surge 包内文件、登记或包态测试 → surge 包态
@@ -29,6 +30,7 @@
 #   运行器、选路表或 CI 测试 workflow → identity 消费者
 #   运行器、选路表或 CI 测试 workflow → minis-verify 消费者
 #   运行器、选路表或 CI 测试 workflow → cchp 消费者
+#   运行器、选路表或 CI 测试 workflow → observatory 消费者
 #   运行器、信号与选路回归 → runner
 #   按需包内校验（结构守卫＋技能包校验）与运行器变更 → 包内校验
 #   运行器、选路表或 CI 测试 workflow → runner 消费者
@@ -48,6 +50,7 @@ esac
 CASES='
 test-auth-call.py|auth|cd tests && python3 -B -m unittest -v test-auth-call|0
 cchp-session-reuse.py|cchp|python3 -B tools/cchp-session-reuse.py --self-test|0
+test-paseo-observatory.py|observatory|cd tests && python3 -B -m unittest -v test-paseo-observatory|0
 check-rules.py|smoke|python3 -B tools/check-rules.py|1
 test-check-rules.sh|gate|sh tests/test-check-rules.sh|1
 test-runner.sh|runner|sh tests/test-runner.sh|1
@@ -383,8 +386,32 @@ def stop_own():
     return ok
 
 
-def run_entry(cmd):
-    p = subprocess.Popen(['sh', '-c', cmd], cwd=ROOT, env=child_env, stdin=subprocess.DEVNULL,
+OBS_ENTRY = 'test-paseo-observatory.py'
+
+
+def entry_env(name):
+    """只给观测台入口在白名单 PATH 前加一个本轮自建目录，里面仅有一个 node 软链。
+
+    该入口需要真实 Node 跑 SDK 桥；受限 CI 的最小 PATH 里没有 node，故由工作流外层解析
+    绝对可执行路径后按名传入。这里不把调用方路径直接交给被测代码，而是核实是绝对常规可执行
+    文件后，在本轮独占 WORK 下建 700 目录并只放一个 node 软链，再前置到该入口的 PATH。
+    变量缺失或不可用时不加，用例照旧因解析不到 node 而失败，不跳过。其他入口用原白名单。
+    """
+    if name != OBS_ENTRY:
+        return child_env
+    node = os.environ.get('OBSERVATORY_TEST_NODE') or ''
+    if not os.path.isabs(node) or not os.path.isfile(node) or not os.access(node, os.X_OK):
+        return child_env
+    bindir = os.path.join(WORK, 'node-bin')
+    if not os.path.isdir(bindir):
+        os.mkdir(bindir, 0o700)
+        os.symlink(node, os.path.join(bindir, 'node'))
+    return dict(child_env, PATH=bindir + ':' + child_env['PATH'])
+
+
+def run_entry(cmd, name):
+    p = subprocess.Popen(['sh', '-c', cmd], cwd=ROOT, env=entry_env(name),
+                         stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
     ACTIVE.append(p)
     fd = p.stdout.fileno()
@@ -534,7 +561,7 @@ try:
             break
         say('==== BEGIN %s group %s' % (name, grp))
         t0 = time.monotonic()
-        rc, data = run_entry(cmd)
+        rc, data = run_entry(cmd, name)
         dt = time.monotonic() - t0
         tests, skip = counts(data, cmd)
         say('==== END %s exit %d tests %s skipped %s %.2fs' % (name, rc, tests, skip, dt))
