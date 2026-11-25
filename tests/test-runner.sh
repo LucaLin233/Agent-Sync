@@ -163,10 +163,12 @@ check('负控：改用继承环境后探针报泄漏',code==1 and all(v in out f
 code,out=rt('case','test-paseo-observatory.py')
 check('环境白名单：未给观测台 node 时该入口 PATH 不变',
       code==0 and 'nodebin:no' in out,out[-200:])
-code,out=rt('case','test-paseo-observatory.py',env=dict(HOSTILE,OBSERVATORY_TEST_NODE='/usr/bin/node'))
+NODE_ABS=os.environ.get('OBSERVATORY_TEST_NODE') or shutil.which('node') or ''
+assert os.path.isabs(NODE_ABS) and os.access(NODE_ABS,os.X_OK),NODE_ABS
+code,out=rt('case','test-paseo-observatory.py',env=dict(HOSTILE,OBSERVATORY_TEST_NODE=NODE_ABS))
 check('环境白名单：观测台入口只前置本轮 node 目录且不继承其它变量',
       code==0 and 'nodebin:yes' in out and 'probe:ok' in out,out[-300:])
-code,out=rt('case','probe2',env=dict(HOSTILE,OBSERVATORY_TEST_NODE='/usr/bin/node'))
+code,out=rt('case','probe2',env=dict(HOSTILE,OBSERVATORY_TEST_NODE=NODE_ABS))
 check('环境白名单：非观测台入口不出让 node 目录',code==0 and 'nodebin:no' in out,out[-200:])
 code,out=rt('case','test-paseo-observatory.py',env=dict(HOSTILE,OBSERVATORY_TEST_NODE='/usr/bin/does-not-exist'))
 check('环境白名单：node 路径不可执行时不前置（交用例失败而非跳过）',
