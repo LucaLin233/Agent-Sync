@@ -46,14 +46,6 @@ export function formatCacheRate(rate: number | null | undefined): string {
   return rate === null || rate === undefined || !Number.isFinite(rate) ? "—" : cachePercent.format(rate);
 }
 
-export function formatCachePillLabel(rate: number | null | undefined): string {
-  return "缓存 " + formatCacheRate(rate);
-}
-
-export function formatRecentPillLabel(rate: number | null | undefined): string {
-  return "最近 " + formatCacheRate(rate);
-}
-
 /** One latest sample per conversation. Repeated snapshots are never added over time. */
 export function summarizeLatestSamples(samples: readonly (CacheSample | null)[]): CacheSummary {
   let input = 0;
@@ -157,53 +149,53 @@ export function formatTokenSpeedNumber(value: number | null | undefined): string
   return value === null || value === undefined || !Number.isFinite(value) ? "—" : speedFormat.format(value);
 }
 
-/**
- * Compact number for the composer pill only: its single line is capped at
- * 160 px, so four-digit values get a `k` suffix. Panel text never uses this.
- */
-export function formatTokenSpeedValue(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
-  if (value >= 1_000_000) return speedFormat.format(value / 1_000_000) + "M";
-  if (value >= 1_000) return speedFormat.format(value / 1_000) + "k";
-  return speedFormat.format(value);
-}
-
 /** One decimal, shared by the panel details, tooltip and composer pill. */
 export function formatTokenSpeed(value: number | null | undefined, unit: "short" | "full" = "short"): string {
   const formatted = formatTokenSpeedNumber(value);
   return formatted === "—" ? formatted : formatted + (unit === "full" ? " token/s" : " t/s");
 }
 
-export function formatTurnPillLabel(value: number | null | undefined): string {
-  return "近轮 " + formatTokenSpeed(value);
+/**
+ * One of the composer pill's two cache slots. A slot is never filled from the
+ * other basis: `unavailable` carries why that reading is missing, and `loading`
+ * means the read is still in flight. `ready` with a null rate is a finished
+ * read that found no valid snapshot, which is distinct from zero.
+ */
+export type PillCacheBasis =
+  | { kind: "loading" }
+  | { kind: "unavailable"; reason: string }
+  | { kind: "ready"; rate: number | null };
+
+function pillRateText(slot: PillCacheBasis): string {
+  if (slot.kind === "loading") return "…";
+  if (slot.kind === "unavailable") return "—";
+  return formatCacheRate(slot.rate);
+}
+
+function pillTitleText(slot: PillCacheBasis, label: string, missing: string): string {
+  if (slot.kind === "loading") return label + " …";
+  if (slot.kind === "unavailable") return label + " —（" + slot.reason + "）";
+  const rate = formatCacheRate(slot.rate);
+  return rate === "—" ? label + " —（" + missing + "）" : label + " " + rate;
 }
 
 /**
- * Visible composer-pill label. When both readings exist, the cache percentage
- * comes first and the words "缓存"/"最近" and "近轮" are omitted to fit the
- * protocol's single line. A missing speed keeps the existing labelled cache
- * text. A missing cache keeps the speed alone; the tooltip still marks the
- * cache as missing. Zero is a real value in either position.
+ * Visible composer-pill label: "累计 94.9% · 最近 81.2%". The two percentages
+ * are independent readings — the cumulative rate from the cumulative RPC, the
+ * recent rate from each conversation's latest `lastUsage` — and neither ever
+ * stands in for the other. Only the 160 px single line is this terse; the
+ * tooltip below spells out both bases and any missing-value reason.
  */
-export function formatPillLabel(
-  rate: number | null | undefined,
-  speed: number | null | undefined,
-): string {
-  if (speed === null || speed === undefined || !Number.isFinite(speed)) return formatCachePillLabel(rate);
-  const formatted = formatTokenSpeedValue(speed);
-  if (formatted === "—") return formatCachePillLabel(rate);
-  if (rate === null || rate === undefined || !Number.isFinite(rate)) return formatted + " t/s";
-  return formatCacheRate(rate) + " · " + formatted + " t/s";
+export function formatPillLabel(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
+  return "累计 " + pillRateText(cumulative) + " · 最近 " + pillRateText(recent);
 }
 
-/** Full tooltip: open action, the displayed cache basis, and the near-turn basis. */
-export function formatPillTitle(
-  rate: number | null | undefined,
-  speed: number | null | undefined,
-  basis: "cache" | "recent" = "cache",
-): string {
-  const cache = basis === "recent" ? formatRecentPillLabel(rate) : formatCachePillLabel(rate);
-  return "打开工作区用量 · " + cache + " · " + formatTurnPillLabel(speed);
+/** Full tooltip: open action, both cache bases, and why either one is missing. */
+export function formatPillTitle(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
+  return "打开工作区用量 · "
+    + pillTitleText(cumulative, "累计缓存", "尚无有效累计快照")
+    + " · "
+    + pillTitleText(recent, "最近样本", "尚无有效最近样本");
 }
 
 const countFormat = new Intl.NumberFormat("zh-CN");
