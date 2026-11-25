@@ -17,6 +17,8 @@ export interface EntityTitleState {
   lastTurnId?: string | null;
   /** True once the one-time repair of a legacy done+model_failed entry was spent. */
   repairUsed?: boolean;
+  /** True once a workspace spent its one model retry after a fallback title. */
+  retryUsed?: boolean;
   /** The agent's workspace, recorded so a finished agent can skip untouched turns. */
   workspaceId?: string;
 }
