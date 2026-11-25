@@ -390,15 +390,23 @@ OBS_ENTRY = 'test-paseo-observatory.py'
 
 
 def entry_env(name):
-    """白名单之外只给观测台入口补一个显式非秘密变量：调用方已核的 node 绝对路径。
+    """只给观测台入口在白名单 PATH 前加一个本轮自建目录，里面仅有一个 node 软链。
 
-    该入口需要真实 Node 跑 SDK 桥；受限 CI 的最小 PATH 里没有 node，故由工作流外层解析后
-    按名传入。变量缺失时不设置，用例自行报错失败，不跳过。其他入口一律用原白名单。
+    该入口需要真实 Node 跑 SDK 桥；受限 CI 的最小 PATH 里没有 node，故由工作流外层解析
+    绝对可执行路径后按名传入。这里不把调用方路径直接交给被测代码，而是核实是绝对常规可执行
+    文件后，在本轮独占 WORK 下建 700 目录并只放一个 node 软链，再前置到该入口的 PATH。
+    变量缺失或不可用时不加，用例照旧因解析不到 node 而失败，不跳过。其他入口用原白名单。
     """
     if name != OBS_ENTRY:
         return child_env
-    node = os.environ.get('OBSERVATORY_TEST_NODE')
-    return dict(child_env, OBSERVATORY_TEST_NODE=node) if node else child_env
+    node = os.environ.get('OBSERVATORY_TEST_NODE') or ''
+    if not os.path.isabs(node) or not os.path.isfile(node) or not os.access(node, os.X_OK):
+        return child_env
+    bindir = os.path.join(WORK, 'node-bin')
+    if not os.path.isdir(bindir):
+        os.mkdir(bindir, 0o700)
+        os.symlink(node, os.path.join(bindir, 'node'))
+    return dict(child_env, PATH=bindir + ':' + child_env['PATH'])
 
 
 def run_entry(cmd, name):
