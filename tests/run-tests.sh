@@ -386,8 +386,24 @@ def stop_own():
     return ok
 
 
-def run_entry(cmd):
-    p = subprocess.Popen(['sh', '-c', cmd], cwd=ROOT, env=child_env, stdin=subprocess.DEVNULL,
+OBS_ENTRY = 'test-paseo-observatory.py'
+
+
+def entry_env(name):
+    """白名单之外只给观测台入口补一个显式非秘密变量：调用方已核的 node 绝对路径。
+
+    该入口需要真实 Node 跑 SDK 桥；受限 CI 的最小 PATH 里没有 node，故由工作流外层解析后
+    按名传入。变量缺失时不设置，用例自行报错失败，不跳过。其他入口一律用原白名单。
+    """
+    if name != OBS_ENTRY:
+        return child_env
+    node = os.environ.get('OBSERVATORY_TEST_NODE')
+    return dict(child_env, OBSERVATORY_TEST_NODE=node) if node else child_env
+
+
+def run_entry(cmd, name):
+    p = subprocess.Popen(['sh', '-c', cmd], cwd=ROOT, env=entry_env(name),
+                         stdin=subprocess.DEVNULL,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
     ACTIVE.append(p)
     fd = p.stdout.fileno()
@@ -537,7 +553,7 @@ try:
             break
         say('==== BEGIN %s group %s' % (name, grp))
         t0 = time.monotonic()
-        rc, data = run_entry(cmd)
+        rc, data = run_entry(cmd, name)
         dt = time.monotonic() - t0
         tests, skip = counts(data, cmd)
         say('==== END %s exit %d tests %s skipped %s %.2fs' % (name, rc, tests, skip, dt))

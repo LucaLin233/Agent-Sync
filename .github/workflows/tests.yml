@@ -28,6 +28,17 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3-yaml
+      # 观测台测试要真实 Node 执行 SDK 桥；用 runner 自带 PATH 解析绝对可执行路径，
+      # 只用这一步的非秘密变量交给后续 env -i，其余仍是最小白名单。
+      # 解析不到或不可执行时留空，观测台测试据此显式失败，不跳过、不假绿。
+      - name: observatory-node
+        run: |
+          NODE=$(command -v node 2>/dev/null || true)
+          case $NODE in
+            /*) [ -x "$NODE" ] || NODE= ;;
+            *) NODE= ;;
+          esac
+          printf 'OBSERVATORY_TEST_NODE=%s\n' "$NODE" >> "$GITHUB_ENV"
       # 单个 selected 步骤：选路表与测试都取受测 checkout，只有一个 job。
       - name: selected
         env:
@@ -39,6 +50,7 @@ jobs:
           AFTER_SHA: ${{ github.event.after }}
         run: |
           env -i PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+            OBSERVATORY_TEST_NODE="${OBSERVATORY_TEST_NODE:-}" \
             PYTHONIOENCODING=utf-8 PYTHONDONTWRITEBYTECODE=1 TMPDIR=/tmp \
             GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_ATTR_NOSYSTEM=1 \
             GIT_NO_REPLACE_OBJECTS=1 GIT_OPTIONAL_LOCKS=0 GIT_NO_LAZY_FETCH=1 \

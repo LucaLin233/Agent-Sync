@@ -42,11 +42,13 @@ case ${HOME:-} in */run-tests-*/home) ;; *) leak="$leak HOME" ;; esac
 case ${TMPDIR:-} in */run-tests-*/tmp) ;; *) leak="$leak TMPDIR" ;; esac
 for v in PYTHONPATH SYNTH_SECRET SYNTH_EMPTY; do eval "[ \\"\\${$v+set}\\" = set ]" && leak="$leak $v"; done
 [ -z "$leak" ] && echo probe:ok || { echo "probe:leak$leak"; exit 1; }
+echo "node:${OBSERVATORY_TEST_NODE:-unset}"
 ''')
 ROWS=('lint|smoke|echo lint:ran|1','eat|g1|cat >/dev/null; echo eat:ran|1','probe|g1|sh tests/probe.sh|1',
       'bad|g2|echo bad:ran; exit 1|0','long|g1|sh tests/long.sh|1','unit|g1|cd tests && python3 -B -m unittest -v unitdemo|1',
       'unitbad|g2|cd tests && python3 -B -m unittest -v unitbad|0','slow|g3|sh -c "sleep 30"|0',
-      'spawn|g4|python3 -B tests/spawn.py & exit 0|0','hold|g5|python3 -B tests/hold.py & exit 0|0')
+      'spawn|g4|python3 -B tests/spawn.py & exit 0|0','hold|g5|python3 -B tests/hold.py & exit 0|0',
+      'test-paseo-observatory.py|g6|sh tests/probe.sh|0')
 (FIX/'tests/long.sh').write_text(''.join('echo %s%s\n'%(m,c*200) for m,c in (('LONGHEAD','A'),('LONGMID','M'),('LONGTAIL','T'))))
 (FIX/'tests/unitdemo.py').write_text('''import unittest
 class T(unittest.TestCase):
@@ -100,8 +102,9 @@ FIXED=RUNNER[:start]+"CASES='\n"+''.join(r+'\n' for r in ROWS)+"'\n"+RUNNER[end:
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
 HOSTILE=dict(os.environ,HOME=str(FIX/'home'),TMPDIR=str(FIX/'tmp'),PYTHONPATH=str(FIX/'poison'),
              SYNTH_SECRET='synthetic-secret',SYNTH_EMPTY='')
-def rt(*a,stdin=None,timeout=120):
-    r=subprocess.run(['sh','tests/run-tests.sh',*a],cwd=str(FIX),env=HOSTILE,input=stdin,
+HOSTILE.pop('OBSERVATORY_TEST_NODE',None)   # 夹具自己决定给不给，不继承调用方值
+def rt(*a,stdin=None,timeout=120,env=None):
+    r=subprocess.run(['sh','tests/run-tests.sh',*a],cwd=str(FIX),env=env or HOSTILE,input=stdin,
                      capture_output=True,text=True,errors='replace',timeout=timeout)
     return r.returncode,r.stdout+r.stderr
 def ran(out):return sorted(set(re.findall(r'(\w+):ran',out))|({'probe'} if 'probe:ok' in out else set()))
@@ -156,6 +159,15 @@ assert FIXED.count('child_env = build_child_env()')==1
 code,out=rt('case','probe')
 (FIX/'tests/run-tests.sh').write_text(FIXED,encoding='utf-8')
 check('负控：改用继承环境后探针报泄漏',code==1 and all(v in out for v in ('PYTHONPATH','SYNTH_SECRET','SYNTH_EMPTY')),out[-300:])
+# 观测台 node 路径：只转发这一个显式非秘密变量，未给时不留其它位
+code,out=rt('case','test-paseo-observatory.py')
+check('环境白名单：未给观测台 node 时观测台入口也不设置该变量',
+      code==0 and 'node:unset' in out,out[-200:])
+code,out=rt('case','test-paseo-observatory.py',env=dict(HOSTILE,OBSERVATORY_TEST_NODE='/usr/bin/node'))
+check('环境白名单：按名只给观测台入口转发 node 绝对路径',
+      code==0 and 'node:/usr/bin/node' in out and 'probe:ok' in out,out[-300:])
+code,out=rt('case','probe',env=dict(HOSTILE,OBSERVATORY_TEST_NODE='/usr/bin/node'))
+check('环境白名单：非观测台入口不继承观测台 node 变量',code==0 and 'node:unset' in out,out[-200:])
 
 # ── CI workflow 运行段：抽取标界内的真实代码，在合成 Git 仓里跑，不复制选路算法 ──
 WF=(ROOT/'.github/workflows/tests.yml').read_text(encoding='utf-8');MK='          # >>> CI_SELECT\n'

@@ -128,11 +128,36 @@ def base_scenario(**over):
     return scenario
 
 
+def resolve_test_node():
+    """被测桥接必须用真实 node；显式给出时只接受核过的绝对可执行路径。
+
+    CI 在 env -i 最小 PATH 下无法解析 node，故由工作流外层解析后以单个非秘密变量传入。
+    缺失或无效直接报错让用例失败，不用跳过或假绿掩盖依赖问题。
+    """
+    explicit = os.environ.get("OBSERVATORY_TEST_NODE")
+    if explicit:
+        if not (os.path.isabs(explicit) and os.path.isfile(explicit)
+                and os.access(explicit, os.X_OK)):
+            raise RuntimeError("OBSERVATORY_TEST_NODE 不是绝对可执行文件")
+        return explicit
+    found = shutil.which("node")
+    if not found:
+        raise RuntimeError("PATH 中没有 node；受限环境应传 OBSERVATORY_TEST_NODE")
+    return found
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="obs-test-")
         self.cli, self.sdk = make_fake_cli(self.tmp, base_scenario())
         self.env_backup = dict(os.environ)
+        # 只在用例内把已核 node 暴露成唯一入口：独占目录里一个 node 软链并前置到 PATH，
+        # 不把宿主完整 PATH 或其它可执行带入子进程。
+        node = resolve_test_node()
+        bindir = pathlib.Path(self.tmp) / "bin"
+        bindir.mkdir()
+        os.symlink(node, bindir / "node")
+        os.environ["PATH"] = f"{bindir}:{os.environ.get('PATH', '')}"
 
     def tearDown(self):
         os.environ.clear()
