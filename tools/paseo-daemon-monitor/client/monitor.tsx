@@ -130,12 +130,14 @@ function Meter({ percent, tone, colors }: { percent: number | null; tone: string
 /** Rough advance width of one CJK glyph at the 10 px badge size. */
 const ANOMALY_CHAR_WIDTH = 10;
 
-function Reading({ icon, percent, tone, showMeter, showIcon, colors, onTextWidth }: {
+function Reading({ icon, percent, tone, showMeter, showIcon, grow, colors, onTextWidth }: {
   icon: string;
   percent: number | null | undefined;
   tone: string;
   showMeter: boolean;
   showIcon: boolean;
+  /** Equal-slot mode: one third of the row, contents centred as a unit. */
+  grow: boolean;
   colors: Colors;
   onTextWidth: (width: number) => void;
 }) {
@@ -143,7 +145,13 @@ function Reading({ icon, percent, tone, showMeter, showIcon, colors, onTextWidth
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+        ...(grow ? { flexGrow: 1, flexBasis: 0, minWidth: 0, overflow: "hidden" } : { flexShrink: 0 }),
+      }}
     >
       {showIcon ? <Icon name={icon} size={12} color={tone} /> : null}
       <Text
@@ -226,6 +234,7 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.accent}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
+        grow={plan.mode === "equal"}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(0, width)}
       />
@@ -235,6 +244,7 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.statusSuccess}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
+        grow={plan.mode === "equal"}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(1, width)}
       />
@@ -244,6 +254,7 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.statusWarning}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
+        grow={plan.mode === "equal"}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(2, width)}
       />
