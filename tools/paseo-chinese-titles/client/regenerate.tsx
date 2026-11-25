@@ -174,8 +174,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       badgeSub: { color: colors.accent, fontSize: 9, marginLeft: 1 },
       heading: {
         color: colors.foreground,
-        fontSize: compact ? 23 : 25,
-        lineHeight: compact ? 30 : 33,
+        fontSize: compact ? 20 : 22,
+        lineHeight: compact ? 27 : 29,
         fontWeight: "700" as const,
       },
       context: {
@@ -196,8 +196,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       cardValue: {
         marginTop: 4,
         color: colors.foreground,
-        fontSize: compact ? 18 : 20,
-        lineHeight: compact ? 26 : 28,
+        fontSize: compact ? 16 : 18,
+        lineHeight: compact ? 23 : 25,
         fontWeight: "600" as const,
       },
       columns: {
@@ -208,8 +208,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       column: { flex: 1, minWidth: 0, gap: 4 },
       sectionTitle: {
         color: colors.foreground,
-        fontSize: 18,
-        lineHeight: 24,
+        fontSize: 16,
+        lineHeight: 22,
         fontWeight: "600" as const,
       },
       helper: {
@@ -248,8 +248,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       optionCopy: { flex: 1, minWidth: 0, gap: 2 },
       optionLabel: {
         color: colors.foreground,
-        fontSize: 16,
-        lineHeight: 22,
+        fontSize: 15,
+        lineHeight: 21,
         fontWeight: "600" as const,
       },
       optionMeta: { color: colors.foregroundMuted, fontSize: 14, lineHeight: 20 },
@@ -282,8 +282,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
       },
       buttonText: {
         color: colors.accentForeground,
-        fontSize: 16,
-        lineHeight: 22,
+        fontSize: 15,
+        lineHeight: 21,
         fontWeight: "700" as const,
         textAlign: "center" as const,
       },
