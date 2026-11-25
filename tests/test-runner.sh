@@ -163,8 +163,9 @@ check('负控：改用继承环境后探针报泄漏',code==1 and all(v in out f
 code,out=rt('case','test-paseo-observatory.py')
 check('环境白名单：未给观测台 node 时该入口 PATH 不变',
       code==0 and 'nodebin:no' in out,out[-200:])
-NODE_ABS=os.environ.get('OBSERVATORY_TEST_NODE') or shutil.which('node') or ''
-assert os.path.isabs(NODE_ABS) and os.access(NODE_ABS,os.X_OK),NODE_ABS
+# 夹具自建一个可执行占位，不依赖宿主 node 的位置（runner 只核绝对常规可执行）。
+NODE_ABS=str(FIX/'fakenode');(FIX/'fakenode').write_text('#!/bin/sh\nexit 0\n',encoding='utf-8')
+os.chmod(NODE_ABS,0o755)
 code,out=rt('case','test-paseo-observatory.py',env=dict(HOSTILE,OBSERVATORY_TEST_NODE=NODE_ABS))
 check('环境白名单：观测台入口只前置本轮 node 目录且不继承其它变量',
       code==0 and 'nodebin:yes' in out and 'probe:ok' in out,out[-300:])
