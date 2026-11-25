@@ -174,15 +174,15 @@ function pillRateText(slot: PillCacheBasis): string {
 
 /**
  * The composer pill shares one 160 px row with its icon, the pill padding and
- * any other pill, and the host truncates the label with an ellipsis, so the
- * visible line uses the shortest readable form of each rate. One-decimal
- * precision stays; a whole percentage drops only the trailing `.0`
- * (`100.0%` → `100%`) so two full rates still fit. The tooltip keeps the full
- * names and one decimal.
+ * any other pill, and the host truncates the label with an ellipsis. The pill
+ * therefore prints the bare number: no percent sign (the tooltip keeps it) and
+ * only a trailing `.0` removed, so `98.5%` → `98.5` and `100.0%` → `100`. A
+ * real measurement keeps its one decimal; `…` and `—` pass through.
  */
 function pillRateCompact(slot: PillCacheBasis): string {
   const text = pillRateText(slot);
-  return text.endsWith(".0%") ? text.slice(0, -3) + "%" : text;
+  const bare = text.endsWith("%") ? text.slice(0, -1) : text;
+  return bare.endsWith(".0") ? bare.slice(0, -2) : bare;
 }
 
 function pillTitleText(slot: PillCacheBasis, label: string, missing: string): string {
@@ -193,15 +193,17 @@ function pillTitleText(slot: PillCacheBasis, label: string, missing: string): st
 }
 
 /**
- * Visible composer-pill label: "总98.1%·近99.5%". The two percentages are
- * independent readings — the cumulative rate from the cumulative RPC, the
- * recent rate from each conversation's latest `lastUsage` — and neither ever
- * stands in for the other. `总`/`近` and the bare `·` are the shortest form that
- * still names both bases inside the host's 160 px single line; the tooltip
- * below spells out the full names and any missing-value reason.
+ * Visible composer-pill label: "累计 98.5 · 最近 99.7", where the space after
+ * each label is U+202F (narrow no-break space). The two readings are
+ * independent — the cumulative rate from the cumulative RPC, the recent rate
+ * from each conversation's latest `lastUsage` — and neither ever stands in for
+ * the other. The narrow space both separates a CJK label from its digits and
+ * keeps the line inside the host's 160 px single line; the tooltip below keeps
+ * the full names, one decimal and the percent sign.
  */
 export function formatPillLabel(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
-  return "总" + pillRateCompact(cumulative) + "·近" + pillRateCompact(recent);
+  return "累计\u202F" + pillRateCompact(cumulative)
+    + " · 最近\u202F" + pillRateCompact(recent);
 }
 
 /** Full tooltip: open action, both cache bases, and why either one is missing. */
