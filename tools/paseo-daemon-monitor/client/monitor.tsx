@@ -5,9 +5,9 @@ import {
   useRpc,
   useSettings,
 } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
+import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppState, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { AppState, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { hostResourcesRpc, type HostResources } from "../shared/contract.ts";
 import { buildSeries, drawnPoints, type SeriesRun } from "../shared/history.ts";
 import { chooseFooterPlan, FOOTER_HEIGHT } from "../shared/layout.ts";
