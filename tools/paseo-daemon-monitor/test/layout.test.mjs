@@ -272,3 +272,25 @@ test("phone: a moderately larger font still shows both rates at 390 DP", () => {
   assert.equal(plan.showIcons, true);
   assert.equal(plan.tailWidth, Math.ceil(40 * 1.3) + FOOTER_COMPACT_TAIL_PAD);
 });
+
+test("phone screenshot case (≈423 DP, 8.8% / 62% / 79%) keeps both rates and meters", () => {
+  // The report that started this round: a ~423 DP phone footer showed bare
+  // numbers with no meter and no rates. Real label widths at 1x are narrower
+  // than the 40 DP worst case, so this must fit with room left for meters.
+  const labels = [27, 26, 26];
+  for (const width of [350, 368, 390, 423, 424]) {
+    const plan = chooseFooterPlan({ width, textWidths: labels, networkAvailable: true, showNetworkSetting: true, compact: true, fontScale: 1 });
+    assert.equal(plan.tail, "network", `rates at ${width}`);
+    assert.equal(plan.tailStacked, true, `two stacked lines at ${width}`);
+    assert.equal(plan.showTail, true, `tail visible at ${width}`);
+    assert.equal(plan.showIcons, true, `icons at ${width}`);
+    assert.equal(plan.showMeters, true, `meter at ${width}`);
+    assert.ok(plan.meterWidth > FOOTER_METER_MIN, `meter room at ${width}`);
+  }
+  // A real 0 B/s sample still counts as data: only a missing sample drops it.
+  const zero = chooseFooterPlan({ width: 390, textWidths: labels, networkAvailable: true, showNetworkSetting: true, compact: true, fontScale: 1 });
+  const missing = chooseFooterPlan({ width: 390, textWidths: labels, networkAvailable: false, showNetworkSetting: true, compact: true, fontScale: 1 });
+  assert.equal(zero.tail, "network");
+  assert.equal(missing.tail, "none");
+  assert.ok(missing.meterWidth > zero.meterWidth);
+});
