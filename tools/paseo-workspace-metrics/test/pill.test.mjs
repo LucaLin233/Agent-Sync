@@ -111,14 +111,16 @@ const ready = (rate) => ({ kind: "ready", rate });
 const loading = { kind: "loading" };
 const off = { kind: "unavailable", reason: "累计统计已关闭" };
 
-test("the pill always carries the cumulative and recent rates, never a speed", () => {
+test("the compact pill keeps both measured rates and never a speed", () => {
   // The two slots are independent readings, so different numbers both show.
-  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "累计 94.9% · 最近 81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "总94.9%·近81.2%");
+  // The reported case: the numbers stay complete instead of being clipped.
+  assert.equal(formatPillLabel(ready(0.981), ready(0.995)), "总98.1%·近99.5%");
   // Equal readings still print both, because they come from different bases.
-  assert.equal(formatPillLabel(ready(0.5), ready(0.5)), "累计 50.0% · 最近 50.0%");
+  assert.equal(formatPillLabel(ready(0.5), ready(0.5)), "总50%·近50%");
   // Real zero is a measurement, not a missing value.
-  assert.equal(formatPillLabel(ready(0), ready(1)), "累计 0.0% · 最近 100.0%");
-  // The pill line never contains a token rate any more.
+  assert.equal(formatPillLabel(ready(0), ready(1)), "总0%·近100%");
+  // The pill line never contains a token rate.
   for (const label of [
     formatPillLabel(ready(0.949), ready(0.812)),
     formatPillLabel(loading, ready(null)),
@@ -128,16 +130,60 @@ test("the pill always carries the cumulative and recent rates, never a speed", (
   }
 });
 
+test("a whole percentage drops only its .0, keeping the measured precision", () => {
+  // 100.0% is the only value that can reach three digits; two of them still fit.
+  assert.equal(formatPillLabel(ready(1), ready(1)), "总100%·近100%");
+  // Any other whole percentage shortens the same way, not just 100%.
+  assert.equal(formatPillLabel(ready(0.98), ready(0.5)), "总98%·近50%");
+  assert.equal(formatPillLabel(ready(0), ready(0)), "总0%·近0%");
+  // A non-zero tenths digit keeps its one-decimal precision.
+  assert.equal(formatPillLabel(ready(0.981), ready(0.995)), "总98.1%·近99.5%");
+  // The tooltip never shortens; it stays on one decimal with full names.
+  assert.equal(formatPillTitle(ready(1), ready(0.5)),
+    "打开工作区用量 · 累计缓存 100.0% · 最近样本 50.0%");
+});
+
 test("each pill slot keeps its own placeholder and never borrows the other", () => {
-  assert.equal(formatPillLabel(loading, ready(0.812)), "累计 … · 最近 81.2%");
-  assert.equal(formatPillLabel(off, ready(0.812)), "累计 — · 最近 81.2%");
-  assert.equal(formatPillLabel(ready(0.949), ready(null)), "累计 94.9% · 最近 —");
-  assert.equal(formatPillLabel(off, loading), "累计 — · 最近 …");
+  assert.equal(formatPillLabel(loading, ready(0.812)), "总…·近81.2%");
+  assert.equal(formatPillLabel(off, ready(0.812)), "总—·近81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(null)), "总94.9%·近—");
+  assert.equal(formatPillLabel(off, loading), "总—·近…");
   // A missing cumulative rate is never filled from the recent sample.
-  assert.equal(formatPillLabel(ready(null), ready(0.812)), "累计 — · 最近 81.2%");
+  assert.equal(formatPillLabel(ready(null), ready(0.812)), "总—·近81.2%");
   assert.equal(formatPillLabel({ kind: "unavailable", reason: "累计读取失败" }, ready(0.812)),
-    "累计 — · 最近 81.2%");
-  assert.equal(formatPillLabel(ready(0.949), ready(undefined)), "累计 94.9% · 最近 —");
+    "总—·近81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(undefined)), "总94.9%·近—");
+});
+
+/**
+ * Width estimate for the host's composer pill, from Paseo v0.17.4 public styles
+ * (`packages/app/src/composer/pill-styles.ts`, `plugins/buttons/view.tsx`):
+ * maxWidth 160, paddingHorizontal 12 each side, gap 8, 16 px icon and 12 px
+ * (fontSize.sm) label. An `action` pill has no chevron. Glyph widths are the
+ * usual 12 px approximations, so this is an estimate, not a real layout pass.
+ */
+const PILL_LABEL_BUDGET = 160 - 12 - 12 - 8 - 16;
+function estimatedLabelWidth(text) {
+  const glyph = (char) => {
+    if (char === " " || char === ".") return 3.4;
+    if (char === "%") return 10.4;
+    if (char === "·") return 4.5;
+    if (char === "…" || char === "—") return 12;
+    if (char.charCodeAt(0) < 0x2e80) return 6.7; // digits, latin
+    return 12; // CJK
+  };
+  return [...text].reduce((sum, char) => sum + glyph(char), 0);
+}
+
+test("the compact pill label fits the host's 160 px single line", () => {
+  const label = formatPillLabel(ready(0.981), ready(0.995));
+  assert.equal(label, "总98.1%·近99.5%");
+  assert.ok(estimatedLabelWidth(label) <= PILL_LABEL_BUDGET,
+    `${label} ≈ ${estimatedLabelWidth(label)} px > ${PILL_LABEL_BUDGET} px`);
+  // The reported truncation: the previously shipped wording overshoots the same budget.
+  assert.ok(estimatedLabelWidth("累计 98.1% · 最近 99.5%") > PILL_LABEL_BUDGET);
+  // Two full rates in the compact form are the widest case that must still fit.
+  assert.ok(estimatedLabelWidth(formatPillLabel(ready(1), ready(1))) <= PILL_LABEL_BUDGET);
 });
 
 test("the pill title names both bases and explains a missing cumulative rate", () => {
@@ -180,7 +226,7 @@ test("the panel keeps distinct recent and cumulative speeds while the pill carri
   assert.equal(formatTokenSpeed(recentSpeed), "900.0 t/s");
   assert.equal(formatTokenSpeed(cumulativeSpeed), "82.7 t/s");
   // …and neither leaks into the composer pill, which shows the two cache rates.
-  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "累计 94.9% · 最近 81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "总94.9%·近81.2%");
 });
 
 test("cumulative speed is weighted by whole-turn duration, not averaged", () => {
