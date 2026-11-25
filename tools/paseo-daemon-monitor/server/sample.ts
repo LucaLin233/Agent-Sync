@@ -3,6 +3,8 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   clampPercent,
   cpuUsagePercent,
+  deltaWindow,
+  diskTotals,
   diskUsage,
   memoryUsagePercent,
   netRates,
@@ -32,9 +34,16 @@ export const SAMPLE_MS = 2_000;
 /** Disks change slowly and statfs across many mounts is not free. */
 export const DISK_MS = 30_000;
 /** About three minutes of fast samples at 2 s. */
-export const HISTORY_LIMIT = Math.round((3 * 60_000) / SAMPLE_MS);
+export const HISTORY_WINDOW_MS = 3 * 60_000;
+export const HISTORY_LIMIT = Math.round(HISTORY_WINDOW_MS / SAMPLE_MS);
 /** Stop the shared loop when no client has asked for a sample recently. */
 const IDLE_STOP_MS = 30_000;
+/**
+ * Counter deltas older than this are a resume gap, not a current reading: the
+ * percentage would average the whole idle period. Such a delta is reported as
+ * null and the history keeps a visible hole instead of a fake bridge.
+ */
+const MAX_DELTA_MS = SAMPLE_MS * 3;
 const PRIME_MS = 250;
 
 /** The forked plugin worker's parent is the daemon; pin it once, never re-derive it. */
@@ -66,16 +75,23 @@ export interface HistoryPoint {
   memoryPercent: number | null;
   rxBytesPerSecond: number | null;
   txBytesPerSecond: number | null;
+  /** Aggregate disk percentage, sampled with the 30 s disk cadence. */
+  diskPercent: number | null;
 }
 
 interface DiskState {
   atMono: number;
   entries: DiskEntry[] | null;
   scope: "local-mounts" | "root-only";
+  /** Root reading taken in the same 30 s pass, so the fast path never statfs's. */
+  root: Awaited<ReturnType<typeof readSystemDisk>> | null;
+  rootIsStale: boolean;
 }
 
 let baseline: CounterBaseline | null = null;
 let latest: HostResources | null = null;
+/** Monotonic time `latest` was produced; a resume must not serve an old payload. */
+let latestMono = 0;
 let history: HistoryPoint[] = [];
 let diskState: DiskState | null = null;
 let loopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -119,19 +135,38 @@ async function readMemorySnapshot(): Promise<{ totalBytes: number; availableByte
 }
 
 /**
- * Disk rows are refreshed independently every 30 s. A failure keeps the root
- * reading and marks the scope accordingly; it never touches CPU or memory.
+ * Both the disk rows and the root reading refresh together every 30 s, so the
+ * 2 s fast path never repeats a statfs. If a refresh fails, the previous rows
+ * and root figure are reused rather than dropped; the flags say they are old.
  */
 async function refreshDisks(nowMono: number): Promise<DiskState> {
   if (diskState && nowMono - diskState.atMono < DISK_MS) return diskState;
-  const entries = await readLocalDisks().catch(() => null);
+  const [entries, root] = await Promise.all([
+    readLocalDisks().catch(() => null),
+    readSystemDisk().catch(() => null),
+  ]);
+  const usable = entries && entries.length > 0 ? entries : null;
   const next: DiskState = {
     atMono: nowMono,
-    entries: entries && entries.length > 0 ? entries : null,
-    scope: entries && entries.length > 0 ? "local-mounts" : "root-only",
+    entries: usable ?? diskState?.entries ?? null,
+    scope: usable ? "local-mounts" : "root-only",
+    root: root ?? diskState?.root ?? null,
+    rootIsStale: root === null && diskState?.root != null,
   };
   diskState = next;
   return next;
+}
+
+/** Aggregate disk figure with an explicit scope; the root fallback is labelled. */
+function diskTotalValue(disks: DiskState): HostResources["diskTotal"] {
+  if (disks.entries) {
+    const totals = diskTotals(disks.entries);
+    return totals ? { scope: "local-disks", ...totals } : null;
+  }
+  const root = disks.root ? diskUsage(disks.root) : null;
+  return root
+    ? { scope: "root-disk", usedBytes: root.usedBytes, availableBytes: root.availableBytes, percent: root.percent }
+    : null;
 }
 
 /** One pass over every counter. Returns null only if even CPU failed outright. */
@@ -141,8 +176,8 @@ async function tick(): Promise<HostResources | null> {
   const firstProcess = await readDaemonProcess();
   const memory = await readMemorySnapshot();
   const memoryDetail = process.platform === "linux" ? await readMemoryDetail().catch(() => null) : null;
+  // One macOS read feeds both the used figure and the cached/pressure fields.
   const mac = process.platform === "darwin" ? await readMacMemory().catch(() => null) : null;
-  const rootDisk = await readSystemDisk().catch(() => null);
   // Failures stay isolated per collector: no counter can null out another.
   const network = await readNetDev().catch(() => null);
   const uptimeSeconds = await readUptime().catch(() => null);
@@ -151,11 +186,16 @@ async function tick(): Promise<HostResources | null> {
 
   const record = (previous: CounterBaseline | null, cpu: typeof firstCpu, daemon: typeof firstProcess): HostResources | null => {
     const nowMono = monotonicMs();
-    const comparable = previous !== null && cpu !== null && previous.source === cpu.source;
-    const hostTicks = comparable ? cpu.times.total - previous.times.total : 0;
-    const windowMs = comparable ? Math.max(0, nowMono - previous.atMono) : 0;
+    // A resumed loop after an idle stop would otherwise show a many-minute
+    // average as "now". Anything past a few sample intervals is a gap.
+    const { withinCadence, windowMs: elapsed } = deltaWindow(previous?.atMono ?? null, nowMono, MAX_DELTA_MS);
+    const comparable = withinCadence && previous !== null && cpu !== null && previous.source === cpu.source;
+    const hostTicks = comparable && previous !== null ? cpu.times.total - previous.times.total : 0;
+    const windowMs = comparable ? elapsed : 0;
     const memoryUsedBytes = memory.availableBytes === null ? null : Math.max(0, memory.totalBytes - memory.availableBytes);
-    const diskUse = rootDisk ? diskUsage(rootDisk) : null;
+    // Root disk comes from the same 30 s pass; it is not re-read every 2 s.
+    const diskUse = disks.root ? diskUsage(disks.root) : null;
+    const diskTotal = diskTotalValue(disks);
 
     let processValue: HostResources["process"] = null;
     if (daemon) {
@@ -176,8 +216,8 @@ async function tick(): Promise<HostResources | null> {
     const networkRates =
       network === null
         ? null
-        : previous?.network != null
-          ? netRates(previous.network, network, windowMs)
+        : withinCadence && previous?.network != null
+          ? netRates(previous.network, network, elapsed)
           : { rxBytesPerSecond: null, txBytesPerSecond: null };
 
     const cpuPercent = comparable ? cpuUsagePercent(previous.times, cpu.times) : null;
@@ -207,9 +247,15 @@ async function tick(): Promise<HostResources | null> {
         memoryPercent,
         rxBytesPerSecond: networkRates?.rxBytesPerSecond ?? null,
         txBytesPerSecond: networkRates?.txBytesPerSecond ?? null,
+        // It is a step function: identical between refreshes, never interpolated.
+        diskPercent: diskTotal?.percent ?? null,
       },
       HISTORY_LIMIT,
     );
+    // Drop points outside the three-minute window as well as by count, so a
+    // resume after an idle stop cannot splice old points onto the new curve.
+    const cutoff = Date.now() - HISTORY_WINDOW_MS;
+    history = history.filter((point) => Date.parse(point.at) >= cutoff);
 
     return {
       sampledAt: new Date().toISOString(),
@@ -237,6 +283,7 @@ async function tick(): Promise<HostResources | null> {
       loadAverage,
       disks: diskRows,
       diskScope: disks.entries ? "local-mounts" : "root-only",
+      diskTotal,
       memoryBreakdown: mac
         ? { cachedBytes: mac.cachedBytes, buffersBytes: null }
         : memoryDetail
@@ -312,7 +359,10 @@ function ensureLoop(): void {
       ticking = true;
       try {
         const value = await tick();
-        if (value) latest = value;
+        if (value) {
+          latest = value;
+          latestMono = monotonicMs();
+        }
       } catch {
         // A failed pass keeps the last good payload; the next tick retries.
       } finally {
@@ -339,6 +389,7 @@ export function stopSampler(): void {
   stopLoop();
   baseline = null;
   latest = null;
+  latestMono = 0;
   history = [];
   diskState = null;
 }
@@ -346,7 +397,9 @@ export function stopSampler(): void {
 export async function readHostResources(_input: unknown, _context: PluginHandlerContext): Promise<HostResources> {
   lastDemandMono = monotonicMs();
   ensureLoop();
-  if (latest) return latest;
+  // Serve the shared payload only while it is current; after an idle stop it is
+  // stale, so the caller waits for a fresh pass instead of seeing old numbers.
+  if (latest && monotonicMs() - latestMono <= MAX_DELTA_MS) return latest;
   // First caller waits for the initial pass instead of inventing an empty one.
   if (ticking) {
     while (ticking) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -355,7 +408,10 @@ export async function readHostResources(_input: unknown, _context: PluginHandler
   ticking = true;
   try {
     const value = await tick();
-    if (value) latest = value;
+    if (value) {
+      latest = value;
+      latestMono = monotonicMs();
+    }
   } finally {
     ticking = false;
   }
@@ -381,6 +437,7 @@ function emptyReading(): HostResources {
     loadAverage: null,
     disks: null,
     diskScope: "root-only",
+    diskTotal: null,
     memoryBreakdown: null,
     memoryPressure: null,
     history: { intervalMs: SAMPLE_MS, samples: [] },

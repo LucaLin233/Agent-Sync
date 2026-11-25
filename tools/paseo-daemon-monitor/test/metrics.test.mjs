@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  deltaWindow,
   dfPercent,
+  diskTotals,
   localMounts,
   parseLoadAverage,
   parseMeminfoDetail,
@@ -80,4 +82,28 @@ test("macOS memory pressure maps warning and critical", () => {
   assert.equal(parseMemoryPressure("2\n"), "warning");
   assert.equal(parseMemoryPressure("4"), "critical");
   assert.equal(parseMemoryPressure("3"), null);
+});
+
+test("disk totals sum deduplicated rows and keep df semantics", () => {
+  assert.deepEqual(diskTotals([{ usedBytes: 60, availableBytes: 40 }, { usedBytes: 40, availableBytes: 60 }]), {
+    usedBytes: 100,
+    availableBytes: 100,
+    percent: 50,
+  });
+  // Reserved space is in neither column, so a 100/0 split is full, not 50%.
+  assert.equal(diskTotals([{ usedBytes: 100, availableBytes: 0 }])?.percent, 100);
+  assert.equal(diskTotals([])?.percent, undefined);
+  assert.equal(diskTotals([]), null);
+});
+
+test("a resume after an idle stop is a gap, not a long-run average", () => {
+  // Normal 2 s cadence.
+  assert.deepEqual(deltaWindow(1000, 3000, 6000), { withinCadence: true, windowMs: 2000 });
+  // Exactly at the tolerance is still current.
+  assert.deepEqual(deltaWindow(1000, 7000, 6000), { withinCadence: true, windowMs: 6000 });
+  // 40 s idle: the old baseline would average 40 s into one instantaneous point.
+  assert.deepEqual(deltaWindow(1000, 41000, 6000), { withinCadence: false, windowMs: 0 });
+  // No baseline at all, and a backwards clock, are both gaps.
+  assert.deepEqual(deltaWindow(null, 5000, 6000), { withinCadence: false, windowMs: 0 });
+  assert.deepEqual(deltaWindow(9000, 5000, 6000), { withinCadence: false, windowMs: 0 });
 });

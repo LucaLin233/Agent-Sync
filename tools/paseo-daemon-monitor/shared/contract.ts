@@ -67,6 +67,18 @@ export const hostResourcesRpc = defineRpc({
       .nullable(),
     /** "local-mounts" = enumerated; "root-only" = fallback to the root reading. */
     diskScope: z.enum(["local-mounts", "root-only"]),
+    /**
+     * One df-style figure across all deduplicated local disks. Scope says what
+     * it covers; null only when neither enumeration nor the root reading worked.
+     */
+    diskTotal: z
+      .object({
+        scope: z.enum(["local-disks", "root-disk"]),
+        usedBytes: z.number().nonnegative(),
+        availableBytes: z.number().nonnegative(),
+        percent: z.number().min(0).max(100).nullable(),
+      })
+      .nullable(),
     /** Reclaimable page cache and buffers, when the platform reports them. */
     memoryBreakdown: z
       .object({ cachedBytes: z.number().nonnegative().nullable(), buffersBytes: z.number().nonnegative().nullable() })
@@ -84,6 +96,8 @@ export const hostResourcesRpc = defineRpc({
           memoryPercent: z.number().min(0).max(100).nullable(),
           rxBytesPerSecond: z.number().nonnegative().nullable(),
           txBytesPerSecond: z.number().nonnegative().nullable(),
+          /** Carried at the 30 s disk cadence; null between disk refreshes. */
+          diskPercent: z.number().min(0).max(100).nullable(),
         }),
       ),
     }),

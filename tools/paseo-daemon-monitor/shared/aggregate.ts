@@ -298,3 +298,33 @@ export function parseMemoryPressure(text: string): "normal" | "warning" | "criti
   if (level === 4) return "critical";
   return null;
 }
+
+/** df-style aggregate across deduplicated local disks. */
+export function diskTotals(rows: readonly { usedBytes: number; availableBytes: number }[]):
+  | { usedBytes: number; availableBytes: number; percent: number | null }
+  | null {
+  if (rows.length === 0) return null;
+  let usedBytes = 0;
+  let availableBytes = 0;
+  for (const row of rows) {
+    if (!Number.isFinite(row.usedBytes) || !Number.isFinite(row.availableBytes)) return null;
+    usedBytes += Math.max(0, row.usedBytes);
+    availableBytes += Math.max(0, row.availableBytes);
+  }
+  return { usedBytes, availableBytes, percent: dfPercent(usedBytes, availableBytes) };
+}
+
+/**
+ * A counter delta is only a "current" reading if the two readings are close
+ * together. After an idle stop or a stall, reporting the whole gap as one
+ * window would show a long-run average as if it were the latest instant.
+ */
+export function deltaWindow(
+  previousMono: number | null,
+  nowMono: number,
+  maxMs: number,
+): { withinCadence: boolean; windowMs: number } {
+  if (previousMono === null) return { withinCadence: false, windowMs: 0 };
+  const elapsed = Math.max(0, nowMono - previousMono);
+  return { withinCadence: elapsed > 0 && elapsed <= maxMs, windowMs: elapsed > 0 && elapsed <= maxMs ? elapsed : 0 };
+}

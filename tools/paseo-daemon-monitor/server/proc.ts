@@ -1,5 +1,6 @@
 /** Filesystem reads for the daemon-side sampler. Server bundle only. */
 
+import os from "node:os";
 import { execFile } from "node:child_process";
 import { readFile, statfs } from "node:fs/promises";
 import {
@@ -54,14 +55,32 @@ export async function readNetDev(): Promise<NetTotals | null> {
   return parseProcNetDev(await readFile("/proc/net/dev", "utf8"));
 }
 
+/**
+ * Linux reads the kernel's own 1/5/15 figures. Darwin gets them from
+ * os.loadavg(), which is a real kernel value there. Windows has no equivalent,
+ * so it stays null instead of a fabricated 0.
+ */
 export async function readLoadAverage(): Promise<{ one: number; five: number; fifteen: number } | null> {
-  if (process.platform !== "linux") return null;
-  return parseLoadAverage(await readFile("/proc/loadavg", "utf8"));
+  if (process.platform === "linux") {
+    return parseLoadAverage(await readFile("/proc/loadavg", "utf8"));
+  }
+  if (process.platform === "darwin") {
+    const [one, five, fifteen] = os.loadavg();
+    return [one, five, fifteen].every((value) => Number.isFinite(value) && value >= 0) ? { one, five, fifteen } : null;
+  }
+  return null;
 }
 
+/** Uptime in seconds: /proc/uptime on Linux, os.uptime() on Darwin and Windows. */
 export async function readUptime(): Promise<number | null> {
-  if (process.platform !== "linux") return null;
-  return parseUptime(await readFile("/proc/uptime", "utf8"));
+  if (process.platform === "linux") {
+    return parseUptime(await readFile("/proc/uptime", "utf8"));
+  }
+  if (process.platform === "darwin" || process.platform === "win32") {
+    const seconds = os.uptime();
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  return null;
 }
 
 export interface DiskEntry {
