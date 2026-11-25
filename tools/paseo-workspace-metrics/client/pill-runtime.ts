@@ -3,8 +3,7 @@ import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries, type Dir
 import {
   formatPillLabel,
   formatPillTitle,
-  formatRecentPillLabel,
-  tokensPerSecond,
+  type PillCacheBasis,
 } from "../shared/metrics.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
 
@@ -51,7 +50,6 @@ interface PillState {
 interface CumulativeState {
   rate: number | null;
   error: string | null;
-  turnSpeed: number | null;
 }
 
 /** Routine directory-driven reads stay at most one per this window per workspace. */
@@ -70,8 +68,9 @@ const EMPTY_SCOPE: WorkspaceScope = {
 };
 
 /**
- * Composer-pill runtime: one pill per visible agent, labelled from the same
- * cumulative response the panel shows. Directory events drive the reads; a
+ * Composer-pill runtime: one pill per visible agent showing two independent
+ * cache readings — the cumulative rate from the same RPC the panel shows, and
+ * the recent per-conversation sample. Directory events drive the reads; a
  * finished turn additionally gets a small number of bounded re-reads so a
  * rollout flushed after the event still reaches the label.
  */
@@ -108,28 +107,34 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     return ids.sort();
   };
 
-  const labelFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) => {
-    const recentLabel = () => formatRecentPillLabel(recent.get(workspaceId)?.rate);
-    if (!scope) return "累计 …";
-    if (!inScope(workspaceId)) return recentLabel();
+  /**
+   * The cumulative slot only ever reflects the cumulative RPC. Settings that
+   * put this workspace out of scope, a failed read, or a reply without a valid
+   * snapshot all leave the slot empty with its own reason; the recent sample
+   * never fills it.
+   */
+  const cumulativeSlot = (workspaceId: string): PillCacheBasis => {
+    if (!scope) return { kind: "loading" };
+    if (scope.error) return { kind: "unavailable", reason: "累计设置错误：" + scope.error };
+    if (!scope.enabled) return { kind: "unavailable", reason: "累计统计已关闭" };
+    if (!inScope(workspaceId)) return { kind: "unavailable", reason: "不在本机累计名单" };
     const state = cumulative.get(workspaceId);
-    if (!state) return "缓存 …";
-    if (state.error) return recentLabel();
-    // Both values share the one visible line; the full tooltip keeps the
-    // labelled cache basis and one-decimal speed.
-    return formatPillLabel(state.rate, state.turnSpeed);
+    if (!state) return { kind: "loading" };
+    if (state.error) return { kind: "unavailable", reason: "累计读取失败：" + state.error };
+    return { kind: "ready", rate: state.rate };
   };
 
-  const titleFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) => {
-    const recentRate = recent.get(workspaceId)?.rate;
-    if (!scope) return "打开工作区用量";
-    if (!inScope(workspaceId)) return formatPillTitle(recentRate, null, "recent");
-    const state = cumulative.get(workspaceId);
-    if (!state) return "打开工作区用量 · 缓存 … · 近轮 —";
-    return state.error
-      ? formatPillTitle(recentRate, null, "recent")
-      : formatPillTitle(state.rate, state.turnSpeed);
-  };
+  /** The recent slot is the same per-conversation `lastUsage` summary the panel uses. */
+  const recentSlot = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>): PillCacheBasis => ({
+    kind: "ready",
+    rate: recent.get(workspaceId)?.rate ?? null,
+  });
+
+  const labelFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) =>
+    formatPillLabel(cumulativeSlot(workspaceId), recentSlot(workspaceId, recent));
+
+  const titleFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) =>
+    formatPillTitle(cumulativeSlot(workspaceId), recentSlot(workspaceId, recent));
 
   // Reuses live registrations; only a changed workspace, label, or title causes a write.
   const reconcile = () => {
@@ -205,16 +210,12 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       .requestCumulative({ workspaceId, agentIds, refresh })
       .then((result) => {
         if (!live()) return;
-        cumulative.set(workspaceId, {
-          rate: result.rate,
-          error: result.error,
-          turnSpeed: tokensPerSecond(result.recentTurn?.outputTokens, result.recentTurn?.elapsedMs),
-        });
+        cumulative.set(workspaceId, { rate: result.rate, error: result.error });
         reconcile();
       })
       .catch(() => {
         if (!live()) return;
-        cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败", turnSpeed: null });
+        cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败" });
         reconcile();
       });
   };
