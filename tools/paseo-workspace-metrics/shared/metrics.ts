@@ -172,6 +172,19 @@ function pillRateText(slot: PillCacheBasis): string {
   return formatCacheRate(slot.rate);
 }
 
+/**
+ * The composer pill shares one 160 px row with its icon, the pill padding and
+ * any other pill, and the host truncates the label with an ellipsis, so the
+ * visible line uses the shortest readable form of each rate. One-decimal
+ * precision stays; a whole percentage drops only the trailing `.0`
+ * (`100.0%` → `100%`) so two full rates still fit. The tooltip keeps the full
+ * names and one decimal.
+ */
+function pillRateCompact(slot: PillCacheBasis): string {
+  const text = pillRateText(slot);
+  return text.endsWith(".0%") ? text.slice(0, -3) + "%" : text;
+}
+
 function pillTitleText(slot: PillCacheBasis, label: string, missing: string): string {
   if (slot.kind === "loading") return label + " …";
   if (slot.kind === "unavailable") return label + " —（" + slot.reason + "）";
@@ -180,14 +193,15 @@ function pillTitleText(slot: PillCacheBasis, label: string, missing: string): st
 }
 
 /**
- * Visible composer-pill label: "累计 94.9% · 最近 81.2%". The two percentages
- * are independent readings — the cumulative rate from the cumulative RPC, the
+ * Visible composer-pill label: "总98.1%·近99.5%". The two percentages are
+ * independent readings — the cumulative rate from the cumulative RPC, the
  * recent rate from each conversation's latest `lastUsage` — and neither ever
- * stands in for the other. Only the 160 px single line is this terse; the
- * tooltip below spells out both bases and any missing-value reason.
+ * stands in for the other. `总`/`近` and the bare `·` are the shortest form that
+ * still names both bases inside the host's 160 px single line; the tooltip
+ * below spells out the full names and any missing-value reason.
  */
 export function formatPillLabel(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
-  return "累计 " + pillRateText(cumulative) + " · 最近 " + pillRateText(recent);
+  return "总" + pillRateCompact(cumulative) + "·近" + pillRateCompact(recent);
 }
 
 /** Full tooltip: open action, both cache bases, and why either one is missing. */
