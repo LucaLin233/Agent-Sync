@@ -8,7 +8,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppState, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { hostResourcesRpc, type HostResources } from "../shared/contract.ts";
-import { chooseFooterLayout, FOOTER_ROW_GAP, FOOTER_ROW_GAP_TIGHT } from "../shared/layout.ts";
+import { chooseFooterLayout } from "../shared/layout.ts";
 
 type Colors = PluginPopoverProps["theme"]["colors"];
 type Status = "loading" | "live" | "stale" | "failed";
@@ -130,14 +130,18 @@ function Meter({ percent, tone, colors }: { percent: number | null; tone: string
 /** Rough advance width of one CJK glyph at the 10 px badge size. */
 const ANOMALY_CHAR_WIDTH = 10;
 
-function Reading({ icon, percent, tone, showMeter, showIcon, grow, colors, onTextWidth }: {
+function Reading({ icon, percent, tone, showMeter, showIcon, grow, stacked, iconSize, iconGap, colors, onTextWidth }: {
   icon: string;
   percent: number | null | undefined;
   tone: string;
   showMeter: boolean;
   showIcon: boolean;
-  /** Equal-slot mode: one third of the row, contents centred as a unit. */
+  /** Equal-column mode: one third of the row, contents centred as a unit. */
   grow: boolean;
+  /** Icon above the number, still inside the same equal column. */
+  stacked: boolean;
+  iconSize: number;
+  iconGap: number;
   colors: Colors;
   onTextWidth: (width: number) => void;
 }) {
@@ -146,14 +150,14 @@ function Reading({ icon, percent, tone, showMeter, showIcon, grow, colors, onTex
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{
-        flexDirection: "row",
+        flexDirection: stacked ? "column" : "row",
         alignItems: "center",
         justifyContent: "center",
-        gap: 4,
+        gap: iconGap,
         ...(grow ? { flexGrow: 1, flexBasis: 0, minWidth: 0, overflow: "hidden" } : { flexShrink: 0 }),
       }}
     >
-      {showIcon ? <Icon name={icon} size={12} color={tone} /> : null}
+      {showIcon ? <Icon name={icon} size={iconSize} color={tone} /> : null}
       <Text
         numberOfLines={1}
         onLayout={(event) => onTextWidth(event.nativeEvent.layout.width)}
@@ -218,10 +222,10 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: plan.tightGap ? FOOTER_ROW_GAP_TIGHT : FOOTER_ROW_GAP,
+        gap: plan.columnGap,
         minHeight: 32,
         paddingVertical: 6,
-        paddingHorizontal: 9,
+        paddingHorizontal: plan.paddingX,
         borderRadius: 8,
         borderWidth: 1,
         borderColor: pressed ? colors.accent : colors.border,
@@ -234,7 +238,10 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.accent}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
-        grow={plan.mode === "equal"}
+        grow={plan.mode !== "content"}
+        stacked={plan.stacked}
+        iconSize={plan.iconSize}
+        iconGap={plan.iconGap}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(0, width)}
       />
@@ -244,7 +251,10 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.statusSuccess}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
-        grow={plan.mode === "equal"}
+        grow={plan.mode !== "content"}
+        stacked={plan.stacked}
+        iconSize={plan.iconSize}
+        iconGap={plan.iconGap}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(1, width)}
       />
@@ -254,7 +264,10 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         tone={colors.statusWarning}
         showMeter={plan.showMeters}
         showIcon={plan.showIcons}
-        grow={plan.mode === "equal"}
+        grow={plan.mode !== "content"}
+        stacked={plan.stacked}
+        iconSize={plan.iconSize}
+        iconGap={plan.iconGap}
         colors={colors}
         onTextWidth={(width) => recordTextWidth(2, width)}
       />

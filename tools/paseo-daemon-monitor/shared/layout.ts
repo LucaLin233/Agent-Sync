@@ -1,26 +1,37 @@
 /**
  * Footer row fitting for the sidebar item.
  *
- * The desktop sidebar can be dragged arbitrarily narrow while still reporting a
- * non-compact layout. RN text neither shrinks nor ellipsizes usefully at 11 px,
- * so the row sheds decoration as its measured width shrinks. Every width here
- * is an outer (onLayout frame) width in DP/CSS pixels; `FOOTER_INSET_X` is
- * subtracted once to get the usable content width.
+ * The desktop sidebar can be dragged down to its minimum width (200 DP in
+ * Paseo 0.17.4) while still reporting a non-compact layout. The three host
+ * readings must stay identifiable there: CPU, memory and disk each keep their
+ * icon and their full percentage. To make that fit, the row tightens its own
+ * padding, icon size and icon/label gap before it gives anything up, and only
+ * as a last resort stacks the icon above the number inside the same column.
  *
- * Two arrangements exist:
- * - "equal": three equal-width slots spanning the inner width, each centring
- *   its icon, percentage and optional meter. Fitting uses the *widest* of the
- *   three labels, not their sum, because every slot is sized by the largest.
- * - "content": numbers only, content-sized, used only when three slots of the
- *   widest label genuinely cannot fit. No icons or meters here either: adding
- *   decoration back for one wider reading is what squeezed the numbers before.
+ * Every width in this module is an outer (onLayout frame) width in DP/CSS
+ * pixels. `frameInset(paddingX)` is the horizontal chrome (padding + border).
+ *
+ * Arrangements, in decreasing width:
+ * 1. "row"       icon + percentage + meter, three equal columns
+ * 2. "row"       icon + percentage, three equal columns
+ * 3. "row"       compact padding/icon, three equal columns
+ * 4. "stacked"   icon above percentage, three equal columns
+ * 5. "content"   percentages only, content-sized (physical floor)
+ *
+ * Fitting uses the *widest* of the three labels for every column, since equal
+ * columns are all sized by the largest.
  */
 
-export const FOOTER_INSET_X = 20; // paddingHorizontal 9 + borderWidth 1, both sides
 export const FOOTER_SLOTS = 3;
-export const FOOTER_ROW_GAP = 9;
-export const FOOTER_ROW_GAP_TIGHT = 4;
-export const FOOTER_ICON_COST = 16; // 12 px icon + 4 px gap
+export const FOOTER_BORDER_X = 2; // borderWidth 1 on both sides
+export const FOOTER_PAD_X = 9;
+export const FOOTER_PAD_X_TIGHT = 4;
+export const FOOTER_COL_GAP = 9;
+export const FOOTER_COL_GAP_TIGHT = 2;
+export const FOOTER_ICON_SIZE = 12;
+export const FOOTER_ICON_SIZE_TIGHT = 10;
+export const FOOTER_ICON_GAP = 4;
+export const FOOTER_ICON_GAP_TIGHT = 2;
 export const FOOTER_METER_COST = 26; // 4 px gap + 22 px meter
 export const FOOTER_ANOMALY_GAP = 9;
 export const FOOTER_ANOMALY_DOT = 8;
@@ -39,17 +50,53 @@ export interface FooterLayoutInput {
 }
 
 export interface FooterLayout {
-  /** Equal slots spanning the row, or a content-sized numbers-only row. */
-  mode: "equal" | "content";
+  /** Equal columns spanning the row, or a content-sized numbers-only row. */
+  mode: "row" | "stacked" | "content";
   showMeters: boolean;
+  /** Icons stay on every tier except the physical-floor content row. */
   showIcons: boolean;
-  /** Content mode only: squeeze the inter-reading gap to keep all three percentages. */
+  stacked: boolean;
+  paddingX: number;
+  columnGap: number;
+  iconSize: number;
+  iconGap: number;
+  /** Content mode only: squeeze the inter-reading gap. */
   tightGap: boolean;
   /** The words `旧样本` / `读取失败`; falls back to the dot when too narrow. */
   showAnomalyText: boolean;
-  /** Status dot. Hidden when even the dot would push a number out of the row. */
+  /** Status dot. Hidden only when even a dot would push a number out. */
   showAnomalyMark: boolean;
 }
+
+interface RowStyle {
+  paddingX: number;
+  columnGap: number;
+  iconSize: number;
+  iconGap: number;
+  meter: boolean;
+  stacked: boolean;
+}
+
+const NORMAL: RowStyle = {
+  paddingX: FOOTER_PAD_X,
+  columnGap: FOOTER_COL_GAP,
+  iconSize: FOOTER_ICON_SIZE,
+  iconGap: FOOTER_ICON_GAP,
+  meter: true,
+  stacked: false,
+};
+const NO_METER: RowStyle = { ...NORMAL, meter: false };
+const TIGHT: RowStyle = {
+  paddingX: FOOTER_PAD_X_TIGHT,
+  columnGap: FOOTER_COL_GAP_TIGHT,
+  iconSize: FOOTER_ICON_SIZE_TIGHT,
+  iconGap: FOOTER_ICON_GAP_TIGHT,
+  meter: false,
+  stacked: false,
+};
+const STACKED: RowStyle = { ...TIGHT, stacked: true };
+
+const ROW_STYLES = [NORMAL, NO_METER, TIGHT, STACKED];
 
 function sumText(textWidths: readonly (number | null)[]): number {
   return textWidths.reduce<number>((total, width) => total + (width ?? 0), 0);
@@ -59,35 +106,46 @@ function maxText(textWidths: readonly (number | null)[]): number {
   return textWidths.reduce<number>((widest, width) => Math.max(widest, width ?? 0), 0);
 }
 
-/** Outer width needed for the percentages alone (no padding subtracted). */
-export function textOnlyWidth(textWidths: readonly (number | null)[], tight = false): number {
-  const gap = tight ? FOOTER_ROW_GAP_TIGHT : FOOTER_ROW_GAP;
-  return FOOTER_INSET_X + sumText(textWidths) + gap * Math.max(0, textWidths.length - 1);
+export function frameInset(paddingX: number): number {
+  return paddingX * 2 + FOOTER_BORDER_X;
 }
 
-/**
- * Outer width for three equal slots. Each slot must hold the widest label, so
- * this is 3 × (widest + decoration), not the sum of the three labels.
- */
-export function equalSlotsWidth(
-  textWidths: readonly (number | null)[],
-  options: { icon: boolean; meter: boolean },
-): number {
-  const slot = maxText(textWidths) + (options.icon ? FOOTER_ICON_COST : 0) + (options.meter ? FOOTER_METER_COST : 0);
-  return FOOTER_INSET_X + FOOTER_SLOTS * slot + FOOTER_ROW_GAP * (FOOTER_SLOTS - 1);
+/** Width of one equal column for the current style. */
+export function columnWidth(textWidths: readonly (number | null)[], style: RowStyle): number {
+  const widest = maxText(textWidths);
+  if (style.stacked) return Math.max(widest, style.iconSize);
+  return widest + style.iconSize + style.iconGap + (style.meter ? FOOTER_METER_COST : 0);
 }
+
+/** Outer width for the three equal columns of a given style. */
+export function rowWidth(textWidths: readonly (number | null)[], style: RowStyle): number {
+  return frameInset(style.paddingX) + FOOTER_SLOTS * columnWidth(textWidths, style) + style.columnGap * (FOOTER_SLOTS - 1);
+}
+
+/** Outer width needed for the percentages alone. */
+export function textOnlyWidth(textWidths: readonly (number | null)[], tight = false): number {
+  const gap = tight ? FOOTER_COL_GAP_TIGHT : FOOTER_COL_GAP;
+  return frameInset(FOOTER_PAD_X_TIGHT) + sumText(textWidths) + gap * Math.max(0, textWidths.length - 1);
+}
+
+/** Exposed for tests and callers that need the tier thresholds. */
+export const FOOTER_STYLES = ROW_STYLES;
 
 type AnomalyEdge = "text" | "dot" | "none";
 
-function anomalyCost(anomaly: boolean, edge: AnomalyEdge, textWidth: number): number {
+/**
+ * Cost of the anomaly badge when it sits after the three columns: it adds one
+ * more gap plus its own width, so the budget must include both.
+ */
+function anomalyCost(anomaly: boolean, edge: AnomalyEdge, textWidth: number, columnGap: number): number {
   if (!anomaly || edge === "none") return 0;
-  return FOOTER_ANOMALY_GAP + (edge === "text" ? textWidth : FOOTER_ANOMALY_DOT);
+  return columnGap + FOOTER_ANOMALY_GAP + (edge === "text" ? textWidth : FOOTER_ANOMALY_DOT);
 }
 
-function anomalyEdgeFor(anomaly: boolean, remaining: number, textWidth: number): AnomalyEdge {
+function anomalyEdgeFor(anomaly: boolean, remaining: number, textWidth: number, columnGap: number): AnomalyEdge {
   if (!anomaly) return "none";
-  if (remaining >= FOOTER_ANOMALY_GAP + textWidth) return "text";
-  if (remaining >= FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT) return "dot";
+  if (remaining >= columnGap + FOOTER_ANOMALY_GAP + textWidth) return "text";
+  if (remaining >= columnGap + FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT) return "dot";
   return "none";
 }
 
@@ -96,11 +154,16 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
   const measured =
     availableWidth !== null && textWidths.length === FOOTER_SLOTS && textWidths.every((width) => width !== null);
   if (!measured) {
-    // Never paint a meter on the first frame: an unmeasured row can be at any width.
+    // Never paint a meter on the first frame, but keep the icons and columns.
     return {
-      mode: "content",
+      mode: "row",
       showMeters: false,
       showIcons: true,
+      stacked: false,
+      paddingX: FOOTER_PAD_X,
+      columnGap: FOOTER_COL_GAP,
+      iconSize: FOOTER_ICON_SIZE,
+      iconGap: FOOTER_ICON_GAP,
       tightGap: false,
       showAnomalyText: anomaly,
       showAnomalyMark: anomaly,
@@ -108,24 +171,20 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
   }
 
   const need = availableWidth as number;
-  const equalOptions = compact
-    ? [
-        { icon: true, meter: false },
-        { icon: false, meter: false },
-      ]
-    : [
-        { icon: true, meter: true },
-        { icon: true, meter: false },
-        { icon: false, meter: false },
-      ];
-  for (const options of equalOptions) {
-    const base = equalSlotsWidth(textWidths, options);
-    const edge = anomalyEdgeFor(anomaly, need - base, anomalyTextWidth);
-    if (need >= base + anomalyCost(anomaly, edge, anomalyTextWidth)) {
+  const tiers = compact ? ROW_STYLES.filter((style) => !style.meter) : ROW_STYLES;
+  for (const style of tiers) {
+    const base = rowWidth(textWidths, style);
+    const edge = anomalyEdgeFor(anomaly, need - base, anomalyTextWidth, style.columnGap);
+    if (need >= base + anomalyCost(anomaly, edge, anomalyTextWidth, style.columnGap)) {
       return {
-        mode: "equal",
-        showMeters: options.meter,
-        showIcons: options.icon,
+        mode: style.stacked ? "stacked" : "row",
+        showMeters: style.meter,
+        showIcons: true,
+        stacked: style.stacked,
+        paddingX: style.paddingX,
+        columnGap: style.columnGap,
+        iconSize: style.iconSize,
+        iconGap: style.iconGap,
         tightGap: false,
         showAnomalyText: edge === "text",
         showAnomalyMark: edge !== "none",
@@ -133,14 +192,21 @@ export function chooseFooterLayout(input: FooterLayoutInput): FooterLayout {
     }
   }
 
+  // Physical floor: not even three icon-above-number columns fit. Keep only the
+  // numbers, content-sized, so nothing is clipped or ellipsized.
   const normal = textOnlyWidth(textWidths);
   const tightGap = need < normal;
   const base = tightGap ? textOnlyWidth(textWidths, true) : normal;
-  const edge = anomalyEdgeFor(anomaly, need - base, anomalyTextWidth);
+  const edge = anomalyEdgeFor(anomaly, need - base, anomalyTextWidth, FOOTER_COL_GAP_TIGHT);
   return {
     mode: "content",
     showMeters: false,
     showIcons: false,
+    stacked: false,
+    paddingX: FOOTER_PAD_X_TIGHT,
+    columnGap: tightGap ? FOOTER_COL_GAP_TIGHT : FOOTER_COL_GAP,
+    iconSize: FOOTER_ICON_SIZE_TIGHT,
+    iconGap: FOOTER_ICON_GAP_TIGHT,
     tightGap,
     showAnomalyText: edge === "text",
     showAnomalyMark: edge !== "none",

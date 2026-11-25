@@ -3,132 +3,140 @@ import test from "node:test";
 
 import {
   chooseFooterLayout,
-  equalSlotsWidth,
+  columnWidth,
   FOOTER_ANOMALY_DOT,
   FOOTER_ANOMALY_GAP,
-  FOOTER_ICON_COST,
-  FOOTER_METER_COST,
-  FOOTER_ROW_GAP,
-  FOOTER_ROW_GAP_TIGHT,
+  FOOTER_COL_GAP,
+  FOOTER_COL_GAP_TIGHT,
+  FOOTER_ICON_GAP,
+  FOOTER_ICON_GAP_TIGHT,
+  FOOTER_ICON_SIZE,
+  FOOTER_ICON_SIZE_TIGHT,
+  FOOTER_PAD_X,
+  FOOTER_PAD_X_TIGHT,
   FOOTER_SLOTS,
+  FOOTER_STYLES,
+  frameInset,
+  rowWidth,
   textOnlyWidth,
 } from "../shared/layout.ts";
 
 const base = { compact: false, anomaly: false, anomalyTextWidth: 0 };
-const even = [30, 30, 30];
+// "100.0%" and "100%" are the widest realistic readings; 40 DP is a generous
+// measurement for them at 11 px bold tabular digits.
+const widest = [40, 40, 40];
+const uneven = [30, 40, 34];
 
-test("equal-slot width uses the widest label per slot, not the sum", () => {
-  const uneven = [26, 34, 30];
-  const iconOnly = 20 + FOOTER_SLOTS * (34 + FOOTER_ICON_COST) + FOOTER_ROW_GAP * (FOOTER_SLOTS - 1);
-  const withMeter = 20 + FOOTER_SLOTS * (34 + FOOTER_ICON_COST + FOOTER_METER_COST) + FOOTER_ROW_GAP * (FOOTER_SLOTS - 1);
-  assert.equal(equalSlotsWidth(uneven, { icon: true, meter: false }), iconOnly);
-  assert.equal(equalSlotsWidth(uneven, { icon: true, meter: true }), withMeter);
-  // Not the sum-based content width.
-  assert.notEqual(iconOnly, textOnlyWidth(uneven));
+test("column width is the widest label plus decoration, never the sum", () => {
+  const normal = FOOTER_STYLES[0];
+  assert.equal(columnWidth(uneven, normal), 40 + FOOTER_ICON_SIZE + FOOTER_ICON_GAP + 26);
+  const stacked = FOOTER_STYLES[3];
+  assert.equal(columnWidth(uneven, stacked), 40);
+  const tinyLabel = [12, 12, 12];
+  // A very short label still reserves the icon width on its own row.
+  assert.equal(columnWidth(tinyLabel, stacked), FOOTER_ICON_SIZE);
+});
+
+test("row width is three equal columns plus chrome", () => {
+  const style = FOOTER_STYLES[1]; // icons, no meter
+  const expected = frameInset(style.paddingX) + FOOTER_SLOTS * columnWidth(uneven, style) + style.columnGap * (FOOTER_SLOTS - 1);
+  assert.equal(rowWidth(uneven, style), expected);
   assert.equal(FOOTER_SLOTS, 3);
 });
 
-test("wide sidebar uses three equal slots with meters, exact boundary included", () => {
-  const threshold = equalSlotsWidth(even, { icon: true, meter: true });
-  const at = chooseFooterLayout({ ...base, availableWidth: threshold, textWidths: even });
-  assert.equal(at.mode, "equal");
+test("100.0% readings keep icons at the host's 200 DP minimum sidebar width", () => {
+  const plan = chooseFooterLayout({ ...base, availableWidth: 200, textWidths: widest });
+  assert.notEqual(plan.mode, "content");
+  assert.equal(plan.showIcons, true);
+  assert.equal(plan.showMeters, false);
+  // Must be the tightest row or the stacked tier, both of which fit at 200 DP.
+  assert.ok(plan.mode === "row" || plan.mode === "stacked");
+  assert.ok(plan.paddingX <= FOOTER_PAD_X_TIGHT);
+  assert.ok(plan.iconSize <= FOOTER_ICON_SIZE_TIGHT);
+});
+
+test("meters return as soon as the widest tier fits, exact boundary included", () => {
+  const threshold = rowWidth(widest, FOOTER_STYLES[0]);
+  const at = chooseFooterLayout({ ...base, availableWidth: threshold, textWidths: widest });
   assert.equal(at.showMeters, true);
-  assert.equal(at.showIcons, true);
-  const below = chooseFooterLayout({ ...base, availableWidth: threshold - 0.1, textWidths: even });
-  assert.equal(below.mode, "equal");
+  assert.equal(at.mode, "row");
+  const below = chooseFooterLayout({ ...base, availableWidth: threshold - 0.1, textWidths: widest });
   assert.equal(below.showMeters, false);
   assert.equal(below.showIcons, true);
 });
 
-test("narrow-but-equal sidebar keeps three equal slots without meters, filling the row", () => {
-  const threshold = equalSlotsWidth(even, { icon: true, meter: false });
-  const at = chooseFooterLayout({ ...base, availableWidth: threshold, textWidths: even });
-  assert.equal(at.mode, "equal");
-  assert.equal(at.showMeters, false);
-  assert.equal(at.showIcons, true);
-  const below = chooseFooterLayout({ ...base, availableWidth: threshold - 0.1, textWidths: even });
-  assert.equal(below.mode, "equal");
-  assert.equal(below.showIcons, false);
-});
-
-test("compact layout never paints meters across equal slots", () => {
-  const plan = chooseFooterLayout({ ...base, availableWidth: 400, compact: true, textWidths: even });
+test("compact layout never paints meters but keeps icons and equal columns", () => {
+  const plan = chooseFooterLayout({ ...base, compact: true, availableWidth: 200, textWidths: widest });
   assert.equal(plan.showMeters, false);
-  assert.equal(plan.mode, "equal");
   assert.equal(plan.showIcons, true);
+  assert.notEqual(plan.mode, "content");
 });
 
-test("uneven labels only raise the equal threshold by the widest one", () => {
-  const uneven = [26, 40, 30];
-  const exact = equalSlotsWidth(uneven, { icon: true, meter: false });
-  assert.equal(chooseFooterLayout({ ...base, availableWidth: exact, textWidths: uneven }).mode, "equal");
-  const below = chooseFooterLayout({ ...base, availableWidth: exact - 0.1, textWidths: uneven });
-  assert.equal(below.mode, "equal");
-  assert.equal(below.showIcons, false);
+test("tiers only shrink padding, gap and icon size, and only stack as a last row resort", () => {
+  const sizes = FOOTER_STYLES.map((style) => rowWidth(widest, style));
+  for (let i = 1; i < sizes.length; i += 1) {
+    assert.ok(sizes[i] <= sizes[i - 1], `tier ${i} must not be wider than tier ${i - 1}`);
+  }
+  assert.equal(FOOTER_STYLES[3].stacked, true);
+  assert.ok(FOOTER_STYLES[2].paddingX < FOOTER_STYLES[1].paddingX);
+  assert.ok(FOOTER_STYLES[2].iconSize < FOOTER_STYLES[1].iconSize);
+  assert.ok(FOOTER_STYLES[2].columnGap < FOOTER_STYLES[1].columnGap);
+  assert.ok(FOOTER_STYLES[2].iconGap < FOOTER_STYLES[1].iconGap);
 });
 
-test("content mode appears only when 3 x widest cannot fit, and is numbers-only", () => {
-  const threshold = equalSlotsWidth(even, { icon: false, meter: false });
-  const at = chooseFooterLayout({ ...base, availableWidth: threshold, textWidths: even });
-  assert.equal(at.mode, "equal");
-  assert.equal(at.showIcons, false);
-  assert.equal(at.showMeters, false);
-
-  // Even labels make both widths identical, so one step below is already tight.
-  const below = chooseFooterLayout({ ...base, availableWidth: threshold - 0.1, textWidths: even });
+test("the smallest sidebar that still shows icon + number vertically is reported", () => {
+  const stacked = FOOTER_STYLES[3];
+  const need = rowWidth(widest, stacked);
+  const at = chooseFooterLayout({ ...base, availableWidth: need, textWidths: widest });
+  assert.equal(at.mode, "stacked");
+  assert.equal(at.showIcons, true);
+  const below = chooseFooterLayout({ ...base, availableWidth: need - 0.1, textWidths: widest });
   assert.equal(below.mode, "content");
-  assert.equal(below.showMeters, false);
   assert.equal(below.showIcons, false);
-
-  // A wider single reading must not bring decoration back.
-  const uneven = [26, 40, 30];
-  const unevenBelow = chooseFooterLayout({ ...base, availableWidth: equalSlotsWidth(uneven, { icon: false, meter: false }) - 0.1, textWidths: uneven });
-  assert.equal(unevenBelow.mode, "content");
-  assert.equal(unevenBelow.showIcons, false);
-  assert.equal(unevenBelow.showMeters, false);
+  // 100.0% at three equal stacked columns must fit inside 200 DP: the floors
+  // are 3 x 40 DP of text plus 2 x 2 DP gaps plus 2 x 4 DP padding and 2 px border.
+  assert.equal(need, 2 * FOOTER_PAD_X_TIGHT + 2 + 3 * 40 + 2 * FOOTER_COL_GAP_TIGHT);
+  assert.ok(need <= 200);
 });
 
-test("content mode squeezes its gap only below the normal numbers width", () => {
-  // Uneven labels are what make content mode reachable: with equal labels the
-  // numbers-only content width coincides with the three equal slots.
-  const uneven = [26, 40, 30];
-  assert.equal(textOnlyWidth(uneven), 134);
-  assert.equal(textOnlyWidth(uneven, true), 124);
-  assert.equal(FOOTER_ROW_GAP_TIGHT, 4);
-  const atNormal = chooseFooterLayout({ ...base, availableWidth: 134, textWidths: uneven });
-  assert.equal(atNormal.mode, "content");
-  assert.equal(atNormal.tightGap, false);
-  const squeezed = chooseFooterLayout({ ...base, availableWidth: 133.9, textWidths: uneven });
-  assert.equal(squeezed.mode, "content");
-  assert.equal(squeezed.tightGap, true);
+test("extremely narrow rows fall back to numbers only, never ellipsized", () => {
+  // Three 40 DP numbers plus tight chrome are the physical floor (134 DP).
+  const floor = textOnlyWidth(widest, true);
+  assert.equal(floor, 8 + 2 + 120 + 2 * FOOTER_COL_GAP_TIGHT);
+  // At the floor the stacked tier still fits and is preferred, since it keeps
+  // all three icons. Only below it do the icons have to go.
+  const atFloor = chooseFooterLayout({ ...base, availableWidth: floor, textWidths: widest });
+  assert.equal(atFloor.mode, "stacked");
+  assert.equal(atFloor.showIcons, true);
+  const below = chooseFooterLayout({ ...base, availableWidth: floor - 0.1, textWidths: widest });
+  assert.equal(below.mode, "content");
+  assert.equal(below.showIcons, false);
+  assert.equal(below.showMeters, false);
+  assert.equal(below.tightGap, true);
 });
 
-test("an unmeasured first frame never paints a meter", () => {
+test("an unmeasured first frame keeps icons and never paints a meter", () => {
   const plan = chooseFooterLayout({ availableWidth: null, compact: false, textWidths: [null, null, null], anomaly: false, anomalyTextWidth: 0 });
   assert.equal(plan.showMeters, false);
-  assert.equal(plan.mode, "content");
+  assert.equal(plan.showIcons, true);
+  assert.notEqual(plan.mode, "content");
 });
 
-test("an anomaly is sized into the equal-row budget: words, then dot, then nothing", () => {
+test("an anomaly never displaces the main reading: words, then dot, then nothing", () => {
   const words = 30;
-  const slots = equalSlotsWidth(even, { icon: true, meter: false });
-  const wordsPlan = chooseFooterLayout({ ...base, availableWidth: slots + FOOTER_ANOMALY_GAP + words, textWidths: even, anomaly: true, anomalyTextWidth: words });
-  assert.equal(wordsPlan.mode, "equal");
-  assert.equal(wordsPlan.showAnomalyText, true);
-  assert.equal(wordsPlan.showAnomalyMark, true);
+  const style = FOOTER_STYLES[1];
+  const slack = style.columnGap + FOOTER_ANOMALY_GAP + words;
+  const noMeterRow = rowWidth(widest, style);
+  const withWords = chooseFooterLayout({ ...base, availableWidth: noMeterRow + slack, textWidths: widest, anomaly: true, anomalyTextWidth: words });
+  assert.equal(withWords.showAnomalyText, true);
+  assert.equal(withWords.showAnomalyMark, true);
 
-  const dotPlan = chooseFooterLayout({ ...base, availableWidth: slots + FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT, textWidths: even, anomaly: true, anomalyTextWidth: words });
-  assert.equal(dotPlan.showAnomalyText, false);
-  assert.equal(dotPlan.showAnomalyMark, true);
+  const dot = chooseFooterLayout({ ...base, availableWidth: noMeterRow + style.columnGap + FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT, textWidths: widest, anomaly: true, anomalyTextWidth: words });
+  assert.equal(dot.showAnomalyText, false);
+  assert.equal(dot.showAnomalyMark, true);
 
-  const nonePlan = chooseFooterLayout({ ...base, availableWidth: slots + FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT - 0.1, textWidths: even, anomaly: true, anomalyTextWidth: words });
-  assert.equal(nonePlan.showAnomalyText, false);
-  assert.equal(nonePlan.showAnomalyMark, false);
-  assert.equal(nonePlan.mode, "equal");
-});
-
-test("costs stay in sync with the rendered meter, icon and gaps", () => {
-  assert.equal(FOOTER_ICON_COST, 16);
-  assert.equal(FOOTER_METER_COST, 26);
-  assert.equal(FOOTER_ROW_GAP, 9);
+  const none = chooseFooterLayout({ ...base, availableWidth: noMeterRow + style.columnGap + FOOTER_ANOMALY_GAP + FOOTER_ANOMALY_DOT - 0.1, textWidths: widest, anomaly: true, anomalyTextWidth: words });
+  assert.equal(none.showAnomalyText, false);
+  assert.equal(none.showAnomalyMark, false);
+  assert.notEqual(none.mode, "content");
 });
