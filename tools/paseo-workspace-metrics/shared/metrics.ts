@@ -156,8 +156,8 @@ export function formatTokenSpeed(value: number | null | undefined, unit: "short"
 }
 
 /**
- * One of the composer pill's two cache slots. A slot is never filled from the
- * other basis: `unavailable` carries why that reading is missing, and `loading`
+ * The composer pill's cumulative cache reading. It is never filled from any
+ * other basis: `unavailable` carries why the reading is missing, and `loading`
  * means the read is still in flight. `ready` with a null rate is a finished
  * read that found no valid snapshot, which is distinct from zero.
  */
@@ -172,19 +172,6 @@ function pillRateText(slot: PillCacheBasis): string {
   return formatCacheRate(slot.rate);
 }
 
-/**
- * The composer pill shares one 160 px row with its icon, the pill padding and
- * any other pill, and the host truncates the label with an ellipsis. The pill
- * therefore prints the bare number: no percent sign (the tooltip keeps it) and
- * only a trailing `.0` removed, so `98.5%` → `98.5` and `100.0%` → `100`. A
- * real measurement keeps its one decimal; `…` and `—` pass through.
- */
-function pillRateCompact(slot: PillCacheBasis): string {
-  const text = pillRateText(slot);
-  const bare = text.endsWith("%") ? text.slice(0, -1) : text;
-  return bare.endsWith(".0") ? bare.slice(0, -2) : bare;
-}
-
 function pillTitleText(slot: PillCacheBasis, label: string, missing: string): string {
   if (slot.kind === "loading") return label + " …";
   if (slot.kind === "unavailable") return label + " —（" + slot.reason + "）";
@@ -193,25 +180,19 @@ function pillTitleText(slot: PillCacheBasis, label: string, missing: string): st
 }
 
 /**
- * Visible composer-pill label: "累计 98.5 · 最近 99.7", where the space after
- * each label is U+202F (narrow no-break space). The two readings are
- * independent — the cumulative rate from the cumulative RPC, the recent rate
- * from each conversation's latest `lastUsage` — and neither ever stands in for
- * the other. The narrow space both separates a CJK label from its digits and
- * keeps the line inside the host's 160 px single line; the tooltip below keeps
- * the full names, one decimal and the percent sign.
+ * Visible composer-pill label: "累计 98.9%". The host keeps it on one line and
+ * the label shows only the cumulative rate from the cumulative RPC, using the
+ * same one-decimal percent format as the panel. The recent sample stays in the
+ * panel, so it never appears here or stands in for a missing cumulative rate.
  */
-export function formatPillLabel(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
-  return "累计\u202F" + pillRateCompact(cumulative)
-    + " · 最近\u202F" + pillRateCompact(recent);
+export function formatPillLabel(cumulative: PillCacheBasis): string {
+  return "累计 " + pillRateText(cumulative);
 }
 
-/** Full tooltip: open action, both cache bases, and why either one is missing. */
-export function formatPillTitle(cumulative: PillCacheBasis, recent: PillCacheBasis): string {
+/** Full tooltip: open action, the cumulative cache base, and why it is missing. */
+export function formatPillTitle(cumulative: PillCacheBasis): string {
   return "打开工作区用量 · "
-    + pillTitleText(cumulative, "累计缓存", "尚无有效累计快照")
-    + " · "
-    + pillTitleText(recent, "最近样本", "尚无有效最近样本");
+    + pillTitleText(cumulative, "累计缓存", "尚无有效累计快照");
 }
 
 const countFormat = new Intl.NumberFormat("zh-CN");

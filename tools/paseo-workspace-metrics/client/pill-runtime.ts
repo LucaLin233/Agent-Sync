@@ -1,5 +1,5 @@
 import type { CumulativeUsage } from "../shared/cumulative.ts";
-import { pillTargetFor, projectDirectoryAgent, workspaceCacheSummaries, type DirectoryAgent, type DirectoryAgentSource } from "../shared/agents.ts";
+import { pillTargetFor, projectDirectoryAgent, type AgentDirectoryEntry, type DirectoryAgent } from "../shared/agents.ts";
 import {
   formatPillLabel,
   formatPillTitle,
@@ -25,7 +25,7 @@ export interface PillRuntimeDeps {
   /** The same cumulative RPC the panel uses; `refresh` bypasses its short caches. */
   requestCumulative(input: { workspaceId: string; agentIds: string[]; refresh?: boolean }): Promise<CumulativeUsage>;
   subscribeAgents(handlers: {
-    snapshot(entries: readonly DirectoryAgentSource[]): void;
+    snapshot(entries: readonly AgentDirectoryEntry[]): void;
     update(message: { type: string; payload: AgentUpdatePayload }): void;
   }): () => void;
   subscribeSettings(values: {
@@ -37,7 +37,7 @@ export interface PillRuntimeDeps {
 export interface AgentUpdatePayload {
   kind: "upsert" | "remove";
   agentId?: string;
-  agent?: DirectoryAgentSource;
+  agent?: AgentDirectoryEntry;
 }
 
 interface PillState {
@@ -68,11 +68,10 @@ const EMPTY_SCOPE: WorkspaceScope = {
 };
 
 /**
- * Composer-pill runtime: one pill per visible agent showing two independent
- * cache readings — the cumulative rate from the same RPC the panel shows, and
- * the recent per-conversation sample. Directory events drive the reads; a
- * finished turn additionally gets a small number of bounded re-reads so a
- * rollout flushed after the event still reaches the label.
+ * Composer-pill runtime: one pill per visible agent showing the cumulative
+ * cache rate from the same RPC the panel shows. Directory events drive the
+ * reads; a finished turn additionally gets a small number of bounded re-reads
+ * so a rollout flushed after the event still reaches the label.
  */
 export function startPillRuntime(deps: PillRuntimeDeps) {
   const agents = new Map<string, DirectoryAgent>();
@@ -110,8 +109,7 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
   /**
    * The cumulative slot only ever reflects the cumulative RPC. Settings that
    * put this workspace out of scope, a failed read, or a reply without a valid
-   * snapshot all leave the slot empty with its own reason; the recent sample
-   * never fills it.
+   * snapshot all leave the slot empty with its own reason.
    */
   const cumulativeSlot = (workspaceId: string): PillCacheBasis => {
     if (!scope) return { kind: "loading" };
@@ -124,22 +122,13 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     return { kind: "ready", rate: state.rate };
   };
 
-  /** The recent slot is the same per-conversation `lastUsage` summary the panel uses. */
-  const recentSlot = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>): PillCacheBasis => ({
-    kind: "ready",
-    rate: recent.get(workspaceId)?.rate ?? null,
-  });
+  const labelFor = (workspaceId: string) => formatPillLabel(cumulativeSlot(workspaceId));
 
-  const labelFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) =>
-    formatPillLabel(cumulativeSlot(workspaceId), recentSlot(workspaceId, recent));
-
-  const titleFor = (workspaceId: string, recent: ReturnType<typeof workspaceCacheSummaries>) =>
-    formatPillTitle(cumulativeSlot(workspaceId), recentSlot(workspaceId, recent));
+  const titleFor = (workspaceId: string) => formatPillTitle(cumulativeSlot(workspaceId));
 
   // Reuses live registrations; only a changed workspace, label, or title causes a write.
   const reconcile = () => {
     if (disposed) return;
-    const recent = workspaceCacheSummaries(agents.values());
     for (const [agentId, pill] of pills) {
       const agent = agents.get(agentId);
       const target = agent ? pillTargetFor(agent) : null;
@@ -148,8 +137,8 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     for (const agent of agents.values()) {
       const target = pillTargetFor(agent);
       if (!target) continue;
-      const label = labelFor(target.workspaceId, recent);
-      const title = titleFor(target.workspaceId, recent);
+      const label = labelFor(target.workspaceId);
+      const title = titleFor(target.workspaceId);
       const existing = pills.get(agent.id);
       if (!existing) {
         const handle = deps.addPill({
@@ -351,7 +340,7 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     if (leftRunning || terminalRefresh) scheduleFollowUp(workspaceId);
   };
 
-  const upsert = (source: DirectoryAgentSource) => {
+  const upsert = (source: AgentDirectoryEntry) => {
     const previous = agents.get(source.id);
     const agent = projectDirectoryAgent(source);
     agents.set(agent.id, agent);

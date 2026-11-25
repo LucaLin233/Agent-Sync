@@ -123,7 +123,7 @@ test("a terminal transition re-reads after the rollout flush without new directo
   assert.equal(fake.pending.length, 1);
   fake.pending.shift().resolve(reply(0.25, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F25 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 25.0%");
 
   // The turn reaches a terminal state; the rollout it describes is not written yet.
   fake.emitUpsert(agent("a", { status: "idle" }));
@@ -138,9 +138,9 @@ test("a terminal transition re-reads after the rollout flush without new directo
   await advance(t, 0);
 
   // No further directory event: the follow-up alone moved the cumulative slot.
-  assert.equal(fake.pills.get("a").label, "累计\u202F60 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 60.0%");
   assert.equal(fake.pills.get("a").title,
-    "打开工作区用量 · 累计缓存 60.0% · 最近样本 50.0%");
+    "打开工作区用量 · 累计缓存 60.0%");
 });
 
 test("a second terminal turn during the chain restores the budget for its rollout", async (t) => {
@@ -169,7 +169,7 @@ test("a second terminal turn during the chain restores the budget for its rollou
   // Its rollout is still old at that tick.
   fake.pending.shift().resolve(reply(0.25, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F25 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 25.0%");
 
   // No further directory events; the restored budget alone picks up B.
   await advance(t, 1_200);
@@ -177,8 +177,8 @@ test("a second terminal turn during the chain restores the budget for its rollou
   assert.equal(fake.pending[0].input.refresh, true);
   fake.pending.shift().resolve(reply(0.6, 600, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F60 · 最近\u202F50");
-  assert.equal(fake.pills.get("b").label, "累计\u202F60 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 60.0%");
+  assert.equal(fake.pills.get("b").label, "累计 60.0%");
 });
 
 test("a member change keeps an active chain and reads the current members", async (t) => {
@@ -203,14 +203,14 @@ test("a member change keeps an active chain and reads the current members", asyn
   first.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
   // The stale [A,B] success is voided, and the chain is still alive.
-  assert.equal(fake.pills.get("a").label, "累计\u202F… · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 …");
 
   await advance(t, 1_200);
   assert.equal(fake.pending.length, 1);
   assert.deepEqual(fake.pending[0].input, { workspaceId: WS, agentIds: ["a"], refresh: true });
   fake.pending.shift().resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 });
 
 test("follow-up reads are bounded and stop", async (t) => {
@@ -246,7 +246,7 @@ test("a turn that ended between snapshots still triggers one bounded re-read", a
   await advance(t, 10_000);
   fake.pending.shift().resolve(reply(0.2, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 
   // Never observed as running: the new updatedAt is the only terminal signal.
   fake.emitUpsert(agent("a", { status: "idle", updatedAt: "2026-11-22T00:05:00Z" }));
@@ -254,7 +254,7 @@ test("a turn that ended between snapshots still triggers one bounded re-read", a
   assert.equal(fake.pending.length, 1);
   fake.pending.shift().resolve(reply(0.5, 500, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F50 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 50.0%");
 });
 
 test("a routine read does not race the follow-up chain for the same workspace", async (t) => {
@@ -309,12 +309,12 @@ test("a late reply for archived members cannot overwrite the current workspace",
   assert.deepEqual(fresh.input.agentIds, ["a"]);
   fresh.resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 
   // The older [A,B] reply lands last and must be discarded.
   stale.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 });
 
 test("same-member concurrent replies keep only the newest request", async (t) => {
@@ -333,14 +333,14 @@ test("same-member concurrent replies keep only the newest request", async (t) =>
   const second = fake.pending.shift();
   second.resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 
   first.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 });
 
-test("a cumulative reply without a snapshot leaves its slot empty instead of borrowing the recent rate", async (t) => {
+test("a cumulative reply without a snapshot leaves the pill missing instead of borrowing another reading", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
   const runtime = startPillRuntime(fake.deps);
@@ -348,37 +348,39 @@ test("a cumulative reply without a snapshot leaves its slot empty instead of bor
   fake.enable();
   fake.emitSnapshot([agent("a")]);
   await advance(t, 10_000);
-  // No cumulative snapshot; the recent per-conversation sample is 50.0%.
-  // The reply does carry a completed turn (125 tokens / 10 s), which the pill
-  // must not turn into a speed now that it shows only the two cache rates.
+  // No cumulative snapshot. The reply does carry a completed turn (125 tokens
+  // / 10 s), which the pill must not turn into a speed: it only shows the
+  // cumulative cache rate.
   fake.pending.shift().resolve(reply(null, 125, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F— · 最近\u202F50");
-  assert.doesNotMatch(fake.pills.get("a").label, /t\/s|token|12\.5/);
+  assert.equal(fake.pills.get("a").label, "累计 —");
+  assert.doesNotMatch(fake.pills.get("a").label, /t\/s|token|12\.5|最近|50/);
   assert.equal(fake.pills.get("a").title,
-    "打开工作区用量 · 累计缓存 —（尚无有效累计快照） · 最近样本 50.0%");
+    "打开工作区用量 · 累计缓存 —（尚无有效累计快照）");
+  // The agent still carries a valid recent `lastUsage` (50.0%) for the panel,
+  // yet the empty cumulative slot stays empty instead of borrowing it.
+  assert.doesNotMatch(fake.pills.get("a").title, /最近|50\.0%/);
 
-  // A later cumulative reply is a valid reading and shows next to that same recent sample.
+  // A later cumulative reply is a valid reading and replaces the placeholder.
   fake.emitUpsert(agent("a", { updatedAt: "2026-11-22T00:00:00Z" }));
   await advance(t, 10_000);
   fake.pending.shift().resolve(reply(0.982, null, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F98.2 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 98.2%");
 });
 
-test("a closed cumulative setting never displays the recent rate in the cumulative slot", async (t) => {
+test("a closed cumulative setting keeps the pill missing and reads nothing", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
   const runtime = startPillRuntime(fake.deps);
   t.after(() => runtime.dispose());
   fake.emitSnapshot([agent("a")]);
-  assert.equal(fake.pills.get("a").label, "累计\u202F… · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 …");
 
   fake.enable({ enabled: false });
   const pill = fake.pills.get("a");
-  assert.equal(pill.label, "累计\u202F— · 最近\u202F50");
+  assert.equal(pill.label, "累计 —");
   assert.match(pill.title, /累计缓存 —（累计统计已关闭）/);
-  assert.match(pill.title, /最近样本 50\.0%/);
   await advance(t, 10_000);
   assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
 });
@@ -391,13 +393,13 @@ test("a workspace outside the cumulative allowlist shows its own reason", async 
   fake.enable({ workspaceIds: ["wks_elsewhere"] });
   fake.emitSnapshot([agent("a")]);
   const pill = fake.pills.get("a");
-  assert.equal(pill.label, "累计\u202F— · 最近\u202F50");
+  assert.equal(pill.label, "累计 —");
   assert.match(pill.title, /累计缓存 —（不在本机累计名单）/);
   await advance(t, 10_000);
   assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
 });
 
-test("a failed cumulative read is reported and never backfilled from the recent sample", async (t) => {
+test("a failed cumulative read is reported and never backfilled", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
   const runtime = startPillRuntime(fake.deps);
@@ -408,11 +410,11 @@ test("a failed cumulative read is reported and never backfilled from the recent 
   fake.pending.shift().reject(new Error("rpc down"));
   await advance(t, 0);
   const pill = fake.pills.get("a");
-  assert.equal(pill.label, "累计\u202F— · 最近\u202F50");
+  assert.equal(pill.label, "累计 —");
   assert.match(pill.title, /累计缓存 —（累计读取失败/);
 });
 
-test("real zero in both slots is a measurement, not a missing value", async (t) => {
+test("a real cumulative zero is a measurement, not a missing value", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
   const runtime = startPillRuntime(fake.deps);
@@ -422,9 +424,9 @@ test("real zero in both slots is a measurement, not a missing value", async (t) 
   await advance(t, 10_000);
   fake.pending.shift().resolve(reply(0, 100, 10_000));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F0 · 最近\u202F0");
+  assert.equal(fake.pills.get("a").label, "累计 0.0%");
   assert.equal(fake.pills.get("a").title,
-    "打开工作区用量 · 累计缓存 0.0% · 最近样本 0.0%");
+    "打开工作区用量 · 累计缓存 0.0%");
 });
 
 test("failures from a superseded request are ignored too", async (t) => {
@@ -442,7 +444,7 @@ test("failures from a superseded request are ignored too", async (t) => {
   await advance(t, 0);
   stale.reject(new Error("late failure"));
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F20 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 20.0%");
 });
 
 test("workspace migration and background flag recompute membership", async (t) => {
@@ -465,7 +467,7 @@ test("workspace migration and background flag recompute membership", async (t) =
   assert.deepEqual(moved.input.agentIds, ["a"]);
   moved.resolve({ ...reply(0.4, 400, 10_000), workspaceId: "wks_other" });
   await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "累计\u202F40 · 最近\u202F50");
+  assert.equal(fake.pills.get("a").label, "累计 40.0%");
 
   fake.emitUpsert(agent("b", { background: true }));
   assert.equal(fake.pills.has("b"), false);
