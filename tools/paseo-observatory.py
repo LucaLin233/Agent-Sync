@@ -301,8 +301,6 @@ def cmd_report_list(args, ctx):
                      "agentId": job.get("agentId") if isinstance(job.get("agentId"), str) else None,
                      "createdAt": job.get("createdAt") if isinstance(job.get("createdAt"), str) else None,
                      "findings": findings, "resolved": resolved,
-                     "openFindings": findings - resolved
-                     if findings is not None and resolved is not None else None,
                      "reportAvailable": available})
     emit({"ok": True, "command": "report list", "serverId": payload.get("serverId"),
           "count": len(rows), "jobs": rows})

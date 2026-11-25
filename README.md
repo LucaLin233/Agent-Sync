@@ -44,7 +44,7 @@ python3 -B tools/paseo-observatory.py --paseo-cli <@getpaseo/cli 包根> \
   --target 127.0.0.1:<port> --server-id <已核 serverId> report list
 ```
 
-动作固定为 `report list|show`、`finding dry-run|close|verify`、`suggestion dry-run|close|verify`，RPC 方法另有白名单；finding 与建议的状态枚举各自校验，不混用。`report list` 按清单接口自己的 `findings`、`resolvedFindings`、`reportAvailable` 字段计数并给出 `openFindings`，清单不含报告正文，字段缺失时输出 `null` 而不是 0；`report show` 直接用 `jobId` 调 `observatory.insights.report`。条目无反馈按 `open` 计。`dry-run` 只发读调用；`close` 由显式动作、条目与目标状态表达意图，写入后按原 ID 回读并输出 `verified`，回执不明也只回读不重写；回读与写入回执的 `job.id` 必须精确等于请求的 `jobId`，缺失或不符即停且不写。已是目标状态时按幂等成功且不写。
+动作固定为 `report list|show`、`finding dry-run|close|verify`、`suggestion dry-run|close|verify`，RPC 方法另有白名单；finding 与建议的状态枚举各自校验，不混用。`report list` 只原样投影清单接口自己的 `findings`、`resolvedFindings`、`reportAvailable`，清单不含报告正文，字段缺失时输出 `null` 而不是 0；`resolvedFindings` 只计 `resolved`，不含 `false_positive`，因此清单不推断开放总数，完整清点须按 `report show` 的实际条目分别统计 `resolved` 与 `false_positive`；`report show` 直接用 `jobId` 调 `observatory.insights.report`。条目无反馈按 `open` 计。`dry-run` 只发读调用；`close` 由显式动作、条目与目标状态表达意图，写入后按原 ID 回读并输出 `verified`，回执不明也只回读不重写；回读与写入回执的 `job.id` 必须精确等于请求的 `jobId`，缺失或不符即停且不写。已是目标状态时按幂等成功且不写。
 
 门禁：目标只接受显式回环 IP `127.0.0.1` 或 `[::1]` 加端口；不接受 `localhost`，因为宿主可能把它解析到非回环地址；从 `--paseo-cli` 解析并同时核 `@getpaseo/cli` 与 `@getpaseo/client` 的包名、版本（当前均为 `0.17.4`）和 `dist/node/index.js` 入口，版本管理器转发 shim 不算包根；连接后核 daemon `serverId` 必须等于 `--server-id`，不符即停。
 

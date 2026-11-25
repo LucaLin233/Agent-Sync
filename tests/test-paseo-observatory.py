@@ -108,13 +108,17 @@ def base_scenario(**over):
         "response": {
             "observatory.insights.list": {"jobs": [
                 {"id": "job-1", "agentId": "agent-1", "createdAt": "2026-11-26T00:00:00Z",
-                 "findings": 6, "resolvedFindings": 2, "reportAvailable": True,
+                 "findings": 6, "resolvedFindings": 0, "reportAvailable": True,
                  "summary": None, "health": "watch"}]},
             "observatory.insights.report": {"job": {
                 "id": "job-1",
                 "report": {"findings": [{"id": "f-1", "severity": "high"},
-                                        {"id": "f-2", "severity": "low"}]},
-                "findingFeedback": {}}},
+                                        {"id": "f-2", "severity": "low"},
+                                        {"id": "f-3", "severity": "medium"},
+                                        {"id": "f-4", "severity": "medium"},
+                                        {"id": "f-5", "severity": "low"},
+                                        {"id": "f-6", "severity": "low"}]},
+                "findingFeedback": {"f-2": {"status": "false_positive"}}}},
             "observatory.insights.suggestions": {"job": {
                 "id": "job-9", "report": {"actions": [{"id": "a-1"}]},
                 "feedback": {}}},
@@ -188,9 +192,29 @@ class ReportListTest(Base):
         self.assertEqual(rc, M.RC_OK, out)
         job = json.loads(out)["jobs"][0]
         self.assertEqual(job["findings"], 6)
-        self.assertEqual(job["resolved"], 2)
-        self.assertEqual(job["openFindings"], 4)
+        self.assertEqual(job["resolved"], 0)
         self.assertTrue(job["reportAvailable"])
+        # resolvedFindings 只计 resolved；清单不推断开放数。
+        self.assertNotIn("openFindings", job)
+
+    def test_summary_does_not_claim_open_total(self):
+        # 真实形状：6 条发现、0 条 resolved、1 条 false_positive，实际开放 5。
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_OK, out)
+        summary = json.loads(out)["jobs"][0]
+        self.assertEqual(summary["findings"], 6)
+        self.assertEqual(summary["resolved"], 0)
+        self.assertNotIn("openFindings", summary)
+
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_OK, out)
+        details = json.loads(out)["findings"]
+        self.assertEqual(len(details), summary["findings"])
+        counts = {}
+        for item in details:
+            counts[item["status"]] = counts.get(item["status"], 0) + 1
+        self.assertEqual(counts, {"open": 5, "false_positive": 1})
+        self.assertEqual(counts.get("resolved", 0), summary["resolved"])
 
     def test_summary_without_counts_is_not_reported_as_zero(self):
         scenario = base_scenario()
@@ -200,7 +224,6 @@ class ReportListTest(Base):
         self.assertEqual(rc, M.RC_OK, out)
         job = json.loads(out)["jobs"][0]
         self.assertIsNone(job["findings"])
-        self.assertIsNone(job["openFindings"])
 
 
 class ReportShowTest(Base):
@@ -250,13 +273,13 @@ class DryRunTest(Base):
 
     def test_no_feedback_counts_as_open(self):
         rc, out = self.run_tool("finding", "dry-run", "--job-id", "job-1",
-                                "--finding-id", "f-2", "--status", "resolved")
+                                "--finding-id", "f-3", "--status", "resolved")
         self.assertEqual(rc, M.RC_OK, out)
         self.assertEqual(json.loads(out)["beforeStatus"], "open")
         self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
 
     def test_verify_without_feedback_is_open_and_verified(self):
-        rc, out = self.run_tool("finding", "verify", "--job-id", "job-1", "--finding-id", "f-2")
+        rc, out = self.run_tool("finding", "verify", "--job-id", "job-1", "--finding-id", "f-3")
         self.assertEqual(rc, M.RC_OK, out)
         payload = json.loads(out)
         self.assertEqual(payload["status"], "open")
