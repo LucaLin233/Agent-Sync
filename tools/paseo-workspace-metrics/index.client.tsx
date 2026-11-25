@@ -1,11 +1,13 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { MetricsPanel } from "./client/panel";
+import { Platform } from "react-native";
+import { MetricsPanel, MetricsSheet } from "./client/panel";
 import { startPillRuntime } from "./client/pill-runtime";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { cumulativeUsageRpc } from "./shared/cumulative";
 import { workspaceSettingsSubscription } from "./shared/scope";
 
 export default function contribute(client: PluginClientContext) {
+  const native = Platform.OS === "ios" || Platform.OS === "android";
   const runtime = startPillRuntime({
     addPill({ workspaceId, agentId, title, label, onPress }) {
       return client.addComposerPill({
@@ -16,7 +18,9 @@ export default function contribute(client: PluginClientContext) {
           title,
           icon: "Activity",
           label,
-          behavior: { kind: "action", onPress },
+          behavior: native
+            ? { kind: "popover", Content: MetricsSheet }
+            : { kind: "action", onPress },
         },
       });
     },
