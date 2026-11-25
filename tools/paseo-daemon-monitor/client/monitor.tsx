@@ -13,7 +13,8 @@ import { chooseFooterLayout } from "../shared/layout.ts";
 type Colors = PluginPopoverProps["theme"]["colors"];
 type Status = "loading" | "live" | "stale" | "failed";
 
-const POLL_MS = 5_000;
+/** Matches the daemon sampler; only the cadence changes in this stage. */
+const POLL_MS = 2_000;
 
 const hostStatusLabels: Record<string, string> = {
   idle: "未连接",

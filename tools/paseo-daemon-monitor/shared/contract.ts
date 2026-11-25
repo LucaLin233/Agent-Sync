@@ -42,6 +42,51 @@ export const hostResourcesRpc = defineRpc({
         windowMs: z.number().int().nonnegative(),
       })
       .nullable(),
+    /** Seconds since the host booted; null where the platform has no counter. */
+    uptimeSeconds: z.number().nonnegative().nullable(),
+    /** 1/5/15 minute host load average; null where unavailable. */
+    loadAverage: z
+      .object({ one: z.number().nonnegative(), five: z.number().nonnegative(), fifteen: z.number().nonnegative() })
+      .nullable(),
+    /**
+     * Local disks, one row per device, df semantics. Null when enumeration is
+     * unsupported or failed; `disk` still carries the system root.
+     */
+    disks: z
+      .array(
+        z.object({
+          mountPoint: z.string(),
+          source: z.string(),
+          fstype: z.string(),
+          totalBytes: z.number().nonnegative(),
+          usedBytes: z.number().nonnegative(),
+          availableBytes: z.number().nonnegative(),
+          percent: z.number().min(0).max(100).nullable(),
+        }),
+      )
+      .nullable(),
+    /** "local-mounts" = enumerated; "root-only" = fallback to the root reading. */
+    diskScope: z.enum(["local-mounts", "root-only"]),
+    /** Reclaimable page cache and buffers, when the platform reports them. */
+    memoryBreakdown: z
+      .object({ cachedBytes: z.number().nonnegative().nullable(), buffersBytes: z.number().nonnegative().nullable() })
+      .nullable(),
+    /** macOS kernel pressure level; null on platforms without the concept. */
+    memoryPressure: z.enum(["normal", "warning", "critical"]).nullable(),
+    /** Bounded in-memory history, oldest first. Disks are not repeated here. */
+    history: z.object({
+      intervalMs: z.number().int().positive(),
+      /** Oldest first; kept to about three minutes. */
+      samples: z.array(
+        z.object({
+          at: z.string(),
+          cpuPercent: z.number().min(0).max(100).nullable(),
+          memoryPercent: z.number().min(0).max(100).nullable(),
+          rxBytesPerSecond: z.number().nonnegative().nullable(),
+          txBytesPerSecond: z.number().nonnegative().nullable(),
+        }),
+      ),
+    }),
     /** Present only when the daemon parent process is verifiable through /proc. */
     process: z
       .object({

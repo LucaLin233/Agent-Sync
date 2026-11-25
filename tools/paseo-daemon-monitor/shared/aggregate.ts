@@ -175,3 +175,126 @@ export function netRates(
   if (rx < 0 || tx < 0) return { rxBytesPerSecond: null, txBytesPerSecond: null };
   return { rxBytesPerSecond: (rx * 1000) / windowMs, txBytesPerSecond: (tx * 1000) / windowMs };
 }
+
+/** Bounded ring helper: newest sample last, oldest dropped first. */
+export function pushBounded<T>(list: readonly T[], entry: T, limit: number): T[] {
+  if (!(limit > 0)) return [];
+  const next = list.length >= limit ? list.slice(list.length - limit + 1) : list.slice();
+  next.push(entry);
+  return next;
+}
+
+/** 1/5/15 minute load averages from /proc/loadavg. */
+export function parseLoadAverage(text: string): { one: number; five: number; fifteen: number } | null {
+  const values = text.trim().split(/\s+/).slice(0, 3).map(Number);
+  if (values.length < 3 || values.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  return { one: values[0], five: values[1], fifteen: values[2] };
+}
+
+/** Uptime in seconds from /proc/uptime. */
+export function parseUptime(text: string): number | null {
+  const value = Number(text.trim().split(/\s+/)[0]);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** Cached/buffers share of /proc/meminfo, for the macOS-style breakdown on Linux. */
+export function parseMeminfoDetail(text: string): { cachedBytes: number; buffersBytes: number } | null {
+  let cachedKb: number | null = null;
+  let buffersKb: number | null = null;
+  for (const line of text.split("\n")) {
+    const match = /^(Cached|Buffers):\s+(\d+)\s+kB$/.exec(line.trim());
+    if (!match) continue;
+    if (match[1] === "Cached") cachedKb = Number(match[2]);
+    else buffersKb = Number(match[2]);
+  }
+  if (cachedKb === null && buffersKb === null) return null;
+  return { cachedBytes: (cachedKb ?? 0) * 1024, buffersBytes: (buffersKb ?? 0) * 1024 };
+}
+
+const NETWORK_FSTYPES = new Set([
+  "nfs", "nfs4", "cifs", "smb3", "smbfs", "sshfs", "fuse.sshfs", "glusterfs", "ceph", "9p", "afs", "afpfs", "davfs",
+]);
+const NON_DISK_FSTYPES = new Set([
+  "proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "ramfs", "cgroup", "cgroup2", "securityfs", "debugfs", "tracefs",
+  "pstore", "bpf", "configfs", "fusectl", "mqueue", "hugetlbfs", "autofs", "binfmt_misc", "efivarfs", "squashfs",
+  "iso9660", "overlay", "nsfs", "rpc_pipefs", "selinuxfs", "fuse.lxcfs", "fuse.gvfsd-fuse",
+]);
+
+export interface MountEntry {
+  source: string;
+  mountPoint: string;
+  fstype: string;
+}
+
+/**
+ * Parse /proc/mounts into the mounts that hold real local storage: block
+ * devices, plus ZFS datasets. Network, memory-backed and read-only image
+ * filesystems are dropped before any statfs call.
+ */
+export function localMounts(text: string): MountEntry[] {
+  const seen = new Set<string>();
+  const mounts: MountEntry[] = [];
+  for (const raw of text.split("\n")) {
+    const fields = raw.trim().split(/\s+/);
+    if (fields.length < 3) continue;
+    const [source, mountPoint, fstype] = fields;
+    if (!source || !mountPoint.startsWith("/")) continue;
+    if (NON_DISK_FSTYPES.has(fstype) || NETWORK_FSTYPES.has(fstype)) continue;
+    const isBlock = source.startsWith("/dev/");
+    const isZfs = fstype === "zfs" || fstype.startsWith("zfs");
+    if (!isBlock && !isZfs) continue;
+    // One entry per device: keep the shortest mount point.
+    if (seen.has(source)) continue;
+    seen.add(source);
+    mounts.push({ source, mountPoint, fstype });
+  }
+  return mounts.sort((a, b) => a.mountPoint.length - b.mountPoint.length);
+}
+
+/** df semantics: reserved space counts as neither used nor available. */
+export function dfPercent(usedBytes: number, availableBytes: number): number | null {
+  const denominator = usedBytes + availableBytes;
+  if (!(denominator > 0)) return null;
+  return clampPercent((100 * usedBytes) / denominator);
+}
+
+/** Activity Monitor style memory from macOS vm_stat, with a page size in bytes. */
+export function parseVmStat(text: string, pageSize: number): {
+  appBytes: number | null;
+  wiredBytes: number | null;
+  compressedBytes: number | null;
+  cachedBytes: number | null;
+  usedBytes: number | null;
+} | null {
+  if (!(pageSize > 0)) return null;
+  const pages: Record<string, number> = {};
+  for (const line of text.split("\n")) {
+    const match = /^"?([A-Za-z][A-Za-z _-]*)"?:\s+(\d+)\.?\s*$/.exec(line.trim());
+    if (match) pages[match[1]] = Number(match[2]);
+  }
+  const page = (name: string): number | null => (Number.isFinite(pages[name]) ? pages[name] * pageSize : null);
+  const active = page("Pages active");
+  const wired = page("Pages wired down");
+  const compressor = page("Pages occupied by compressor");
+  const cachedRaw = (page("Pages inactive") ?? 0) + (page("Pages purgeable") ?? 0);
+  const appBytes = active;
+  const compressedBytes = compressor;
+  const usedBytes =
+    active === null || wired === null ? null : active + wired + (compressor ?? 0);
+  return {
+    appBytes,
+    wiredBytes: wired,
+    compressedBytes,
+    cachedBytes: cachedRaw > 0 ? cachedRaw : null,
+    usedBytes,
+  };
+}
+
+/** macOS kernel memory pressure level: 1 normal, 2 warning, 4 critical. */
+export function parseMemoryPressure(text: string): "normal" | "warning" | "critical" | null {
+  const level = Number(text.trim());
+  if (level === 1) return "normal";
+  if (level === 2) return "warning";
+  if (level === 4) return "critical";
+  return null;
+}

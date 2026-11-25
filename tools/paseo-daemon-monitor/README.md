@@ -23,10 +23,12 @@ paseo plugin reload daemon-monitor
 - 服务端插件代码运行在 daemon 进程旁，直接读 daemon 所在主机的数据，不需要路径、命令或凭据，也不向外传主机地址。
 - CPU：Linux 取 `/proc/stat` 汇总行相邻两次计数，100% 代表全部逻辑核心满载；其他平台用 `os.cpus()` 同源计数。首次采样在同一请求内取两次，避免显示伪造的 0%。
 - 内存：Linux 已用 = 总量 − `/proc/meminfo` `MemAvailable`；其他平台退到 `os.totalmem()`/`os.freemem()`，并在详情标明该平台没有 MemAvailable。
-- 系统盘：`fs.statfs` 读系统根所在文件系统（`/`，Windows 为 `C:\`），只算这一个挂载点；已用按 `blocks - bfree`，可用按 `bavail`。
+- 系统盘：`fs.statfs` 读系统根所在文件系统（`/`，Windows 为 `C:\`），已用按 `blocks - bfree`，可用按 `bavail`。
+- 本地磁盘（Linux）：按 `/proc/mounts` 选块设备与 ZFS，排除网络、内存盘、squashfs/iso 等只读镜像，每个设备只取一次，逐个 `statfs`；百分比按 `df` 口径（保留空间既不算已用也不算可用）。枚举失败时退回单一系统根读数。
+- 历史：约 3 分钟的有界内存序列（2 秒一个点），重载即清空；磁盘不进历史，详情读取当前一次磁盘结果。
 - daemon 主进程（仅 Linux，可选）：进程 CPU、RSS、PID 读自插件父进程 `/proc`。启动时固定 ppid，IPC 断开或 ppid 变化即停止上报，绝不用插件子进程冒充。
 - 网络（仅 Linux）：`/proc/net/dev` 累计字节的差值，不跑命令、不产生流量。跳过 loopback，以及 veth/docker/bridge 等已知虚拟接口，避免容器两端重复计数；接口集合变化或计数回退时该次速率记为未知，不是 0。
-- 轮询 5 秒一次，仅组件挂载且应用在前台时进行；服务端另有 1 秒缓存，避免同一时刻的重复读取。网络速率沿用同一采样与缓存，不新增后台循环。
+- 服务端每 2 秒采一次 CPU、内存与网速，磁盘每 30 秒单独刷新；采样由 daemon 内单个循环驱动，多个客户端与弹层共享同一份结果，不叠加读数，慢采样不与下一轮重叠。前端按同一 2 秒节奏读取。
 
 ## 状态
 
