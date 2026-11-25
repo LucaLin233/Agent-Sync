@@ -111,62 +111,82 @@ const ready = (rate) => ({ kind: "ready", rate });
 const loading = { kind: "loading" };
 const off = { kind: "unavailable", reason: "累计统计已关闭" };
 
-test("the compact pill keeps both measured rates and never a speed", () => {
+const LABEL_SEP = "\u202F";
+
+test("the pill keeps both readings, drops the percent sign and never a speed", () => {
   // The two slots are independent readings, so different numbers both show.
-  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "总94.9%·近81.2%");
-  // The reported case: the numbers stay complete instead of being clipped.
-  assert.equal(formatPillLabel(ready(0.981), ready(0.995)), "总98.1%·近99.5%");
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)),
+    "累计" + LABEL_SEP + "94.9 · 最近" + LABEL_SEP + "81.2");
+  // The reported case, with the exact narrow space after each label.
+  assert.equal(formatPillLabel(ready(0.985), ready(0.997)),
+    "累计" + LABEL_SEP + "98.5 · 最近" + LABEL_SEP + "99.7");
   // Equal readings still print both, because they come from different bases.
-  assert.equal(formatPillLabel(ready(0.5), ready(0.5)), "总50%·近50%");
+  assert.equal(formatPillLabel(ready(0.5), ready(0.5)),
+    "累计" + LABEL_SEP + "50 · 最近" + LABEL_SEP + "50");
   // Real zero is a measurement, not a missing value.
-  assert.equal(formatPillLabel(ready(0), ready(1)), "总0%·近100%");
-  // The pill line never contains a token rate.
+  assert.equal(formatPillLabel(ready(0), ready(1)),
+    "累计" + LABEL_SEP + "0 · 最近" + LABEL_SEP + "100");
+  // Only U+202F follows a label; the separator keeps ordinary spaces.
   for (const label of [
-    formatPillLabel(ready(0.949), ready(0.812)),
+    formatPillLabel(ready(0.985), ready(0.997)),
     formatPillLabel(loading, ready(null)),
     formatPillLabel(off, ready(0.4)),
   ]) {
     assert.doesNotMatch(label, /t\/s|token/i);
+    assert.doesNotMatch(label, /%/, label);
+    assert.equal(label.split(LABEL_SEP).length, 3, label);
+    assert.doesNotMatch(label, /\u00A0/, "no full no-break space");
   }
 });
 
-test("a whole percentage drops only its .0, keeping the measured precision", () => {
-  // 100.0% is the only value that can reach three digits; two of them still fit.
-  assert.equal(formatPillLabel(ready(1), ready(1)), "总100%·近100%");
-  // Any other whole percentage shortens the same way, not just 100%.
-  assert.equal(formatPillLabel(ready(0.98), ready(0.5)), "总98%·近50%");
-  assert.equal(formatPillLabel(ready(0), ready(0)), "总0%·近0%");
-  // A non-zero tenths digit keeps its one-decimal precision.
-  assert.equal(formatPillLabel(ready(0.981), ready(0.995)), "总98.1%·近99.5%");
-  // The tooltip never shortens; it stays on one decimal with full names.
+test("a whole reading drops only its .0 and keeps measured precision", () => {
+  // 100 is the widest value; two of them still print in full.
+  assert.equal(formatPillLabel(ready(1), ready(1)),
+    "累计" + LABEL_SEP + "100 · 最近" + LABEL_SEP + "100");
+  // Any whole percentage shortens the same way, not just 100.
+  assert.equal(formatPillLabel(ready(0.98), ready(0.5)),
+    "累计" + LABEL_SEP + "98 · 最近" + LABEL_SEP + "50");
+  assert.equal(formatPillLabel(ready(0), ready(0)),
+    "累计" + LABEL_SEP + "0 · 最近" + LABEL_SEP + "0");
+  // A non-zero tenths digit keeps its one decimal.
+  assert.equal(formatPillLabel(ready(0.999), ready(0.999)),
+    "累计" + LABEL_SEP + "99.9 · 最近" + LABEL_SEP + "99.9");
+  // The tooltip keeps the percent sign, one decimal and the full names.
   assert.equal(formatPillTitle(ready(1), ready(0.5)),
     "打开工作区用量 · 累计缓存 100.0% · 最近样本 50.0%");
 });
 
 test("each pill slot keeps its own placeholder and never borrows the other", () => {
-  assert.equal(formatPillLabel(loading, ready(0.812)), "总…·近81.2%");
-  assert.equal(formatPillLabel(off, ready(0.812)), "总—·近81.2%");
-  assert.equal(formatPillLabel(ready(0.949), ready(null)), "总94.9%·近—");
-  assert.equal(formatPillLabel(off, loading), "总—·近…");
+  assert.equal(formatPillLabel(loading, ready(0.812)),
+    "累计" + LABEL_SEP + "… · 最近" + LABEL_SEP + "81.2");
+  assert.equal(formatPillLabel(off, ready(0.812)),
+    "累计" + LABEL_SEP + "— · 最近" + LABEL_SEP + "81.2");
+  assert.equal(formatPillLabel(ready(0.949), ready(null)),
+    "累计" + LABEL_SEP + "94.9 · 最近" + LABEL_SEP + "—");
+  assert.equal(formatPillLabel(off, loading),
+    "累计" + LABEL_SEP + "— · 最近" + LABEL_SEP + "…");
   // A missing cumulative rate is never filled from the recent sample.
-  assert.equal(formatPillLabel(ready(null), ready(0.812)), "总—·近81.2%");
+  assert.equal(formatPillLabel(ready(null), ready(0.812)),
+    "累计" + LABEL_SEP + "— · 最近" + LABEL_SEP + "81.2");
   assert.equal(formatPillLabel({ kind: "unavailable", reason: "累计读取失败" }, ready(0.812)),
-    "总—·近81.2%");
-  assert.equal(formatPillLabel(ready(0.949), ready(undefined)), "总94.9%·近—");
+    "累计" + LABEL_SEP + "— · 最近" + LABEL_SEP + "81.2");
 });
 
 /**
- * Width estimate for the host's composer pill, from Paseo v0.17.4 public styles
- * (`packages/app/src/composer/pill-styles.ts`, `plugins/buttons/view.tsx`):
- * maxWidth 160, paddingHorizontal 12 each side, gap 8, 16 px icon and 12 px
- * (fontSize.sm) label. An `action` pill has no chevron. Glyph widths are the
- * usual 12 px approximations, so this is an estimate, not a real layout pass.
+ * Width estimate anchored to the parent's browser measurement of this plugin's
+ * pill: `累计 98.5 · 最近 99.7` with ordinary spaces rendered 158 px at the
+ * host's 12 px label size. Paseo v0.17.4 public styles give the non-text part as
+ * 160 max width minus 12 + 12 padding, 8 gap and the 16 px icon = 48 px, so that
+ * label is ~110 px against a 112 px text budget. Other strings are compared to
+ * it with rough per-glyph deltas (CJK 12 px, digit 6.7 px, U+202F 2.4 px ≈
+ * 0.2 em), so this is a style-bound estimate, never a real layout result.
  */
-const PILL_LABEL_BUDGET = 160 - 12 - 12 - 8 - 16;
-function estimatedLabelWidth(text) {
+const PILL_TEXT_BUDGET = 160 - 12 - 12 - 8 - 16; // 112 px
+const MEASURED_PLAIN_LABEL = 110; // px, parent browser measurement
+function labelGlyphWidth(text) {
   const glyph = (char) => {
+    if (char === "\u202F") return 2.4;
     if (char === " " || char === ".") return 3.4;
-    if (char === "%") return 10.4;
     if (char === "·") return 4.5;
     if (char === "…" || char === "—") return 12;
     if (char.charCodeAt(0) < 0x2e80) return 6.7; // digits, latin
@@ -174,16 +194,24 @@ function estimatedLabelWidth(text) {
   };
   return [...text].reduce((sum, char) => sum + glyph(char), 0);
 }
+const PLAIN_LABEL = "累计 98.5 · 最近 99.7";
+function estimatedLabelWidth(label) {
+  return MEASURED_PLAIN_LABEL + labelGlyphWidth(label) - labelGlyphWidth(PLAIN_LABEL);
+}
 
-test("the compact pill label fits the host's 160 px single line", () => {
-  const label = formatPillLabel(ready(0.981), ready(0.995));
-  assert.equal(label, "总98.1%·近99.5%");
-  assert.ok(estimatedLabelWidth(label) <= PILL_LABEL_BUDGET,
-    `${label} ≈ ${estimatedLabelWidth(label)} px > ${PILL_LABEL_BUDGET} px`);
-  // The reported truncation: the previously shipped wording overshoots the same budget.
-  assert.ok(estimatedLabelWidth("累计 98.1% · 最近 99.5%") > PILL_LABEL_BUDGET);
-  // Two full rates in the compact form are the widest case that must still fit.
-  assert.ok(estimatedLabelWidth(formatPillLabel(ready(1), ready(1))) <= PILL_LABEL_BUDGET);
+test("the reported values and the widest pairs stay inside the 160 px style bound", () => {
+  const reported = formatPillLabel(ready(0.985), ready(0.997));
+  assert.equal(reported, "累计" + LABEL_SEP + "98.5 · 最近" + LABEL_SEP + "99.7");
+  // The narrow space is what buys the room, so the plain-space form stays wider.
+  assert.ok(estimatedLabelWidth(reported) < estimatedLabelWidth(PLAIN_LABEL));
+  for (const label of [
+    reported,
+    formatPillLabel(ready(0.999), ready(0.999)),
+    formatPillLabel(ready(1), ready(1)),
+  ]) {
+    assert.ok(estimatedLabelWidth(label) <= PILL_TEXT_BUDGET,
+      `${label} ≈ ${estimatedLabelWidth(label).toFixed(1)} px > ${PILL_TEXT_BUDGET} px`);
+  }
 });
 
 test("the pill title names both bases and explains a missing cumulative rate", () => {
@@ -226,7 +254,8 @@ test("the panel keeps distinct recent and cumulative speeds while the pill carri
   assert.equal(formatTokenSpeed(recentSpeed), "900.0 t/s");
   assert.equal(formatTokenSpeed(cumulativeSpeed), "82.7 t/s");
   // …and neither leaks into the composer pill, which shows the two cache rates.
-  assert.equal(formatPillLabel(ready(0.949), ready(0.812)), "总94.9%·近81.2%");
+  assert.equal(formatPillLabel(ready(0.949), ready(0.812)),
+    "累计" + LABEL_SEP + "94.9 · 最近" + LABEL_SEP + "81.2");
 });
 
 test("cumulative speed is weighted by whole-turn duration, not averaged", () => {
