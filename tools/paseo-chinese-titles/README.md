@@ -147,6 +147,16 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 工作区自动首任务路径不变：仍是 `workspace.create.before` 种子加首个真实任务的模型/兜底标题，不读会话历史，也不受本面板选择影响。
 
 
+### 面板配色
+
+面板的强调色按设计稿固定的紫色角色实现，不再直接取主题的 `accent` / `accentForeground`（那会变成 Paseo 默认的绿色）。
+
+- **紫色角色**：图标文字、单选项圆点和生成中提示用强调紫色；主按钮是紫色实底配深紫文字；图标块和选中项各自有紫调的底色和描边。中性底色、正文、次要文字和成功/警告/失败状态仍取 Paseo 主题，未改动。
+- **深色**：完全沿用设计稿取值——强调文字 `#c1b7ff`，按钮 `#b5a8ff` 配文字 `#1c1335`，图标块 `#232231` 配边框 `#49455e`，选中项 `#252532` 配边框 `#8d80ca`。
+- **浅色**：换成更深的紫色 `#5b3fc4`（图标块底色 `#efecf9`、边框 `#6b5abf`）以保证可读性；浅色下白字配 `#5b3fc4` 对比度 7.11:1，强调文字在 `#ffffff`/`#fafafa`/`#f4f4f5` 上为 7.11/6.81/6.47:1。
+- **深浅判断**：SDK 的 `PluginTheme` 没有公开的 `mode`/`appearance` 字段（`appearance` 只出现在插件自己贡献的主题条目上），所以按 `surface0` 的相对亮度判断，规则与工作区用量面板一致；无法解析颜色时按深色处理。
+- 这套取值写在 `shared/palette.ts`，`client/regenerate.tsx` 只通过 `panelPalette(theme.colors)` 取用，业务逻辑、布局和字号未动。
+
 ## 验收与限制
 
 **本次候选（会话自动命名与全量连续摘要）的自动化验证是离线合成的**：`npm run typecheck`、`npm test`，以及用 Paseo 0.17.4 自带插件编译器对候选目录做的真实打包检查（入口解析、manifest、server/client bundle 均成功；该检查在内存中完成，不安装、不加载）。测试全程使用合成输入与独占临时目录，无真实模型调用、未读取任何真实会话正文。候选内容在运行 Paseo 0.17.4 的宿主 daemon 上以 `plugin reload` 加载成功（`enabled`、`status: "running"`、`Plugin ready`，无报错行）。现场回读另已覆盖两类真实路径：一条历史失败记录被自动修复（状态为 `done`、`attempts=2`、`repairUsed=true`、无失败码，Paseo 回读的标题确实换成了摘要），以及一次手动重生成成功（标题保留了 WebSocket 主题，不再被截断）。全新会话的首轮自动命名（`agent.turn.after` 首轮触发与 `agent update --name` 实写）、20 秒 hook 与 22 秒 RPC 的实际预算上界，仍尚未单独现场实测。

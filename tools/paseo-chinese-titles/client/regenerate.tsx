@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { listWorkspaceSessionsRpc, regenerateWorkspaceTitleRpc } from "../shared/rpc";
+import { panelPalette } from "../shared/palette";
 
 type Scope = "both" | "workspace" | "session";
 
@@ -106,6 +107,7 @@ function writtenTargets(workspace: boolean, session: boolean): string {
 
 export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
   const compact = layout.compact;
+  const accent = panelPalette(theme.colors);
   const currentTitle = useWorkspace(workspaceId, (workspace) => workspace.title);
   // A new prompt in this workspace means a session may have joined or moved;
   // re-read the picker without touching any saved selection.
@@ -165,13 +167,13 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         height: compact ? 32 : 38,
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: colors.accent,
-        backgroundColor: colors.surface2,
+        borderColor: accent.iconBorder,
+        backgroundColor: accent.iconPlate,
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
-      badgeText: { color: colors.accent, fontSize: 17, fontWeight: "700" as const },
-      badgeSub: { color: colors.accent, fontSize: 9, marginLeft: 1 },
+      badgeText: { color: accent.mark, fontSize: 17, fontWeight: "700" as const },
+      badgeSub: { color: accent.mark, fontSize: 9, marginLeft: 1 },
       heading: {
         color: colors.foreground,
         fontSize: compact ? 20 : 22,
@@ -231,7 +233,7 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         backgroundColor: colors.surface1,
         opacity: running ? 0.6 : 1,
       },
-      optionSelected: { borderColor: colors.accent, backgroundColor: colors.surface2 },
+      optionSelected: { borderColor: accent.selectedEdge, backgroundColor: accent.selectedPlate },
       radio: {
         marginTop: 4,
         width: 16,
@@ -244,7 +246,7 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
-      radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
+      radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: accent.mark },
       optionCopy: { flex: 1, minWidth: 0, gap: 2 },
       optionLabel: {
         color: colors.foreground,
@@ -275,13 +277,13 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         paddingVertical: 9,
         paddingHorizontal: 16,
         borderRadius: 9,
-        backgroundColor: colors.accent,
+        backgroundColor: accent.action,
         opacity: running || !selectedId ? 0.6 : 1,
         alignItems: "center" as const,
         justifyContent: "center" as const,
       },
       buttonText: {
-        color: colors.accentForeground,
+        color: accent.actionText,
         fontSize: 15,
         lineHeight: 21,
         fontWeight: "700" as const,
@@ -352,7 +354,7 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
   const selectedScope = SCOPES.find((option) => option.value === scope) ?? SCOPES[0];
   const notice =
     phase.kind === "running"
-      ? { tone: theme.colors.accent, title: "正在生成中文标题", body: "正在读取所选会话的可见文本。" }
+      ? { tone: accent.mark, title: "正在生成中文标题", body: "正在读取所选会话的可见文本。" }
       : phase.kind === "done"
         ? {
             tone: theme.colors.statusSuccess,
