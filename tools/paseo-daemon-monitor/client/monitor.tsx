@@ -5,7 +5,7 @@ import {
   useRpc,
   useSettings,
 } from "@getpaseo/plugin/client";
-import { Icon, ScrollView } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { hostResourcesRpc, type HostResources } from "../shared/contract.ts";
@@ -537,7 +537,14 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
         </View>
       ) : null}
 
-      <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ gap: 8 }}>
+      {/*
+        The host owns the only scroll area here: on desktop the sidebar popover
+        is rendered by PluginPopoverSurface -> MenuSurface(scrollable) ->
+        FloatingScrollView with a height capped by maxHeight; on compact the
+        bottom sheet wraps its content in BottomSheetScrollView. A nested
+        ScrollView would add a second scrollbar and clip the daemon process row.
+      */}
+      <View style={{ gap: 8 }}>
         <View style={{ flexDirection: "row", gap: 8, paddingBottom: 9, borderBottomWidth: 1, borderBottomColor: colors.border }}>
           <Fact label="主机运行时长" value={uptimeText(value?.uptimeSeconds)} colors={colors} />
           <Fact label="系统负载 1 / 5 / 15 分钟" value={loadText(value?.loadAverage)} colors={colors} />
@@ -633,7 +640,7 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
             </Text>
           )}
         </Card>
-      </ScrollView>
+      </View>
     </View>
   );
 }
