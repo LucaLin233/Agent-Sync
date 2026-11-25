@@ -6,8 +6,9 @@ import {
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AppState, Pressable, ScrollView, Text, View } from "react-native";
+import { AppState, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { hostResourcesRpc, type HostResources } from "../shared/contract.ts";
+import { chooseFooterLayout, FOOTER_ROW_GAP, FOOTER_ROW_GAP_TIGHT } from "../shared/layout.ts";
 
 type Colors = PluginPopoverProps["theme"]["colors"];
 type Status = "loading" | "live" | "stale" | "failed";
@@ -126,21 +127,36 @@ function Meter({ percent, tone, colors }: { percent: number | null; tone: string
   );
 }
 
-function Reading({ icon, percent, tone, showMeter, colors }: {
+/** Rough advance width of one CJK glyph at the 10 px badge size. */
+const ANOMALY_CHAR_WIDTH = 10;
+
+function Reading({ icon, percent, tone, showMeter, showIcon, colors, onTextWidth }: {
   icon: string;
   percent: number | null | undefined;
   tone: string;
   showMeter: boolean;
+  showIcon: boolean;
   colors: Colors;
+  onTextWidth: (width: number) => void;
 }) {
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0, flexShrink: 1 }}
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 }}
     >
-      <Icon name={icon} size={12} color={tone} />
-      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"] }}>
+      {showIcon ? <Icon name={icon} size={12} color={tone} /> : null}
+      <Text
+        numberOfLines={1}
+        onLayout={(event) => onTextWidth(event.nativeEvent.layout.width)}
+        style={{
+          color: colors.foreground,
+          fontSize: 11,
+          fontWeight: "700",
+          fontVariant: ["tabular-nums"],
+          flexShrink: 0,
+        }}
+      >
         {percentText(percent)}
       </Text>
       {showMeter ? <Meter percent={percent ?? null} tone={tone} colors={colors} /> : null}
@@ -157,8 +173,29 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
   const cpu = percentText(value?.cpuPercent);
   const memory = percentText(value?.memoryPercent);
   const disk = percentText(value?.disk?.percent);
-  const showMeters = !layout.compact;
   const anomaly = shown === "stale" ? "旧样本" : shown === "failed" ? "读取失败" : null;
+  const { fontScale } = useWindowDimensions();
+  const [availableWidth, setAvailableWidth] = useState<number | null>(null);
+  const [textWidths, setTextWidths] = useState<(number | null)[]>([null, null, null]);
+
+  // The percentages are the only content that must survive at any width, so the
+  // row fits itself to real measurements instead of trusting the layout flag.
+  const plan = chooseFooterLayout({
+    availableWidth,
+    compact: layout.compact,
+    textWidths,
+    anomaly: anomaly !== null,
+    anomalyTextWidth: anomaly ? anomaly.length * ANOMALY_CHAR_WIDTH * fontScale : 0,
+  });
+
+  const recordTextWidth = (index: number, width: number) => {
+    setTextWidths((previous) => {
+      if (Math.abs((previous[index] ?? -1) - width) < 0.5) return previous;
+      const next = previous.slice();
+      next[index] = width;
+      return next;
+    });
+  };
 
   return (
     <Pressable
@@ -166,10 +203,14 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
       accessibilityLabel={`宿主机资源：CPU ${cpu}，内存 ${memory}，硬盘 ${disk}，${hostStatusLabels[connection] ?? connection}${anomaly ? `，${anomaly}` : ""}`}
       accessibilityHint="打开宿主机资源详情"
       onPress={() => openPopover(Popover)}
+      onLayout={(event) => {
+        const width = Math.max(0, event.nativeEvent.layout.width);
+        setAvailableWidth((previous) => (previous !== null && Math.abs(previous - width) < 0.5 ? previous : width));
+      }}
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: 9,
+        gap: plan.tightGap ? FOOTER_ROW_GAP_TIGHT : FOOTER_ROW_GAP,
         minHeight: 32,
         paddingVertical: 6,
         paddingHorizontal: 9,
@@ -179,13 +220,47 @@ export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSide
         backgroundColor: pressed ? colors.surface2 : colors.surface1,
       })}
     >
-      <Reading icon="Cpu" percent={value?.cpuPercent} tone={colors.accent} showMeter={showMeters} colors={colors} />
-      <Reading icon="MemoryStick" percent={value?.memoryPercent} tone={colors.statusSuccess} showMeter={showMeters} colors={colors} />
-      <Reading icon="HardDrive" percent={value?.disk?.percent} tone={colors.statusWarning} showMeter={showMeters} colors={colors} />
-      {anomaly ? (
-        <Text numberOfLines={1} style={{ marginLeft: "auto", flexShrink: 0, color: shown === "failed" ? colors.statusDanger : colors.statusWarning, fontSize: 10 }}>
+      <Reading
+        icon="Cpu"
+        percent={value?.cpuPercent}
+        tone={colors.accent}
+        showMeter={plan.showMeters}
+        showIcon={plan.showIcons}
+        colors={colors}
+        onTextWidth={(width) => recordTextWidth(0, width)}
+      />
+      <Reading
+        icon="MemoryStick"
+        percent={value?.memoryPercent}
+        tone={colors.statusSuccess}
+        showMeter={plan.showMeters}
+        showIcon={plan.showIcons}
+        colors={colors}
+        onTextWidth={(width) => recordTextWidth(1, width)}
+      />
+      <Reading
+        icon="HardDrive"
+        percent={value?.disk?.percent}
+        tone={colors.statusWarning}
+        showMeter={plan.showMeters}
+        showIcon={plan.showIcons}
+        colors={colors}
+        onTextWidth={(width) => recordTextWidth(2, width)}
+      />
+      {anomaly && plan.showAnomalyText ? (
+        <Text
+          numberOfLines={1}
+          style={{ marginLeft: "auto", flexShrink: 0, color: shown === "failed" ? colors.statusDanger : colors.statusWarning, fontSize: 10 }}
+        >
           {anomaly}
         </Text>
+      ) : null}
+      {anomaly && !plan.showAnomalyText && plan.showAnomalyMark ? (
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: 4, backgroundColor: shown === "failed" ? colors.statusDanger : colors.statusWarning }}
+        />
       ) : null}
     </Pressable>
   );
