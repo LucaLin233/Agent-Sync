@@ -29,7 +29,12 @@ exports.createHostClient = (target, config) => {
   return {
     async connect() {
       const s = readScenario();
-      if (s.connectError) { const e = new Error('x'); e.code = s.connectError; throw e; }
+      if (s.connectError) {
+        const e = new Error('synthetic');
+        e.name = 'DaemonAuthenticationError';
+        e.reason = s.connectError;
+        throw e;
+      }
     },
     getLastServerInfoMessage() {
       const s = readScenario();
@@ -50,12 +55,24 @@ exports.createHostClient = (target, config) => {
         const job = ((s.response || {})[method] || {}).job;
         if (!job) { throw new Error('fixture missing job'); }
         job[key] = job[key] || {};
-        job[key][id] = {status: input.status};
+        job[key][id] = {status: input.status, updatedAt: '2026-11-26T00:00:00Z'};
+      }
+      if (isWrite && s.writeJobId) {
+        const method = input.findingId ? 'observatory.insights.report'
+                                       : 'observatory.insights.suggestions';
+        const job = ((s.response || {})[method] || {}).job;
+        if (job) job.id = s.writeJobId;
       }
       writeScenario(s);
       if (s.rpcErrors && s.rpcErrors[method]) { throw new Error('synthetic rpc failure'); }
       if (isWrite && s.writeOutcome === 'throw') { throw new Error('synthetic write failure'); }
-      if (isWrite && s.writeOutcome === 'apply') { return {ok: true}; }
+      if (isWrite && s.writeOutcome === 'apply') {
+        // 反馈接口按契约返回完整 job；readback 仍走 report/suggestions。
+        const isFinding = !!input.findingId;
+        const method = isFinding ? 'observatory.insights.report'
+                                 : 'observatory.insights.suggestions';
+        return JSON.parse(JSON.stringify(((s.response || {})[method] || {}).job));
+      }
       if (isWrite) { return {}; }
       return s.response[method];
     },
@@ -91,17 +108,16 @@ def base_scenario(**over):
         "response": {
             "observatory.insights.list": {"jobs": [
                 {"id": "job-1", "agentId": "agent-1", "createdAt": "2026-11-26T00:00:00Z",
-                 "report": {"findings": [{"id": "f-1", "severity": "high"},
-                                         {"id": "f-2", "severity": "low"}],
-                            "actions": [{"id": "a-1"}]}}]},
+                 "findings": 6, "resolvedFindings": 2, "reportAvailable": True,
+                 "summary": None, "health": "watch"}]},
             "observatory.insights.report": {"job": {
                 "id": "job-1",
                 "report": {"findings": [{"id": "f-1", "severity": "high"},
                                         {"id": "f-2", "severity": "low"}]},
-                "findingFeedback": {"f-1": {"status": "open"}}}},
+                "findingFeedback": {}}},
             "observatory.insights.suggestions": {"job": {
                 "id": "job-9", "report": {"actions": [{"id": "a-1"}]},
-                "feedback": {"a-1": {"status": "open"}}}},
+                "feedback": {}}},
         },
     }
     scenario.update(over)
@@ -166,6 +182,53 @@ class ChildEnvTest(Base):
         self.assertFalse(target["hasPassword"])
 
 
+class ReportListTest(Base):
+    def test_counts_come_from_summary_fields(self):
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_OK, out)
+        job = json.loads(out)["jobs"][0]
+        self.assertEqual(job["findings"], 6)
+        self.assertEqual(job["resolved"], 2)
+        self.assertEqual(job["openFindings"], 4)
+        self.assertTrue(job["reportAvailable"])
+
+    def test_summary_without_counts_is_not_reported_as_zero(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.list"]["jobs"][0].pop("findings")
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_OK, out)
+        job = json.loads(out)["jobs"][0]
+        self.assertIsNone(job["findings"])
+        self.assertIsNone(job["openFindings"])
+
+
+class ReportShowTest(Base):
+    def test_show_calls_report_directly(self):
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_OK, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["jobId"], "job-1")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_show_missing_report_is_input_error_and_zero_write(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"] = {"job": None}
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_INPUT, out)
+        self.assertEqual(json.loads(out)["code"], "job_not_found")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_show_job_id_mismatch_stops(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"]["job"]["id"] = "job-other"
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_VERIFY, out)
+        self.assertEqual(json.loads(out)["code"], "job_id_mismatch")
+
+
 class DryRunTest(Base):
     def test_dry_run_sends_no_write(self):
         rc, out = self.run_tool("finding", "dry-run", "--job-id", "job-1",
@@ -184,6 +247,28 @@ class DryRunTest(Base):
                                 "--finding-id", "f-1", "--status", "done")
         self.assertEqual(rc, M.RC_INPUT, out)
         self.assertEqual(self.calls(), [])
+
+    def test_no_feedback_counts_as_open(self):
+        rc, out = self.run_tool("finding", "dry-run", "--job-id", "job-1",
+                                "--finding-id", "f-2", "--status", "resolved")
+        self.assertEqual(rc, M.RC_OK, out)
+        self.assertEqual(json.loads(out)["beforeStatus"], "open")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_verify_without_feedback_is_open_and_verified(self):
+        rc, out = self.run_tool("finding", "verify", "--job-id", "job-1", "--finding-id", "f-2")
+        self.assertEqual(rc, M.RC_OK, out)
+        payload = json.loads(out)
+        self.assertEqual(payload["status"], "open")
+        self.assertTrue(payload["verified"])
+
+    def test_verify_job_id_mismatch_zero_write(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"]["job"]["id"] = "job-other"
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("finding", "verify", "--job-id", "job-1", "--finding-id", "f-1")
+        self.assertEqual(rc, M.RC_VERIFY, out)
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
 
     def test_suggestion_dry_run_uses_own_status_set(self):
         rc, out = self.run_tool("suggestion", "dry-run", "--job-id", "job-9",
@@ -248,6 +333,36 @@ class WriteTest(Base):
         self.assertEqual(rc, M.RC_OK, out)
         self.assertTrue(json.loads(out)["verified"])
 
+    def test_missing_report_on_close_is_input_error_and_zero_write(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"] = {"job": None}
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("finding", "close", "--job-id", "job-1",
+                                "--finding-id", "f-1", "--status", "resolved")
+        self.assertEqual(rc, M.RC_INPUT, out)
+        self.assertEqual(json.loads(out)["code"], "job_not_found")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_read_job_id_mismatch_blocks_write(self):
+        scenario = base_scenario(writeOutcome="apply")
+        scenario["response"]["observatory.insights.report"]["job"]["id"] = "job-other"
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("finding", "close", "--job-id", "job-1",
+                                "--finding-id", "f-1", "--status", "resolved")
+        self.assertEqual(rc, M.RC_VERIFY, out)
+        self.assertEqual(json.loads(out)["code"], "job_id_mismatch")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_write_receipt_job_id_mismatch_stops_without_rewrite(self):
+        scenario = base_scenario(writeOutcome="apply", writeJobId="job-other")
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("finding", "close", "--job-id", "job-1",
+                                "--finding-id", "f-1", "--status", "resolved")
+        self.assertEqual(rc, M.RC_VERIFY, out)
+        self.assertEqual(json.loads(out)["code"], "job_id_mismatch")
+        methods = [c["method"] for c in self.calls()]
+        self.assertEqual(methods.count("observatory.insights.feedback"), 1)
+
     def test_unknown_entry_is_input_error(self):
         rc, out = self.run_tool("finding", "verify", "--job-id", "job-1", "--finding-id", "nope")
         self.assertEqual(rc, M.RC_INPUT, out)
@@ -293,8 +408,14 @@ class GateTest(Base):
         self.assertEqual(box.exception.code, "target_not_loopback")
 
     def test_loopback_forms_accepted(self):
-        for target in ("127.0.0.1:6767", "localhost:8080", "[::1]:9000"):
+        for target in ("127.0.0.1:6767", "[::1]:9000"):
             self.assertEqual(M.validate_target(target), target)
+
+    def test_localhost_rejected(self):
+        # localhost 可能解析到非回环地址；只接受显式回环 IP。
+        with self.assertRaises(M.Fail) as box:
+            M.validate_target("localhost:6767")
+        self.assertEqual(box.exception.code, "target_not_loopback")
 
     def test_shim_not_treated_as_package(self):
         shim = pathlib.Path(self.tmp) / "paseo-shim"
@@ -324,11 +445,17 @@ class GateTest(Base):
             M.resolve_cli(self.cli)
         self.assertEqual(box.exception.code, "sdk_package_missing")
 
-    def test_auth_failure_maps_to_auth_rc(self):
-        write_scenario(self.sdk, base_scenario(connectError="password_required"))
+    def test_auth_failures_map_to_auth_rc_by_name_and_reason(self):
+        for reason in ("password_required", "incorrect_password"):
+            write_scenario(self.sdk, base_scenario(connectError=reason))
+            rc, out = self.run_tool("report", "list")
+            self.assertEqual(rc, M.RC_AUTH, out)
+            self.assertEqual(json.loads(out)["code"], "daemon_auth_required")
+
+    def test_other_connect_error_is_not_auth(self):
+        write_scenario(self.sdk, base_scenario(connectError="econnrefused"))
         rc, out = self.run_tool("report", "list")
-        self.assertEqual(rc, M.RC_AUTH, out)
-        self.assertEqual(json.loads(out)["code"], "daemon_auth_required")
+        self.assertEqual(rc, M.RC_ENV, out)
 
 
 if __name__ == "__main__":

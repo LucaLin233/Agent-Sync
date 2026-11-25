@@ -18,7 +18,8 @@ finding 状态写一次反馈并回读，或对改进建议做同样的按 actio
 设计约束（与报告 closeout-channel-friction、inline-rpc-repetition、
 credential-env-inheritance 对应）：
 - 固定动作与固定 RPC 方法名；无任意 URL、命令、方法名或表达式入口。
-- 目标只接受本地 loopback；连接后必须核 serverId 等于 --server-id，不符即停。
+- 目标只接受显式回环 IP（127.0.0.1 或 [::1]）加端口；连接后必须核 serverId 等于
+  --server-id，不符即停。不解析 localhost，避免宿主解析到非回环地址。
 - 子进程环境从零重建，只给 PATH 与按名获准注入的 PASEO_PASSWORD；不继承父环境。
 - 只输出稳定 JSON 一行，字段仅 ID、状态、时间、公开枚举和计数；不回显报告正文、
   证据、配置、连接信息或 SDK 错误原文。
@@ -48,7 +49,7 @@ METHODS = {
     "observatory.insights.feedback": "write",
     "observatory.insights.action-feedback": "write",
 }
-LOOPBACK = re.compile(r"^(?:127\.0\.0\.1|localhost|\[::1\]):\d{1,5}$")
+LOOPBACK = re.compile(r"^(?:127\.0\.0\.1|\[::1\]):\d{1,5}$")
 
 RC_OK, RC_INPUT, RC_ENV, RC_AUTH, RC_IDENTITY, RC_VERIFY = 0, 1, 2, 3, 4, 5
 
@@ -90,8 +91,11 @@ const { createHostClient } = require(path.join(clientPkg, 'dist', 'node', 'index
     process.stdout.write(JSON.stringify({ ok: true, serverId: out.serverId,
       daemonVersion: out.daemonVersion, results }));
   } catch (error) {
-    const code = error && typeof error === 'object' ? String(error.code || '') : '';
-    const authFailure = code === 'password_required' || code === 'incorrect_password';
+    // 0.17.4 的 DaemonAuthenticationError 只带 name 和 reason，没有 code。
+    const name = error && typeof error === 'object' ? error.name : '';
+    const reason = error && typeof error === 'object' ? error.reason : '';
+    const authFailure = name === 'DaemonAuthenticationError'
+      && (reason === 'password_required' || reason === 'incorrect_password');
     process.stdout.write(JSON.stringify({ ok: false,
       code: authFailure ? 'auth' : (out.stage === 'rpc' ? 'rpc_error' : 'connect_error'),
       stage: out.stage }));
@@ -214,6 +218,16 @@ def expect_read(payload, index):
     return results[index]
 
 
+JOB_ID_MAX, ENTRY_ID_MAX = 128, 80
+
+
+def _feedback_status(feedback, entry_id):
+    """无反馈按 open 计（正式口径），只投影公开枚举。"""
+    current = feedback.get(entry_id)
+    status = current.get("status") if isinstance(current, dict) else current
+    return status if isinstance(status, str) and status else "open"
+
+
 def project_report(job):
     """只投影已确认非秘密字段。"""
     report = job.get("report") if isinstance(job.get("report"), dict) else {}
@@ -225,13 +239,7 @@ def project_report(job):
         fid = finding.get("id")
         if not isinstance(fid, str):
             continue
-        current = feedback.get(fid)
-        status = None
-        if isinstance(current, dict):
-            status = current.get("status")
-        elif isinstance(current, str):
-            status = current
-        items.append({"findingId": fid, "status": status})
+        items.append({"findingId": fid, "status": _feedback_status(feedback, fid)})
     return {"jobId": job.get("id"), "findings": items}
 
 
@@ -245,14 +253,30 @@ def project_suggestions(job):
         aid = action.get("id")
         if not isinstance(aid, str):
             continue
-        current = feedback.get(aid)
-        status = None
-        if isinstance(current, dict):
-            status = current.get("status")
-        elif isinstance(current, str):
-            status = current
-        items.append({"actionId": aid, "status": status})
+        items.append({"actionId": aid, "status": _feedback_status(feedback, aid)})
     return {"jobId": job.get("id"), "actions": items}
+
+
+def _check_id(value, limit):
+    if not isinstance(value, str) or not value or len(value) > limit:
+        raise Fail(RC_INPUT, "identifier_invalid")
+
+
+def _job_from(data, job_id):
+    """只接受与请求 jobId 精确相等的 job；缺失或不符即停，不读写错对象。"""
+    job = data.get("job") if isinstance(data, dict) and isinstance(data.get("job"), dict) else None
+    if job is None:
+        raise Fail(RC_INPUT, "job_not_found")
+    if job.get("id") != job_id:
+        raise Fail(RC_VERIFY, "job_id_mismatch")
+    return job
+
+
+def _count(value):
+    """整数计数原样投影；字段缺失或类型不符给 None，不误报 0。"""
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
 
 
 def emit(payload):
@@ -269,31 +293,28 @@ def cmd_report_list(args, ctx):
     for job in jobs:
         if not isinstance(job, dict):
             continue
+        findings = _count(job.get("findings"))
+        resolved = _count(job.get("resolvedFindings"))
+        available = job.get("reportAvailable")
+        available = available if isinstance(available, bool) else None
         rows.append({"jobId": job.get("id"),
                      "agentId": job.get("agentId") if isinstance(job.get("agentId"), str) else None,
                      "createdAt": job.get("createdAt") if isinstance(job.get("createdAt"), str) else None,
-                     "findings": len((job.get("report") or {}).get("findings") or [])
-                     if isinstance(job.get("report"), dict) else 0})
+                     "findings": findings, "resolved": resolved,
+                     "openFindings": findings - resolved
+                     if findings is not None and resolved is not None else None,
+                     "reportAvailable": available})
     emit({"ok": True, "command": "report list", "serverId": payload.get("serverId"),
           "count": len(rows), "jobs": rows})
     return RC_OK
 
 
 def cmd_report_show(args, ctx):
-    if not isinstance(args.job_id, str) or not args.job_id or len(args.job_id) > 200:
-        raise Fail(RC_INPUT, "identifier_invalid")
-    payload = run_bridge(ctx["cli"], ctx["target"], args.server_id,
-                         [("observatory.insights.list", {"agentId": args.agent_id} if args.agent_id else {})],
-                         ctx["allow_password"], ctx["timeout"], ctx["node"])
-    data = expect_read(payload, 0)
-    jobs = data.get("jobs") if isinstance(data.get("jobs"), list) else []
-    if not any(isinstance(j, dict) and j.get("id") == args.job_id for j in jobs):
-        raise Fail(RC_INPUT, "job_id_not_in_list")
+    _check_id(args.job_id, JOB_ID_MAX)
     payload = run_bridge(ctx["cli"], ctx["target"], args.server_id,
                          [("observatory.insights.report", {"jobId": args.job_id})],
                          ctx["allow_password"], ctx["timeout"], ctx["node"])
-    job = expect_read(payload, 0)
-    job = job.get("job") if isinstance(job, dict) and isinstance(job.get("job"), dict) else job
+    job = _job_from(expect_read(payload, 0), args.job_id)
     emit({"ok": True, "command": "report show", "serverId": payload.get("serverId"),
           **project_report(job)})
     return RC_OK
@@ -303,8 +324,7 @@ def _read_entry(args, ctx, kind):
     method = "observatory.insights.report" if kind == "finding" else "observatory.insights.suggestions"
     payload = run_bridge(ctx["cli"], ctx["target"], args.server_id, [(method, {"jobId": args.job_id})],
                          ctx["allow_password"], ctx["timeout"], ctx["node"])
-    job = expect_read(payload, 0)
-    job = job.get("job") if isinstance(job, dict) and isinstance(job.get("job"), dict) else job
+    job = _job_from(expect_read(payload, 0), args.job_id)
     return payload, (project_report(job) if kind == "finding" else project_suggestions(job))
 
 
@@ -323,9 +343,8 @@ def _lookup(view, kind, entry_id):
 def cmd_entry(args, ctx, kind, mode):
     valid = FINDING_STATUSES if kind == "finding" else SUGGESTION_STATUSES
     entry_id = args.finding_id if kind == "finding" else args.action_id
-    for value in (args.job_id, entry_id):
-        if not isinstance(value, str) or not value or len(value) > 200:
-            raise Fail(RC_INPUT, "identifier_invalid")
+    _check_id(args.job_id, JOB_ID_MAX)
+    _check_id(entry_id, ENTRY_ID_MAX)
     if mode != "verify" and args.status not in valid:
         raise Fail(RC_INPUT, "status_invalid")
     before_payload, before = _read_entry(args, ctx, kind)
@@ -342,10 +361,11 @@ def cmd_entry(args, ctx, kind, mode):
         return RC_OK
     if mode == "verify":
         status = before_item.get("status")
-        out.update({"ok": True, "command": f"{kind} verify", "write": False,
-                    "status": status, "verified": status is not None})
+        verified = status in valid
+        out.update({"ok": verified, "command": f"{kind} verify", "write": False,
+                    "status": status, "verified": verified})
         emit(out)
-        return RC_OK
+        return RC_OK if verified else RC_VERIFY
     if before_item.get("status") == args.status:
         out.update({"ok": True, "command": f"{kind} close", "write": False,
                     "idempotent": True, "afterStatus": args.status, "verified": True})
@@ -359,27 +379,34 @@ def cmd_entry(args, ctx, kind, mode):
                       {"jobId": args.job_id, "actionId": entry_id, "status": args.status})
     write_state = "sent"
     try:
-        run_bridge(ctx["cli"], ctx["target"], args.server_id, [write_call],
-                   ctx["allow_password"], ctx["timeout"], ctx["node"])
+        written = run_bridge(ctx["cli"], ctx["target"], args.server_id, [write_call],
+                             ctx["allow_password"], ctx["timeout"], ctx["node"])
+        written_job = expect_read(written, 0)
+        if isinstance(written_job.get("id"), str) and written_job.get("id") != args.job_id:
+            raise Fail(RC_VERIFY, "job_id_mismatch")
     except Fail as exc:
         if exc.rc in (RC_AUTH, RC_IDENTITY):
             raise
+        if exc.code == "job_id_mismatch":
+            emit({"ok": False, "command": f"{kind} close", "write": True,
+                  "writeState": "sent", "plannedStatus": args.status, "code": exc.code})
+            return RC_VERIFY
         write_state = "unclear"
-    # 无论回执如何都回读实际状态；回读不明不重写。
-    after_item = None
-    for _ in range(2):
-        try:
-            _, after = _read_entry(args, ctx, kind)
-        except Fail:
-            continue
+    # 无论回执如何都只回读一次实际状态；回读不明不重写，ID 不符也不改读别的对象。
+    after_status = None
+    read_state = "ok"
+    try:
+        _, after = _read_entry(args, ctx, kind)
         after_item = _lookup(after, kind, entry_id)
-        if after_item is not None:
-            break
-    after_status = after_item.get("status") if after_item else None
+        after_status = after_item.get("status") if after_item else None
+    except Fail as exc:
+        read_state = exc.code
     verified = after_status == args.status
     out.update({"command": f"{kind} close", "write": True, "writeState": write_state,
                 "plannedStatus": args.status, "afterStatus": after_status, "verified": verified,
                 "ok": verified})
+    if read_state != "ok":
+        out["readState"] = read_state
     emit(out)
     return RC_OK if verified else RC_VERIFY
 
@@ -406,8 +433,9 @@ def build_parser():
         if name == "report":
             for action in ("list", "show"):
                 cmd = actions.add_parser(action)
-                cmd.add_argument("--agent-id")
-                if action == "show":
+                if action == "list":
+                    cmd.add_argument("--agent-id")
+                else:
                     cmd.add_argument("--job-id", required=True)
         else:
             for action in ("dry-run", "close", "verify"):
