@@ -15,6 +15,7 @@ import {
   type NetTotals,
 } from "../shared/aggregate.ts";
 import type { HostResources } from "../shared/contract.ts";
+import { DEFAULT_SETTINGS, type MonitorSettings } from "../shared/settings.ts";
 import {
   readLoadAverage,
   readLocalDisks,
@@ -29,13 +30,14 @@ import {
   type DiskEntry,
 } from "./proc.ts";
 
-/** Fast counters: CPU, memory and network. */
+/** Default fast cadence; the stored setting may be 5 s or 10 s instead. */
 export const SAMPLE_MS = 2_000;
 /** Disks change slowly and statfs across many mounts is not free. */
 export const DISK_MS = 30_000;
-/** About three minutes of fast samples at 2 s. */
+/** About three minutes, independent of the chosen cadence. */
 export const HISTORY_WINDOW_MS = 3 * 60_000;
-export const HISTORY_LIMIT = Math.round(HISTORY_WINDOW_MS / SAMPLE_MS);
+/** Hard cap on stored points so a 2 s cadence cannot grow past 90. */
+export const HISTORY_LIMIT = Math.round(HISTORY_WINDOW_MS / 2000);
 /** Stop the shared loop when no client has asked for a sample recently. */
 const IDLE_STOP_MS = 30_000;
 /**
@@ -43,7 +45,10 @@ const IDLE_STOP_MS = 30_000;
  * percentage would average the whole idle period. Such a delta is reported as
  * null and the history keeps a visible hole instead of a fake bridge.
  */
-const MAX_DELTA_MS = SAMPLE_MS * 3;
+/** A delta may span up to a few configured intervals before it is a gap. */
+function maxDeltaMs(): number {
+  return intervalMs * 3;
+}
 const PRIME_MS = 250;
 
 /** The forked plugin worker's parent is the daemon; pin it once, never re-derive it. */
@@ -90,6 +95,8 @@ interface DiskState {
 
 let baseline: CounterBaseline | null = null;
 let latest: HostResources | null = null;
+/** Cadence currently in force; changed live from the host-scoped settings. */
+let intervalMs: number = DEFAULT_SETTINGS.intervalMs;
 /** Monotonic time `latest` was produced; a resume must not serve an old payload. */
 let latestMono = 0;
 let history: HistoryPoint[] = [];
@@ -188,7 +195,7 @@ async function tick(): Promise<HostResources | null> {
     const nowMono = monotonicMs();
     // A resumed loop after an idle stop would otherwise show a many-minute
     // average as "now". Anything past a few sample intervals is a gap.
-    const { withinCadence, windowMs: elapsed } = deltaWindow(previous?.atMono ?? null, nowMono, MAX_DELTA_MS);
+    const { withinCadence, windowMs: elapsed } = deltaWindow(previous?.atMono ?? null, nowMono, maxDeltaMs());
     const comparable = withinCadence && previous !== null && cpu !== null && previous.source === cpu.source;
     const hostTicks = comparable && previous !== null ? cpu.times.total - previous.times.total : 0;
     const windowMs = comparable ? elapsed : 0;
@@ -290,7 +297,7 @@ async function tick(): Promise<HostResources | null> {
           ? { cachedBytes: memoryDetail.cachedBytes, buffersBytes: memoryDetail.buffersBytes }
           : null,
       memoryPressure: mac?.pressure ?? null,
-      history: { intervalMs: SAMPLE_MS, samples: history.slice() },
+      history: { intervalMs, samples: history.slice() },
       process: processValue,
     };
   };
@@ -350,16 +357,24 @@ async function tick(): Promise<HostResources | null> {
 function ensureLoop(): void {
   if (running) return;
   running = true;
+  scheduleNext();
+}
+
+/** Re-arm the single timer on the current cadence; chained, never overlapping. */
+function scheduleNext(): void {
   const schedule = () => {
     if (!running) return;
     loopTimer = setTimeout(async () => {
       loopTimer = null;
       if (!running) return;
-      if (ticking) return schedule();
+      // A timer left over from a cadence change must not start a second chain:
+      // the tick already in flight re-arms the one chain when it finishes.
+      if (ticking) return;
       ticking = true;
       try {
         const value = await tick();
-        if (value) {
+        // A sampler stopped while this pass ran must not resurrect the payload.
+        if (value && running) {
           latest = value;
           latestMono = monotonicMs();
         }
@@ -373,9 +388,32 @@ function ensureLoop(): void {
         return;
       }
       schedule();
-    }, SAMPLE_MS);
+    }, intervalMs);
   };
   schedule();
+}
+
+/**
+ * Apply a settings change without a reload: the next chained tick uses the new
+ * cadence. A pending timer is re-armed so a shorter interval takes effect now.
+ */
+export function applySettings(next: Partial<MonitorSettings>): void {
+  const desired = next.intervalMs ?? intervalMs;
+  const changed = desired !== intervalMs;
+  intervalMs = desired;
+  if (!changed || !running) return;
+  // Only a waiting timer needs re-arming. During a tick the in-flight chain
+  // re-arms with the new cadence, so starting another chain here would double
+  // the sampling rate.
+  if (loopTimer) {
+    clearTimeout(loopTimer);
+    loopTimer = null;
+    scheduleNext();
+  }
+}
+
+export function currentIntervalMs(): number {
+  return intervalMs;
 }
 
 function stopLoop(): void {
@@ -399,7 +437,7 @@ export async function readHostResources(_input: unknown, _context: PluginHandler
   ensureLoop();
   // Serve the shared payload only while it is current; after an idle stop it is
   // stale, so the caller waits for a fresh pass instead of seeing old numbers.
-  if (latest && monotonicMs() - latestMono <= MAX_DELTA_MS) return latest;
+  if (latest && monotonicMs() - latestMono <= maxDeltaMs()) return latest;
   // First caller waits for the initial pass instead of inventing an empty one.
   if (ticking) {
     while (ticking) await new Promise((resolve) => setTimeout(resolve, 50));
@@ -440,7 +478,7 @@ function emptyReading(): HostResources {
     diskTotal: null,
     memoryBreakdown: null,
     memoryPressure: null,
-    history: { intervalMs: SAMPLE_MS, samples: [] },
+    history: { intervalMs, samples: [] },
     process: null,
   };
 }

@@ -3,18 +3,19 @@ import {
   type PluginSidebarItemProps,
   useHosts,
   useRpc,
+  useSettings,
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppState, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { hostResourcesRpc, type HostResources } from "../shared/contract.ts";
-import { chooseFooterLayout } from "../shared/layout.ts";
+import { buildSeries, drawnPoints, type SeriesRun } from "../shared/history.ts";
+import { chooseFooterPlan, FOOTER_HEIGHT } from "../shared/layout.ts";
+import { DEFAULT_SETTINGS, monitorSettings } from "../shared/settings.ts";
+import { bytesText, loadText, percentText, rateText, shortRate, timeText, uptimeText } from "./format.ts";
 
 type Colors = PluginPopoverProps["theme"]["colors"];
 type Status = "loading" | "live" | "stale" | "failed";
-
-/** Matches the daemon sampler; only the cadence changes in this stage. */
-const POLL_MS = 2_000;
 
 const hostStatusLabels: Record<string, string> = {
   idle: "未连接",
@@ -24,39 +25,12 @@ const hostStatusLabels: Record<string, string> = {
   error: "连接异常",
 };
 
-function percentText(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : `${value.toFixed(value >= 100 ? 0 : 1)}%`;
-}
-
-function bytesText(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  const gib = value / 1024 ** 3;
-  if (gib >= 1) return `${gib.toFixed(1)} GiB`;
-  return `${(value / 1024 ** 2).toFixed(0)} MiB`;
-}
-
-/** Short rate text: `12.3 KB/s`. Unknown stays an em dash, never a fake 0. */
-function rateText(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  const kb = value / 1000;
-  if (kb >= 1000) return `${(kb / 1000).toFixed(1)} MB/s`;
-  if (kb >= 10) return `${kb.toFixed(0)} KB/s`;
-  if (kb >= 0.1) return `${kb.toFixed(1)} KB/s`;
-  return `${value.toFixed(0)} B/s`;
-}
-
-function timeText(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleTimeString("zh-CN", { hour12: false });
-}
-
 /**
- * The reading is tagged with the host it came from, so a host switch never
- * paints the previous host's numbers even for one frame. Polling runs only while
- * the surface is mounted and the app is in the foreground.
+ * One shared reading per daemon: the footer and the popover both poll, but the
+ * daemon serves the same cached sample, so they never double-sample. Polling
+ * runs only while a surface is mounted and the app is in the foreground.
  */
-function useSample(hostId: string) {
+function useSample(hostId: string, intervalMs: number) {
   const sample = useRpc(hostResourcesRpc);
   const [state, setState] = useState<{ hostId: string; value: HostResources } | null>(null);
   const [status, setStatus] = useState<Status>("loading");
@@ -79,21 +53,23 @@ function useSample(hostId: string) {
     if (!awake) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setStatus("loading");
 
     const run = async () => {
       try {
         const value = await sample({});
         if (cancelled || !mounted.current) return;
+        const age = Date.now() - Date.parse(value.sampledAt);
+        // Same three-interval tolerance the daemon uses to drop a stale payload.
+        const old = Number.isFinite(age) && age > intervalMs * 3;
         setState({ hostId, value });
-        setStatus("live");
-        setFailing(false);
+        setStatus(old ? "stale" : "live");
+        setFailing(old);
       } catch {
         if (cancelled || !mounted.current) return;
         setFailing(true);
         setStatus("failed");
       } finally {
-        if (!cancelled) timer = setTimeout(run, POLL_MS);
+        if (!cancelled) timer = setTimeout(run, intervalMs);
       }
     };
 
@@ -102,7 +78,7 @@ function useSample(hostId: string) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [awake, hostId, sample, tick]);
+  }, [awake, hostId, sample, tick, intervalMs]);
 
   const value = state?.hostId === hostId ? state.value : null;
   return {
@@ -125,201 +101,252 @@ function effectiveStatus(status: Status, value: HostResources | null, connection
   return status;
 }
 
+/** Track spans the free width of its column; the fill stays a true percentage. */
 /**
- * Track takes the spare width of its column; the filled part stays a true
- * percentage of that track, so a wide sidebar shows a long bar at 30% rather
- * than a short fixed stub floating in empty space.
+ * The column is a fixed third of the row, so `flexGrow` here means "everything
+ * the icon and number did not need" — the bar elongates with the sidebar.
+ * `width` is only the reserved length for the widest label, used as a floor.
  */
-function Meter({ percent, tone, colors, grow }: { percent: number | null; tone: string; colors: Colors; grow: boolean }) {
-  const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
+function Meter({ percent, tone, colors, width }: { percent: number | null; tone: string; colors: Colors; width: number }) {
+  const fill = percent === null ? 0 : Math.min(100, Math.max(0, percent));
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={{
-        height: 3,
-        borderRadius: 3,
-        backgroundColor: colors.border,
-        overflow: "hidden",
-        ...(grow ? { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 22, maxWidth: 96 } : { width: 22 }),
-      }}
+      style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: Math.min(width, 14), height: 4, borderRadius: 4, backgroundColor: colors.border, overflow: "hidden" }}
     >
-      <View style={{ width: `${width}%`, height: "100%", borderRadius: 3, backgroundColor: tone }} />
+      <View style={{ width: `${fill}%`, height: "100%", borderRadius: 4, backgroundColor: tone }} />
     </View>
   );
 }
 
-/** Rough advance width of one CJK glyph at the 10 px badge size. */
-const ANOMALY_CHAR_WIDTH = 10;
-
-function Reading({ icon, percent, tone, showMeter, showIcon, grow, stacked, iconSize, iconGap, colors, onTextWidth }: {
+interface ReadingProps {
   icon: string;
   percent: number | null | undefined;
   tone: string;
-  showMeter: boolean;
   showIcon: boolean;
-  /** Equal-column mode: one third of the row, contents centred as a unit. */
-  grow: boolean;
-  /** Icon above the number, still inside the same equal column. */
+  /** Drawn meter length in DP; 0 hides the meter. */
+  meterWidth: number;
+  /** Equal column width in DP; null before the first measurement (flex share). */
+  columnWidth: number | null;
   stacked: boolean;
   iconSize: number;
   iconGap: number;
+  padX: number;
   colors: Colors;
   onTextWidth: (width: number) => void;
-}) {
+}
+
+/**
+ * Icon, then a non-shrinking number slot, then the meter eating the rest. The
+ * number never shrinks or ellipsizes; only the meter gives up width.
+ */
+function Reading({ icon, percent, tone, showIcon, meterWidth, columnWidth, stacked, iconSize, iconGap, padX, colors, onTextWidth }: ReadingProps) {
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={{
+        ...(columnWidth === null
+          ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 }
+          : { width: columnWidth, flexGrow: 0, flexShrink: 0 }),
+        minWidth: 0,
         flexDirection: stacked ? "column" : "row",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: stacked ? "center" : "flex-start",
         gap: iconGap,
-        ...(grow ? { flexGrow: 1, flexBasis: 0, minWidth: 0, overflow: "hidden" } : { flexShrink: 0 }),
+        paddingHorizontal: padX,
       }}
     >
       {showIcon ? <Icon name={icon} size={iconSize} color={tone} /> : null}
       <Text
         numberOfLines={1}
         onLayout={(event) => onTextWidth(event.nativeEvent.layout.width)}
-        style={{
-          color: colors.foreground,
-          fontSize: 11,
-          fontWeight: "700",
-          fontVariant: ["tabular-nums"],
-          flexShrink: 0,
-        }}
+        style={{ color: colors.foreground, fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"], flexShrink: 0 }}
       >
         {percentText(percent)}
       </Text>
-      {showMeter ? <Meter percent={percent ?? null} tone={tone} colors={colors} grow={grow} /> : null}
+      {meterWidth > 0 ? <Meter percent={percent ?? null} tone={tone} colors={colors} width={meterWidth} /> : null}
     </View>
   );
+}
+
+/** A HH:MM:SS clock barely fits a 48 DP track; shorter tracks keep HH:MM. */
+function clockText(iso: string, trackWidth: number): string {
+  const full = timeText(iso);
+  if (trackWidth >= 60 || full.length <= 5) return full;
+  return full.slice(0, 5);
 }
 
 export function HostMonitorItem({ theme, host, layout, openPopover }: PluginSidebarItemProps) {
   const colors = theme.colors;
   const hosts = useHosts();
   const connection = hosts.find((entry) => entry.serverId === host.id)?.status ?? "offline";
-  const { value, status } = useSample(host.id);
+  const settings = useSettings(monitorSettings);
+  const intervalMs = settings.status === "ready" ? settings.values.intervalMs : DEFAULT_SETTINGS.intervalMs;
+  const networkEnabled = settings.status === "ready" ? settings.values.showNetworkInFooter : DEFAULT_SETTINGS.showNetworkInFooter;
+  const { value, status } = useSample(host.id, intervalMs);
   const shown = effectiveStatus(status, value, connection);
   const cpu = percentText(value?.cpuPercent);
   const memory = percentText(value?.memoryPercent);
-  const disk = percentText(value?.disk?.percent);
+  const disk = percentText(value?.diskTotal?.percent ?? value?.disk?.percent);
   const anomaly = shown === "stale" ? "旧样本" : shown === "failed" ? "读取失败" : null;
   const { fontScale } = useWindowDimensions();
-  const [availableWidth, setAvailableWidth] = useState<number | null>(null);
+  const [width, setWidth] = useState<number | null>(null);
   const [textWidths, setTextWidths] = useState<(number | null)[]>([null, null, null]);
+  const networkAvailable = Boolean(value?.network && (value.network.rxBytesPerSecond !== null || value.network.txBytesPerSecond !== null));
 
-  // The percentages are the only content that must survive at any width, so the
-  // row fits itself to real measurements instead of trusting the layout flag.
-  const plan = chooseFooterLayout({
-    availableWidth,
+  // Before the first measurement, reserve for the widest plausible label at the
+  // user's own font scale so the tier choice is not optimistic.
+  const fallbackText = Math.ceil(40 * fontScale);
+  const plan = chooseFooterPlan({
+    width,
+    textWidths: textWidths.map((value) => value ?? fallbackText),
+    // At very large text sizes the two rates cannot share the tail track; fall
+    // back to the clock there rather than clipping them. The label still
+    // carries both rates for assistive tech.
+    networkAvailable: networkAvailable && fontScale <= 1.4,
+    showNetworkSetting: networkEnabled,
     compact: layout.compact,
-    textWidths,
-    anomaly: anomaly !== null,
-    anomalyTextWidth: anomaly ? anomaly.length * ANOMALY_CHAR_WIDTH * fontScale : 0,
   });
 
-  const recordTextWidth = (index: number, width: number) => {
+  const recordTextWidth = (index: number, measured: number) => {
     setTextWidths((previous) => {
-      if (Math.abs((previous[index] ?? -1) - width) < 0.5) return previous;
+      if (Math.abs((previous[index] ?? -1) - measured) < 0.5) return previous;
       const next = previous.slice();
-      next[index] = width;
+      next[index] = measured;
       return next;
     });
   };
 
+  const rateLabel = networkAvailable
+    ? `，下行 ${rateText(value?.network?.rxBytesPerSecond)}，上行 ${rateText(value?.network?.txBytesPerSecond)}`
+    : "";
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`宿主机资源：CPU ${cpu}，内存 ${memory}，硬盘 ${disk}，${hostStatusLabels[connection] ?? connection}${plan.showNetwork ? `，下行 ${rateText(value?.network?.rxBytesPerSecond)}，上行 ${rateText(value?.network?.txBytesPerSecond)}` : ""}${anomaly ? `，${anomaly}` : ""}`}
+      accessibilityLabel={`宿主机资源：CPU ${cpu}，内存 ${memory}，硬盘 ${disk}${rateLabel}，${hostStatusLabels[connection] ?? connection}${anomaly ? `，${anomaly}` : ""}`}
       accessibilityHint="打开宿主机资源详情"
       onPress={() => openPopover(Popover)}
       onLayout={(event) => {
-        const width = Math.max(0, event.nativeEvent.layout.width);
-        setAvailableWidth((previous) => (previous !== null && Math.abs(previous - width) < 0.5 ? previous : width));
+        const next = Math.max(0, event.nativeEvent.layout.width);
+        setWidth((previous) => (previous !== null && Math.abs(previous - next) < 0.5 ? previous : next));
       }}
       style={({ pressed }) => ({
+        height: FOOTER_HEIGHT,
         flexDirection: "row",
         alignItems: "center",
-        gap: plan.columnGap,
-        minHeight: 32,
-        paddingVertical: 6,
-        paddingHorizontal: plan.paddingX,
-        borderRadius: 8,
+        paddingHorizontal: 8,
+        borderRadius: 9,
         borderWidth: 1,
         borderColor: pressed ? colors.accent : colors.border,
         backgroundColor: pressed ? colors.surface2 : colors.surface1,
+        overflow: "hidden",
       })}
     >
-      <Reading
-        icon="Cpu"
-        percent={value?.cpuPercent}
-        tone={colors.accent}
-        showMeter={plan.showMeters}
-        showIcon={plan.showIcons}
-        grow={plan.mode !== "content"}
-        stacked={plan.stacked}
-        iconSize={plan.iconSize}
-        iconGap={plan.iconGap}
-        colors={colors}
-        onTextWidth={(width) => recordTextWidth(0, width)}
-      />
-      <Reading
-        icon="MemoryStick"
-        percent={value?.memoryPercent}
-        tone={colors.statusSuccess}
-        showMeter={plan.showMeters}
-        showIcon={plan.showIcons}
-        grow={plan.mode !== "content"}
-        stacked={plan.stacked}
-        iconSize={plan.iconSize}
-        iconGap={plan.iconGap}
-        colors={colors}
-        onTextWidth={(width) => recordTextWidth(1, width)}
-      />
-      <Reading
-        icon="HardDrive"
-        percent={value?.disk?.percent}
-        tone={colors.statusWarning}
-        showMeter={plan.showMeters}
-        showIcon={plan.showIcons}
-        grow={plan.mode !== "content"}
-        stacked={plan.stacked}
-        iconSize={plan.iconSize}
-        iconGap={plan.iconGap}
-        colors={colors}
-        onTextWidth={(width) => recordTextWidth(2, width)}
-      />
-      {plan.showNetwork ? (
+      {plan.mode === "content" ? (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", flex: 1, gap: 4, paddingHorizontal: 4 }}>
+          {[cpu, memory, disk].map((label, index) => (
+            <Text
+              key={index}
+              numberOfLines={1}
+              onLayout={(event) => recordTextWidth(index, event.nativeEvent.layout.width)}
+              style={{ color: colors.foreground, fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"], flexShrink: 0 }}
+            >
+              {label}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <>
+          <Reading
+            icon="Cpu"
+            percent={value?.cpuPercent}
+            tone={colors.accent}
+            showIcon={plan.showIcons}
+            meterWidth={plan.meterWidth}
+            columnWidth={plan.measured ? plan.columnWidth : null}
+            stacked={plan.stacked}
+            iconSize={plan.iconSize}
+            iconGap={plan.iconGap}
+            padX={plan.columnPadX}
+            colors={colors}
+            onTextWidth={(measured) => recordTextWidth(0, measured)}
+          />
+          <Reading
+            icon="MemoryStick"
+            percent={value?.memoryPercent}
+            tone={colors.statusSuccess}
+            showIcon={plan.showIcons}
+            meterWidth={plan.meterWidth}
+            columnWidth={plan.measured ? plan.columnWidth : null}
+            stacked={plan.stacked}
+            iconSize={plan.iconSize}
+            iconGap={plan.iconGap}
+            padX={plan.columnPadX}
+            colors={colors}
+            onTextWidth={(measured) => recordTextWidth(1, measured)}
+          />
+          <Reading
+            icon="HardDrive"
+            percent={value?.diskTotal?.percent ?? value?.disk?.percent}
+            tone={colors.statusWarning}
+            showIcon={plan.showIcons}
+            meterWidth={plan.meterWidth}
+            columnWidth={plan.measured ? plan.columnWidth : null}
+            stacked={plan.stacked}
+            iconSize={plan.iconSize}
+            iconGap={plan.iconGap}
+            padX={plan.columnPadX}
+            colors={colors}
+            onTextWidth={(measured) => recordTextWidth(2, measured)}
+          />
+        </>
+      )}
+      {plan.showTail ? (
         <View
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
-          style={{ flexShrink: 0, alignItems: "flex-end", gap: 1, minWidth: 84 }}
+          style={{
+            width: plan.tailWidth,
+            flexShrink: 0,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            paddingLeft: 8,
+            borderLeftWidth: 1,
+            borderLeftColor: colors.border,
+            overflow: "hidden",
+          }}
         >
-          <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
-            ↓ {rateText(value?.network?.rxBytesPerSecond)}
-          </Text>
-          <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
-            ↑ {rateText(value?.network?.txBytesPerSecond)}
-          </Text>
+          {plan.tail === "network" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"] }}>
+                ↓{shortRate(value?.network?.rxBytesPerSecond)}
+              </Text>
+              <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"] }}>
+                ↑{shortRate(value?.network?.txBytesPerSecond)}
+              </Text>
+            </View>
+          ) : (
+            <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontVariant: ["tabular-nums"] }}>
+              {value ? clockText(value.sampledAt, plan.tailWidth) : "—"}
+            </Text>
+          )}
         </View>
       ) : null}
-      {anomaly && plan.showAnomalyText ? (
-        <Text
-          numberOfLines={1}
-          style={{ marginLeft: "auto", flexShrink: 0, color: shown === "failed" ? colors.statusDanger : colors.statusWarning, fontSize: 10 }}
-        >
-          {anomaly}
-        </Text>
-      ) : null}
-      {anomaly && !plan.showAnomalyText && plan.showAnomalyMark ? (
+      {anomaly ? (
         <View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: 4, backgroundColor: shown === "failed" ? colors.statusDanger : colors.statusWarning }}
+          style={{
+            position: "absolute",
+            top: 4,
+            right: plan.tailWidth + 4,
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: shown === "failed" ? colors.statusDanger : colors.statusWarning,
+          }}
         />
       ) : null}
     </Pressable>
@@ -330,10 +357,7 @@ function Fact({ label, value, colors, strong = false }: { label: string; value: 
   return (
     <View style={{ gap: 3, flexGrow: 1, flexShrink: 1, flexBasis: 92, minWidth: 0 }}>
       <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{label}</Text>
-      <Text
-        numberOfLines={2}
-        style={{ color: colors.foreground, fontSize: strong ? 20 : 13, fontWeight: strong ? "700" : "600", fontVariant: ["tabular-nums"] }}
-      >
+      <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: strong ? 20 : 13, fontWeight: strong ? "700" : "600", fontVariant: ["tabular-nums"] }}>
         {value}
       </Text>
     </View>
@@ -352,11 +376,72 @@ function Card({ title, icon, tone, children, colors }: { title: string; icon: st
   );
 }
 
+const CHART_BUCKETS = 60;
+
+function bucketize(runs: readonly SeriesRun[], buckets: number): (number | null)[] {
+  const out: (number | null)[] = Array.from({ length: buckets }, () => null);
+  for (const run of runs) {
+    for (const point of run) {
+      const index = Math.max(0, Math.min(buckets - 1, Math.floor(point.x * buckets)));
+      out[index] = point.v;
+    }
+  }
+  return out;
+}
+
+/**
+ * React Native has no canvas; thin bars over the same 3-minute window are the
+ * cross-platform primitive here. Missing buckets stay blank, so null values and
+ * idle gaps read as holes rather than a flattened line.
+ */
+function Chart({ runs, max, colors, second }: { runs: readonly SeriesRun[]; max: number; colors: Colors; second?: { runs: readonly SeriesRun[]; color: string } }) {
+  const [width, setWidth] = useState(0);
+  const primary = useMemo(() => bucketize(runs, CHART_BUCKETS), [runs]);
+  const secondary = useMemo(() => second ? bucketize(second.runs, CHART_BUCKETS) : null, [second]);
+  const peak = Math.max(1, max);
+  const points = drawnPoints(runs) + (second ? drawnPoints(second.runs) : 0);
+  const barWidth = width > 0 ? Math.max(1, width / CHART_BUCKETS - 1) : 2;
+
+  return (
+    <View style={{ gap: 4 }}>
+      <View
+        onLayout={(event) => setWidth(Math.max(0, event.nativeEvent.layout.width))}
+        style={{ height: 44, flexDirection: "row", alignItems: "flex-end", borderBottomWidth: 1, borderBottomColor: colors.border }}
+      >
+        {width > 0
+          ? primary.map((value, index) => {
+              const other = secondary?.[index] ?? null;
+              const primaryHeight = value === null ? 0 : Math.max(1, (Math.min(value / peak, 1) * 100));
+              const otherHeight = other === null ? 0 : Math.max(1, Math.min(other / peak, 1) * 100);
+              const empty = value === null && other === null;
+              return (
+                <View key={index} style={{ width: barWidth, height: "100%", justifyContent: "flex-end", marginRight: 1 }}>
+                  {empty ? null : (
+                    <View style={{ flexDirection: "row", alignItems: "flex-end", height: "100%" }}>
+                      <View style={{ width: secondary ? barWidth / 2 : barWidth, height: `${primaryHeight}%`, backgroundColor: colors.accent, borderRadius: 1 }} />
+                      {secondary ? <View style={{ width: barWidth / 2, height: `${otherHeight}%`, backgroundColor: second?.color, borderRadius: 1 }} /> : null}
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          : null}
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>−3 分钟</Text>
+        <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>{points > 1 ? "最新" : points === 1 ? "等待下一次采样" : "暂无历史"}</Text>
+      </View>
+    </View>
+  );
+}
+
 function Popover({ theme, host, close }: PluginPopoverProps) {
   const colors = theme.colors;
   const hosts = useHosts();
   const connection = hosts.find((entry) => entry.serverId === host.id)?.status ?? "offline";
-  const { value, status, failing, refresh } = useSample(host.id);
+  const settings = useSettings(monitorSettings);
+  const settingsInterval = settings.status === "ready" ? settings.values.intervalMs : DEFAULT_SETTINGS.intervalMs;
+  const { value, status, refresh } = useSample(host.id, settingsInterval);
   const shown = effectiveStatus(status, value, connection);
   const isLinux = value?.platform === "linux";
   const process = value?.process ?? null;
@@ -364,6 +449,31 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
     shown === "live" ? "采样成功" : shown === "stale" ? "本次采样未更新，显示旧样本" : shown === "failed" ? "无法读取主机资源" : "正在采样…";
   const statusTone =
     shown === "live" ? colors.statusSuccess : shown === "stale" ? colors.statusWarning : shown === "failed" ? colors.statusDanger : colors.foregroundMuted;
+
+  const history = value?.history;
+  const interval = history?.intervalMs ?? settingsInterval;
+  // Anchor the window to the snapshot itself, so a stale sample still draws its
+  // own last three minutes instead of falling outside a wall-clock window.
+  const endMs = value && Number.isFinite(Date.parse(value.sampledAt)) ? Date.parse(value.sampledAt) : Date.now();
+  const maxGap = Math.max(6000, interval * 3);
+  const samples = history?.samples ?? [];
+  const cpuRuns = buildSeries(samples, (point) => point.cpuPercent, endMs, undefined, maxGap);
+  const memoryRuns = buildSeries(samples, (point) => point.memoryPercent, endMs, undefined, maxGap);
+  const diskRuns = buildSeries(samples, (point) => point.diskPercent, endMs, undefined, 45_000);
+  const rxRuns = buildSeries(samples, (point) => point.rxBytesPerSecond, endMs, undefined, maxGap);
+  const txRuns = buildSeries(samples, (point) => point.txBytesPerSecond, endMs, undefined, maxGap);
+  const networkPeak = Math.max(
+    1024,
+    ...rxRuns.flat().map((point) => point.v),
+    ...txRuns.flat().map((point) => point.v),
+  );
+
+  const diskTotal = value?.diskTotal ?? null;
+  const diskScopeText = diskTotal
+    ? diskTotal.scope === "local-disks"
+      ? "本地磁盘汇总：逐个去重后，已用与可用分别求和再算百分比（df 口径）。"
+      : "仅能读取系统根盘，以下为根盘口径。"
+    : "磁盘容量暂不可用。";
 
   return (
     <View style={{ gap: 12, minWidth: 260 }}>
@@ -381,7 +491,12 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: statusTone }} />
-        <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600", flex: 1 }}>{statusText}</Text>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>{statusText}</Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontVariant: ["tabular-nums"] }}>
+            每 {(interval / 1000).toFixed(0)} 秒 · 最近成功 {value ? timeText(value.sampledAt) : "—"}
+          </Text>
+        </View>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="重新采样"
@@ -401,19 +516,25 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
         </Pressable>
       </View>
 
-      <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-        最近成功采样 {value ? timeText(value.sampledAt) : "—"}
-        {value && value.cpuWindowMs > 0 ? ` · CPU 窗口 ${(value.cpuWindowMs / 1000).toFixed(1)} 秒` : ""}
-      </Text>
-
-      {shown === "stale" && failing ? (
-        <Text style={{ color: colors.statusWarning, fontSize: 11 }}>本次采样失败，读数保持上一次成功结果。</Text>
+      {shown === "stale" ? (
+        <View style={{ padding: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.statusWarning, backgroundColor: colors.surface1 }}>
+          <Text style={{ color: colors.statusWarning, fontSize: 12, fontWeight: "700" }}>正在显示旧样本</Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>本次采样失败。下方读数来自此主机最近一次成功采样。</Text>
+        </View>
       ) : null}
       {shown === "failed" ? (
-        <Text style={{ color: colors.statusDanger, fontSize: 11 }}>暂时无法读取此主机资源，请确认连接后重试。</Text>
+        <View style={{ padding: 9, borderRadius: 9, borderWidth: 1, borderColor: colors.statusDanger, backgroundColor: colors.surface1 }}>
+          <Text style={{ color: colors.statusDanger, fontSize: 12, fontWeight: "700" }}>无法读取主机资源</Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>此主机暂无可用样本，请确认连接后重试。</Text>
+        </View>
       ) : null}
 
-      <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8 }}>
+      <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ gap: 8 }}>
+        <View style={{ flexDirection: "row", gap: 8, paddingBottom: 9, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+          <Fact label="主机运行时长" value={uptimeText(value?.uptimeSeconds)} colors={colors} />
+          <Fact label="系统负载 1 / 5 / 15 分钟" value={loadText(value?.loadAverage)} colors={colors} />
+        </View>
+
         <Card title="宿主机 CPU" icon="Cpu" tone={colors.accent} colors={colors}>
           <View style={{ flexDirection: "row", gap: 12 }}>
             <Fact label="使用率" value={percentText(value?.cpuPercent)} colors={colors} strong />
@@ -421,9 +542,10 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
           </View>
           <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
             {isLinux && value?.cpuSource === "proc"
-              ? "取自 daemon 宿主 /proc/stat 相邻两次计数，100% 代表全部逻辑核心满载。"
-              : "取自 daemon 宿主 os.cpus() 相邻两次计数，100% 代表全部逻辑核心满载。"}
+              ? "取自宿主 /proc/stat 相邻两次计数；100% 代表全部逻辑核心满载。"
+              : "取自宿主 os.cpus() 相邻两次计数；100% 代表全部逻辑核心满载。"}
           </Text>
+          <Chart runs={cpuRuns} max={100} colors={colors} />
         </Card>
 
         <Card title="宿主机内存" icon="MemoryStick" tone={colors.statusSuccess} colors={colors}>
@@ -436,40 +558,51 @@ function Popover({ theme, host, close }: PluginPopoverProps) {
               ? "已用 = 总量 − /proc/meminfo MemAvailable。"
               : "已用 = 总量 − 系统空闲内存；此平台没有 MemAvailable。"}
           </Text>
+          {value?.memoryPressure || value?.memoryBreakdown ? (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+              {value.memoryPressure
+                ? `内存压力：${{ normal: "正常", warning: "偏高", critical: "严重" }[value.memoryPressure]}`
+                : null}
+              {value.memoryBreakdown ? `${value.memoryPressure ? " · " : ""}缓存 ${bytesText(value.memoryBreakdown.cachedBytes)}${value.memoryBreakdown.buffersBytes !== null ? `, 缓冲 ${bytesText(value.memoryBreakdown.buffersBytes)}` : ""}` : null}
+            </Text>
+          ) : null}
+          <Chart runs={memoryRuns} max={100} colors={colors} />
         </Card>
 
-        <Card title="系统盘" icon="HardDrive" tone={colors.statusWarning} colors={colors}>
-          {value?.disk ? (
-            <>
-              <View style={{ flexDirection: "row", gap: 12 }}>
-                <Fact label="使用率" value={percentText(value.disk.percent)} colors={colors} strong />
-                <Fact label="已用 / 总量" value={`${bytesText(value.disk.usedBytes)} / ${bytesText(value.disk.totalBytes)}`} colors={colors} />
-              </View>
-              <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-                可用 {bytesText(value.disk.availableBytes)}；仅统计 daemon 宿主系统根所在文件系统，不枚举其他磁盘。
-              </Text>
-            </>
-          ) : (
-            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>系统盘容量暂不可读，CPU 与内存读数不受影响。</Text>
-          )}
+        <Card title={diskTotal?.scope === "root-disk" ? "系统盘" : "本地磁盘"} icon="HardDrive" tone={colors.statusWarning} colors={colors}>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <Fact label="使用率" value={percentText(diskTotal?.percent)} colors={colors} strong />
+            <Fact label="已用 / 可用" value={diskTotal ? `${bytesText(diskTotal.usedBytes)} / ${bytesText(diskTotal.availableBytes)}` : "—"} colors={colors} />
+          </View>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{diskScopeText}</Text>
+          <Chart runs={diskRuns} max={100} colors={colors} />
+          {value?.disks && value.disks.length > 0 ? (
+            <View style={{ gap: 5 }}>
+              {value.disks.map((entry) => (
+                <View key={`${entry.mountPoint}:${entry.source}`} style={{ flexDirection: "row", justifyContent: "space-between", gap: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 5 }}>
+                  <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11, flexShrink: 1 }}>
+                    {entry.mountPoint === "/" ? "系统盘 /" : entry.mountPoint} · {entry.fstype}
+                  </Text>
+                  <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontVariant: ["tabular-nums"], flexShrink: 0 }}>
+                    {bytesText(entry.usedBytes)} / {bytesText(entry.totalBytes)} · 可用 {bytesText(entry.availableBytes)} · {percentText(entry.percent)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </Card>
 
         <Card title="宿主机网络" icon="Network" tone={colors.accent} colors={colors}>
-          {value?.network ? (
-            <>
-              <View style={{ flexDirection: "row", gap: 12 }}>
-                <Fact label="下行" value={rateText(value.network.rxBytesPerSecond)} colors={colors} strong />
-                <Fact label="上行" value={rateText(value.network.txBytesPerSecond)} colors={colors} strong />
-              </View>
-              <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-                {value.platform === "linux"
-                  ? "取自 daemon 宿主 /proc/net/dev 累计字节的差值；已跳过 loopback 与 veth、docker、bridge 等虚拟接口，不产生流量。"
-                  : "此平台没有可用的 /proc/net/dev，网络速率不可用。"}
-              </Text>
-            </>
-          ) : (
-            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>网络速率暂不可读；CPU、内存与磁盘读数不受影响。</Text>
-          )}
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <Fact label="↓ 下行" value={rateText(value?.network?.rxBytesPerSecond)} colors={colors} strong />
+            <Fact label="↑ 上行" value={rateText(value?.network?.txBytesPerSecond)} colors={colors} strong />
+          </View>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            {isLinux
+              ? "取自宿主 /proc/net/dev 累计字节的差值；已跳过 loopback 与 veth、docker、bridge 等虚拟接口，不产生流量。"
+              : "此平台没有可用的 /proc/net/dev，网络速率不可用。"}
+          </Text>
+          <Chart runs={rxRuns} second={{ runs: txRuns, color: colors.statusSuccess }} max={networkPeak} colors={colors} />
         </Card>
 
         <Card title="Paseo daemon 主进程" icon="Terminal" tone={colors.foregroundMuted} colors={colors}>

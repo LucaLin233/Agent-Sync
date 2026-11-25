@@ -1,7 +1,7 @@
 {
   "id": "daemon-monitor",
   "name": "宿主机资源",
-  "description": "在侧栏底部常驻显示 daemon 所在主机的 CPU、内存与系统盘使用率，点击查看采样详情。",
+  "description": "在侧栏底部常驻显示 daemon 所在主机的 CPU、内存、磁盘使用率与宿主机网速，点击查看采样详情；可在设置中选择采样间隔。",
   "requirements": {
     "paseo": ">=0.17.3"
   }
