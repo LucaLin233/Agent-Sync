@@ -140,6 +140,13 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 - 工作区标题用 `setTitle` 写入；会话标题复用官方 CLI `agent update --name`；两者都不改目录、仓库或分支。
 - 生成前记录各目标原标题，写入前逐一回读：生成期间工作区或所选会话被手动改名、归档或移出工作区，则本次不写任何目标并返回 `skipped`。工作区写入后再紧随 CLI 之前回读一次会话，若两处写之间会话被手动改名，工作区已写入，返回 `partial` 且不覆盖会话。
 - 两个写入没有跨对象事务。任一处失败或超时时按实际回读结果分别报告 `workspaceUpdated` / `sessionUpdated`，状态为 `partial` 并给出可重试的原因；不会回滚已成功的写入，也不会覆盖人手改动。完成后逐目标回读确认写入值。
+- **后台任务与状态回读**：Paseo 0.17.3/0.17.4 的常规插件 RPC 传输超时为 30 秒，因此手动生成不再占用一条长 RPC。点击后 `chinese-titles.regenerate-start` 只登记任务并立即返回 `jobId`，面板立刻显示「正在生成」，再轮询 `chinese-titles.regeneration-status` 取回完成或明确失败。任务本身有 120 秒上限，单次模型调用不超过 35 秒（辅助会话内部另有 45 秒硬上限），扫描、模型和两次写入各留有独立预算；状态是内存中的有界任务表，不落盘、不跨进程，因此不是持久化队列。
+- **过期与重载**：插件 reload、disable 或 dispose 时任务表被清空并标记取消；正在跑的模型迟到的答复在写前守卫处被拒绝，不会产生迟到写入。remount 的面板会用工作区重新挂到仍在跑的任务；任务丢失时显示 `unknown` 并允许重试。同一工作区（或同一所选会话）已有任务时，重复点击与自动命名共用 claim，返回 `busy`，不会重跑。
+
+**时限与分段**：分段提炼在同一个后台任务里完成，每段按剩余时间分得一份，但单步不低于 8 秒，保证现场约 5.15 秒的一次模型调用能完成；整条链仍被 120 秒任务截止约束，剩余不够就以 `timeout` 结束、不写任何标题。常规会话的 30 000 字读取能放进两段；若轮次极多、每轮很短，「用户：」「助手：」标签也可能把已读内容推过两段上限，此时按 `segment_cap` 如实标部分覆盖，不冒充全会话。
+
+（上一候选，非本版本；以下是同步 RPC 版手动生成的原文记录，本次移植已改为后台任务与状态回读）
+
 - Paseo 0.17.3/0.17.4 的常规插件 RPC 传输超时为 30 秒，而 `PluginHandlerContext` 没有 abort signal；插件使用 22 秒内部截止，扫描只花其中约 5 秒，并在分页之间、模型调用之间和最终写前反复检查；超时返回 `timeout`，迟到的模型或辅助会话完成不会在 RPC 返回后写入。分段提炼时每段预算按剩余时间均分，剩余不够就以 `timeout` 结束，不用残缺分段冒充完成。
 
 **同步时限与分段**：分段提炼仍走同一个同步 RPC，在 22 秒预算内完成，每段只分到剩余预算的一部分；时间不够就以 `timeout` 结束，不写任何标题。常规会话的 30 000 字读取能放进两段；若轮次极多、每轮很短，「用户：」「助手：」标签也可能把已读内容推过两段上限，此时按 `segment_cap` 如实标部分覆盖，不冒充全会话。若需要更长会话的完整覆盖，或让多段提炼不受同步时限约束，需要另做受控异步 RPC/UI，本版本未做。
@@ -159,7 +166,9 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 
 ## 验收与限制
 
-**本次候选（会话自动命名与全量连续摘要）的自动化验证是离线合成的**：`npm run typecheck`、`npm test`，以及用 Paseo 0.17.4 自带插件编译器对候选目录做的真实打包检查（入口解析、manifest、server/client bundle 均成功；该检查在内存中完成，不安装、不加载）。测试全程使用合成输入与独占临时目录，无真实模型调用、未读取任何真实会话正文。候选内容在运行 Paseo 0.17.4 的宿主 daemon 上以 `plugin reload` 加载成功（`enabled`、`status: "running"`、`Plugin ready`，无报错行）。现场回读另已覆盖两类真实路径：一条历史失败记录被自动修复（状态为 `done`、`attempts=2`、`repairUsed=true`、无失败码，Paseo 回读的标题确实换成了摘要），以及一次手动重生成成功（标题保留了 WebSocket 主题，不再被截断）。全新会话的首轮自动命名（`agent.turn.after` 首轮触发与 `agent update --name` 实写）、20 秒 hook 与 22 秒 RPC 的实际预算上界，仍尚未单独现场实测。
+**本次移植（手动生成改为后台任务与状态回读）的验证是离线合成的**：`tsc --noEmit`、`node --test test/*.test.mjs`，全程使用合成输入与独占临时目录，无真实模型调用、未读取任何真实会话正文、未写入任何现役目录。仓库既有的会话自动命名、时间线覆盖和手动摘要用例一并保留并通过。
+
+（上一候选，非本版本；下面这段的“本次候选”指该候选）**本次候选（会话自动命名与全量连续摘要）的自动化验证是离线合成的**：`npm run typecheck`、`npm test`，以及用 Paseo 0.17.4 自带插件编译器对候选目录做的真实打包检查（入口解析、manifest、server/client bundle 均成功；该检查在内存中完成，不安装、不加载）。测试全程使用合成输入与独占临时目录，无真实模型调用、未读取任何真实会话正文。候选内容在运行 Paseo 0.17.4 的宿主 daemon 上以 `plugin reload` 加载成功（`enabled`、`status: "running"`、`Plugin ready`，无报错行）。现场回读另已覆盖两类真实路径：一条历史失败记录被自动修复（状态为 `done`、`attempts=2`、`repairUsed=true`、无失败码，Paseo 回读的标题确实换成了摘要），以及一次手动重生成成功（标题保留了 WebSocket 主题，不再被截断）。全新会话的首轮自动命名（`agent.turn.after` 首轮触发与 `agent update --name` 实写）、20 秒 hook 与 22 秒 RPC 的实际预算上界，仍尚未单独现场实测。
 
 下面这一组 0.17.3 隔离 daemon 黑盒结果来自**更早的构建**，不是本次候选的运行结果，只保留作为基础安装/命名背景，不能当作本版本的逐字输出或行为证据。那次 E2E 只覆盖安装/running、`workspace-sessions` RPC 接线与无会话时的可识别状态，不包含真实模型、真实会话摘要、会话改名或 30 秒传输。
 
@@ -173,11 +182,14 @@ Better Paseo 1.6.4 的 **「自动优化新任务标题」**（设置里的 `aft
 
 ### 本次验证
 
-- `npm run typecheck`：通过。
-- `npm test`：130 项通过。在上一候选的项目/工作区/双目标手动摘要覆盖之外，本候选新增：会话自动命名的场景 B（首次模型失败保留临时标题、下一不同完成轮补试、成功即停）、同一轮重复事件/重启/并发不重复消耗、失败与仅工具调用轮不消耗、provider 暂时不可用仍保留补试、两次失败后耗尽、手动改名胜出不被覆盖、`done+model_failed`/`provider_unavailable` legacy 只修复一次且用户改过就不修、已有明确标题与 `legacy` 不碰；`agent.turn.after` 的 `completed/failed/canceled` 经由真实 `contribute()` 注册的 hook 走通，已命名会话后续轮零读取零模型；时间线读取的 reset/gap/staleCursor 首屏与中途断点都标部分覆盖且不把跳段尾页拼进正文、首页读失败区分于空会话、连续分页覆盖时间顺序、超长会话分段上限如实标 `segment_cap`、工具密集首问仍取到本轮实质回答、同轮多段助手正文全部纳入、尾页不借别的轮次；摘要覆盖信息经 RPC 透传到界面，手动范围与刷新守卫保持；手动摘要另覆盖真实断句复现（`诊断 422 后关闭 CCHP 与 GDR 的` 不再被正式入口接受）、完整短标题单次调用（含「迁移到本地」「趋于饱和」「应纳税所得」这类正常词尾）、超长标题单次语义缩写保留中心对象、缩写仍不合格或预算耗尽时零写入与明确失败码。
+- `npm run typecheck`（等价 `tsc --noEmit`，TypeScript 5.9.3 与 `@getpaseo/*` 0.17.3 依赖）：通过，退出码 0。
+- `npm test`（`node --test test/*.test.mjs`）：170 项通过、0 失败。合并后同时包含仓库原有的自动命名、时间线覆盖、面板入口、palette 与工作区修复用例，以及本次新增的后台任务、start/status RPC 契约、任务注册表与超时预算用例；`engine-jobs`、`manual-background` 覆盖 120 秒任务截止、35 秒单步上限和现场约 5.15 秒一次调用仍能完成整条链。
+- （上一候选，非本版本）`npm run typecheck`：通过。
+- （上一候选，非本版本）`npm test`：130 项通过。在上一候选的项目/工作区/双目标手动摘要覆盖之外，本候选新增：会话自动命名的场景 B（首次模型失败保留临时标题、下一不同完成轮补试、成功即停）、同一轮重复事件/重启/并发不重复消耗、失败与仅工具调用轮不消耗、provider 暂时不可用仍保留补试、两次失败后耗尽、手动改名胜出不被覆盖、`done+model_failed`/`provider_unavailable` legacy 只修复一次且用户改过就不修、已有明确标题与 `legacy` 不碰；`agent.turn.after` 的 `completed/failed/canceled` 经由真实 `contribute()` 注册的 hook 走通，已命名会话后续轮零读取零模型；时间线读取的 reset/gap/staleCursor 首屏与中途断点都标部分覆盖且不把跳段尾页拼进正文、首页读失败区分于空会话、连续分页覆盖时间顺序、超长会话分段上限如实标 `segment_cap`、工具密集首问仍取到本轮实质回答、同轮多段助手正文全部纳入、尾页不借别的轮次；摘要覆盖信息经 RPC 透传到界面，手动范围与刷新守卫保持；手动摘要另覆盖真实断句复现（`诊断 422 后关闭 CCHP 与 GDR 的` 不再被正式入口接受）、完整短标题单次调用（含「迁移到本地」「趋于饱和」「应纳税所得」这类正常词尾）、超长标题单次语义缩写保留中心对象、缩写仍不合格或预算耗尽时零写入与明确失败码。
 - （上一候选，非本版本）0.17.3 隔离 daemon E2E（0.17.3 CLI、独占 `/tmp`、合成 HOME、`unix://` socket、`codex` provider 禁用）：`plugin install` 后 `plugin ls` 为 `running`，插件日志无报错；新建普通工作区后调用 `chinese-titles.workspace-sessions` 返回 `{"sessions":[]}`；不传 `agentId` 的重生成返回 `{"status":"needs_selection","reason":"no_session"}`，传不属于该工作区的 `agentId` 返回 `{"status":"skipped","reason":"session_not_selectable"}`，工作区标题保持不变；对不存在的工作区调用会话列表返回空数组。临时 daemon 与临时根已退出并清理。
 - （上一候选，非本版本）隔离 daemon 冒烟（0.17.3 CLI 与 daemon、独占 `/tmp`、合成 HOME、`unix://` socket、`codex` provider 禁用、daemon 只监听该 socket）：`plugin install` 后 `plugin ls` 为 `running`、插件日志无报错；对一个真实存在、无会话的工作区，`chinese-titles.workspace-sessions` 返回 `{"sessions":[]}`；重生成分别传 `scope: "both"`、`"workspace"`、`"session"` 和不传 `scope`，四种请求都返回 `{"status":"needs_selection","reason":"no_session","workspaceUpdated":false,"sessionUpdated":false}`，工作区标题未变；`scope: "all"` 被 RPC 输入校验拒绝，缺 `workspaceId` 同样被拒绝；传不属于该工作区的 `agentId` 返回 `{"status":"skipped","reason":"session_not_selectable"}`；不存在的 `workspaceId` 重生成返回 `not_found`，会话列表返回空数组。该实例的 `codex` provider 已禁用，创建普通会话会报 `Provider 'codex' is disabled`，因此 CLI 会话改名的写前回读与真实写入未在此次冒烟中执行。临时 daemon 已停止，合成 HOME 与 `/tmp` 临时目录已删除。
-- 未覆盖：真实 daemon 上的 `agent.turn.after` 回调、CLI `agent update --name` 实写与回读、20 秒 hook / 22 秒 RPC 的真实时限、真实时间线的 reset/gap 触发、真实模型的分段提炼与合成、客户端覆盖提示的实际渲染（宽屏/紧凑、深浅主题）、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
+- （上一候选，非本版本）未覆盖：真实 daemon 上的 `agent.turn.after` 回调、CLI `agent update --name` 实写与回读、20 秒 hook / 22 秒 RPC 的真实时限、真实时间线的 reset/gap 触发、真实模型的分段提炼与合成、客户端覆盖提示的实际渲染（宽屏/紧凑、深浅主题）、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
+- 未覆盖：真实 daemon 上的手动面板轮询与生成中提示、reload 中途取消的迟到写入拦截、CLI `agent update --name` 实写与回读、20 秒 hook 的真实时限、真实时间线的 reset/gap 触发、真实模型的分段提炼与合成、客户端覆盖提示的实际渲染（宽屏/紧凑、深浅主题）、桌面/手机 UI、Better Paseo 手动“从对话生成标题”。
 
 ### 最小 smoke 复跑
 

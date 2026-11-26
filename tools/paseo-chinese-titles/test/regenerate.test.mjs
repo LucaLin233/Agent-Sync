@@ -676,30 +676,88 @@ test("session-only mode on an archived workspace writes nothing", async () => {
   assert.deepEqual(state.sessionWrites, []);
 });
 
-test("the RPC contract accepts old requests without scope and the explicit three scopes", async () => {
-  const { regenerateWorkspaceTitleRpc } = await import("../shared/rpc.ts");
-  assert.deepEqual(regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1" }), { workspaceId: "w1" });
+test("the start RPC accepts old requests, the three scopes and the status contract", async () => {
+  const { regenerationStatusRpc, startRegenerationRpc } = await import("../shared/rpc.ts");
+  assert.deepEqual(startRegenerationRpc.input.parse({ workspaceId: "w1" }), { workspaceId: "w1" });
   for (const scope of ["both", "workspace", "session"]) {
-    assert.equal(regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1", agentId: "a1", scope }).scope, scope);
+    assert.equal(startRegenerationRpc.input.parse({ workspaceId: "w1", agentId: "a1", scope }).scope, scope);
   }
-  assert.throws(() => regenerateWorkspaceTitleRpc.input.parse({ workspaceId: "w1", scope: "all" }));
+  assert.throws(() => startRegenerationRpc.input.parse({ workspaceId: "w1", scope: "all" }));
+  assert.deepEqual(startRegenerationRpc.output.parse({ status: "busy" }), { status: "busy" });
+  assert.deepEqual(startRegenerationRpc.output.parse({ status: "started", jobId: "rg_1" }), {
+    status: "started",
+    jobId: "rg_1",
+  });
+
+  // A finished job carries the same per-target result the old synchronous RPC
+  // returned; the status call itself stays small.
+  const partial = {
+    status: "partial",
+    title: "修复登录问题",
+    reason: "session_write_failed",
+    workspaceUpdated: true,
+    sessionUpdated: false,
+  };
   assert.deepEqual(
-    regenerateWorkspaceTitleRpc.output.parse({
-      status: "partial",
-      title: "修复登录问题",
-      reason: "session_write_failed",
-      workspaceUpdated: true,
-      sessionUpdated: false,
-    }),
-    {
-      status: "partial",
-      title: "修复登录问题",
-      reason: "session_write_failed",
-      workspaceUpdated: true,
-      sessionUpdated: false,
-    },
+    regenerationStatusRpc.output.parse({ status: "done", jobId: "rg_1", result: partial }),
+    { status: "done", jobId: "rg_1", result: partial },
   );
-  assert.throws(() => regenerateWorkspaceTitleRpc.output.parse({ status: "done", title: "修复登录问题" }));
+  assert.deepEqual(regenerationStatusRpc.output.parse({ status: "unknown" }), { status: "unknown" });
+  assert.deepEqual(regenerationStatusRpc.output.parse({ status: "running", jobId: "rg_1" }), {
+    status: "running",
+    jobId: "rg_1",
+  });
+  assert.throws(() => regenerationStatusRpc.output.parse({ status: "done", jobId: "rg_1" }));
+  assert.throws(() => regenerationStatusRpc.input.parse({}));
+});
+
+test("a job registry reports running, done and busy, and drops a disposed job's result", async () => {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let probe = null;
+  const jobs = new RegenerationJobs({ id: () => "rg_test" });
+  const started = jobs.start({ workspaceId: "w1", claimKey: "workspace:w1" }, async (isCancelled) => {
+    probe = isCancelled;
+    await gate;
+    return { status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false };
+  });
+  assert.deepEqual(started, { status: "started", jobId: "rg_test" });
+  assert.deepEqual(jobs.start({ workspaceId: "w1", claimKey: "workspace:w1" }, async () => ({ status: "error", workspaceUpdated: false, sessionUpdated: false })), { status: "busy" });
+  assert.deepEqual(jobs.status({ jobId: "rg_test" }), { status: "running", jobId: "rg_test" });
+  assert.deepEqual(jobs.status({ workspaceId: "w1" }), { status: "running", jobId: "rg_test" });
+  assert.equal(probe(), false);
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(jobs.status({ jobId: "rg_test" }), {
+    status: "done",
+    jobId: "rg_test",
+    result: { status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false },
+  });
+  assert.deepEqual(jobs.status({ jobId: "missing" }), { status: "unknown" });
+
+  // A second workspace is independent, so two workspaces may run at once.
+  const other = jobs.start({ workspaceId: "w2", claimKey: "workspace:w2" }, async () => ({ status: "error", workspaceUpdated: false, sessionUpdated: false }));
+  assert.equal(other.status, "started");
+
+  jobs.dispose();
+  assert.deepEqual(jobs.status({ jobId: "rg_test" }), { status: "unknown" });
+  assert.deepEqual(jobs.start({ workspaceId: "w3", claimKey: "workspace:w3" }, async () => ({ status: "error", workspaceUpdated: false, sessionUpdated: false })), { status: "busy" });
+});
+
+test("a disposed job never lets its late result through", async () => {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const jobs = new RegenerationJobs({ id: () => "rg_late" });
+  jobs.start({ workspaceId: "w1", claimKey: "workspace:w1" }, async () => {
+    await gate;
+    return { status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false };
+  });
+  jobs.dispose();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(jobs.status({ jobId: "rg_late" }), { status: "unknown" });
 });
 
 test("a workspace write failure is not downgraded when the session then changes", async () => {

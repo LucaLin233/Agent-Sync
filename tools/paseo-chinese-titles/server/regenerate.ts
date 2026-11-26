@@ -6,13 +6,19 @@ import { selectableSessionsFor, resolveSessionSelection, isSelectableSession } f
 import { truncateChars } from "../shared/title.ts";
 import { helperDirectory, isInsideDirectory } from "./state.ts";
 
-/** The daemon's regular plugin RPC transport allows 30 s in Paseo 0.17.3. */
-const RPC_DEADLINE_MS = 22_000;
-const GENERATION_DEADLINE_MS = 18_000;
+/**
+ * A manual regeneration runs in the plugin's background job, not inside the
+ * daemon's 30 s plugin RPC transport. The panel starts the job, receives an id
+ * immediately and reads its state. This deadline therefore bounds the task
+ * itself: a long conversation may condense several parts and still write.
+ */
+const MANUAL_GENERATION_DEADLINE_MS = 120_000;
+/** One model step (a digest or the final title) gets its own bounded share. */
+const GENERATION_DEADLINE_MS = 35_000;
 /** Reserve time for the final read, setTitle/rename and verification. */
-const WRITE_RESERVE_MS = 3_000;
+const WRITE_RESERVE_MS = 6_000;
 /** Two writes plus two verifications need a little more than one. */
-const DOUBLE_WRITE_RESERVE_MS = 4_500;
+const DOUBLE_WRITE_RESERVE_MS = 9_000;
 
 export type RegenerateStatus = "done" | "partial" | "busy" | "needs_selection" | "skipped" | "error";
 
@@ -65,10 +71,15 @@ export interface RegenerateOptions {
   readConversation: (agentId: string) => Promise<ConversationExcerpt | null>;
   /** Official CLI rename for one session; the caller owns credential use. */
   renameSession: (agentId: string, title: string, timeoutMs: number) => Promise<SessionRenameResult>;
-  /** Absolute epoch milliseconds; defaults to now + 22 s. */
+  /** Absolute epoch milliseconds; defaults to now + the manual job deadline. */
   deadlineAt?: number;
   now?: () => number;
   generationTimeoutMs?: number;
+  /**
+   * Checked immediately before every write. The plugin sets it when the plugin
+   * is disposed or reloaded, so work that outlived its job never writes late.
+   */
+  isCancelled?: () => boolean;
 }
 
 function normalizedTitle(value: string | null | undefined): string | null {
@@ -107,10 +118,11 @@ function statusFor(wantsWorkspace: boolean, wantsSession: boolean, workspaceUpda
  * requested targets. A short conversation needs one model turn; a long one is
  * condensed part by part first, all inside the same request's deadline.
  *
- * Paseo 0.17.3's PluginHandlerContext has no abort signal. The caller therefore
- * gives this function a deadline shorter than the daemon's 30 s RPC timeout,
- * and this function checks that deadline immediately before each write. A late
- * model completion can never write after the RPC has timed out.
+ * The manual panel runs this as a background job instead of one long RPC, so
+ * the deadline is the job's own budget rather than the daemon's 30 s plugin
+ * transport. The check immediately before each write, plus the caller's
+ * cancellation probe, keeps a late model answer from writing after the job was
+ * abandoned, reloaded or replaced.
  */
 export async function regenerateWorkspaceTitle(options: RegenerateOptions): Promise<RegenerateResult> {
   const coverageOut: { value?: RegenerateResult["coverage"] } = {};
@@ -128,7 +140,8 @@ async function runRegeneration(
   const wantsSession = scope !== "workspace";
   const { paseo, workspaceId, claims } = options;
   const now = options.now ?? Date.now;
-  const deadlineAt = options.deadlineAt ?? now() + RPC_DEADLINE_MS;
+  const deadlineAt = options.deadlineAt ?? now() + MANUAL_GENERATION_DEADLINE_MS;
+  const cancelled = options.isCancelled ?? (() => false);
   const reserve = wantsWorkspace && wantsSession ? DOUBLE_WRITE_RESERVE_MS : WRITE_RESERVE_MS;
 
   if (wantsWorkspace && claims.has(workspaceId)) {
@@ -183,6 +196,9 @@ async function runRegeneration(
 
     // Reading the chosen session is bounded, but it still spends the shared RPC
     // budget; re-check the deadline before the model is even started.
+    if (cancelled()) {
+      return { status: "error", reason: "cancelled", workspaceUpdated: false, sessionUpdated: false };
+    }
     if (now() >= deadlineAt - reserve) {
       return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
     }
@@ -233,6 +249,9 @@ async function runRegeneration(
     if (!generated) {
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
+    if (cancelled()) {
+      return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
+    }
     if (now() >= deadlineAt - reserve) {
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
@@ -278,6 +297,9 @@ async function runRegeneration(
         return { status: "skipped", reason: "session_manual_change", agentId, workspaceUpdated: false, sessionUpdated: false };
       }
     }
+    if (cancelled()) {
+      return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
+    }
     if (now() >= deadlineAt - reserve) {
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
@@ -294,7 +316,10 @@ async function runRegeneration(
     let writeFailed = false;
 
     if (wantsWorkspace) {
-      if (now() >= deadlineAt - WRITE_RESERVE_MS) {
+      if (cancelled()) {
+        reason = "cancelled";
+        skipped = true;
+      } else if (now() >= deadlineAt - WRITE_RESERVE_MS) {
         reason = "timeout";
       } else {
         try {
@@ -330,6 +355,9 @@ async function runRegeneration(
             : latestAgent.workspaceId !== workspaceId
               ? "session_moved"
               : "session_manual_change";
+      } else if (cancelled()) {
+        skipped = true;
+        reason ??= "cancelled";
       } else if (now() >= deadlineAt - 1_000) {
         reason ??= "timeout";
       } else {
@@ -373,4 +401,4 @@ async function runRegeneration(
   }
 }
 
-export { RPC_DEADLINE_MS };
+export { MANUAL_GENERATION_DEADLINE_MS };
