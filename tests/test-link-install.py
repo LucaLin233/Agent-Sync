@@ -768,32 +768,40 @@ module.main(sys.argv[2:])
         self.assertEqual(config["daemon"]["mcp"],
                          {"enabled": True, "injectIntoAgents": True})
         providers = config["agents"]["providers"]
-        enabled = sorted(name for name, entry in providers.items() if entry.get("enabled", True))
-        self.assertEqual(enabled, ["cchp", "gdr"])
-        for upstream in ("cchp", "gdr"):
-            fragment = providers[upstream]
-            self.assertEqual(fragment["extends"], "codex")
-            self.assertEqual(fragment["label"], upstream.upper())
-            self.assertIn('model_provider="%s"' % upstream, fragment["command"])
-            self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/codex-home"})
+        enabled = {name: entry for name, entry in providers.items() if entry.get("enabled", True)}
+        gateways = {}
+        for provider_id, fragment in enabled.items():
+            self.assertRegex(provider_id, r"^(codex|claude)-[a-z0-9]+(?:-[a-z0-9]+)*$")
+            runtime, gateway = provider_id.split("-", 1)
+            self.assertEqual(fragment["extends"], runtime)
+            gateways.setdefault(gateway, set()).add(runtime)
+            if runtime == "codex":
+                self.assertIn('model_provider="%s"' % gateway, fragment["command"])
+                self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/codex-home"})
+            else:
+                self.assertEqual(fragment["env"], {
+                    "CLAUDE_CONFIG_DIR": "/home/example/" + provider_id,
+                    "ANTHROPIC_BASE_URL": "https://" + gateway + ".example.invalid",
+                })
+        self.assertTrue(gateways)
+        for runtimes in gateways.values():
+            self.assertEqual(runtimes, {"codex", "claude"})
         for builtin in ("claude", "codex", "copilot", "opencode", "pi", "omp"):
             self.assertEqual(providers[builtin], {"enabled": False})
 
         profiles = config["daemon"]["agentProfiles"]
-        self.assertEqual([entry["id"] for entry in profiles],
-                         ["cchp-luno", "cchp-lens", "cchp-forge",
-                          "gdr-luno", "gdr-lens", "gdr-forge"])
+        # Match the provider and Profile ID contract documented under 派发通道.
+        self.assertCountEqual([entry["id"] for entry in profiles],
+                              [gateway + "-" + role for gateway in gateways
+                               for role in ("luno", "lens", "forge")])
         for entry in profiles:
-            upstream, role = entry["id"].split("-", 1)
-            self.assertEqual(entry["provider"], upstream)
-            self.assertEqual(entry["model"], "deepseek-flash" if (upstream, role) == ("cchp", "forge")
-                             else "gpt-6.2-sol")
+            gateway, role = entry["id"].rsplit("-", 1)
+            self.assertIn(entry["provider"], enabled)
+            self.assertEqual(entry["provider"], "codex-" + gateway)
+            self.assertEqual(entry["model"], "deepseek-flash" if role == "forge" else "gpt-6.2-sol")
             self.assertEqual(entry["modeId"], "full-access")
             self.assertEqual(entry["thinkingOptionId"], "high")
-            self.assertEqual(set(entry["options"]), {"service_tier"})
-            self.assertEqual(entry["options"]["service_tier"],
-                             "ultrafast" if upstream == "gdr" else "default")
-            self.assertNotIn("notes", entry)
+            self.assertEqual(entry["options"], {"service_tier": "default"})
 
         # 角色启动段改由受管生成入口渲染：示例不再承载私人或其他正文，也不留占位路径。
         self.assertNotIn("appendSystemPrompt", config["daemon"])

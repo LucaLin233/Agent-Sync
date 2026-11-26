@@ -178,13 +178,13 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 宿主端是 npm 安装并由 systemd 托管的 Paseo；Codex 作为 provider 进程在运行用户下启动。仓库不提供容器构建路径，也不假定部署目录、用户名或镜像布局。规则与流程按 `skills/luno-core/references/sync.md`〔分支 sync-host〕，各端机制见 `skills/luno-platform/references/runtime-host.md`、`runtime-codex.md`、`runtime-paseo.md`。下文 `<home>` 是核实后的受管安装根（安装器的 `--home`，不必然等于 Paseo data home 或 systemd 的工作目录），`<checkout>` 是受管检出，`<prefix>` 是隔离安装前缀；它们都是占位符，实际值按当次现场读取，不写进仓库。已核基线是活动 systemd 单元经 Node/mise 启动，`@getpaseo/cli` 与 `@getpaseo/server` 同为 0.17.1；具体用户、安装前缀、HOME 与 Paseo data home 以现场读取为准。除只读取证外，命令都以实际运行用户执行；需要提权或切换系统单元的动作另按授权进行。
 
 1. **核实实际入口**：只读核对活动 systemd 单元的实际用户、`ExecStart`、环境和工作目录，确认进程实际加载的 `@getpaseo/cli` 与 `@getpaseo/server` 来自同一安装前缀且版本一致，记录可恢复的旧程序入口、配置和登录态位置。不要只凭 `which`、全局 npm 清单或包目录推定实际加载。
-2. **隔离原版实例**：在独立 npm `<prefix>` 安装同版本 `@getpaseo/cli`、`@getpaseo/server`（0.17.1），回读两者版本一致；用独立 `PASEO_HOME`、回环端口和临时 HOME 启动隔离 daemon，不原地改写现役前缀，也不在这步切换 systemd。原版不需要补丁或插件。
+2. **隔离原版实例**：在独立 npm `<prefix>` 安装与目标 daemon 同版本的 `@getpaseo/cli` 和 `@getpaseo/server`，回读两者版本一致。当前配置示例按 0.17.4 核验；用独立 `PASEO_HOME`、回环端口和临时 HOME 启动隔离 daemon，不原地改写现役前缀，也不在这步切换 systemd。原版不需要补丁或插件。
 3. **受管检出**：以运行用户 `git clone https://github.com/LucaLin233/Agent-Sync.git <checkout>`；之后只快进到已合并的 main（升级失败时的回退见第 10 步），不在其中编辑。
 4. **GLOBAL 副本或 daemon 范围来源**：默认内嵌模式把 Minis `GLOBAL.md` 整份复制到 `<home>/.luno/memory/GLOBAL.md`（属主为运行用户，权限 600）；缺这个文件时安装器在预检阶段报错，不做任何写入。以后 GLOBAL 更新时，复制后再运行一次 `--apply` 与 `--check`，重新生成 Codex 常驻文件。已选 daemon 模式时改用单端选项（见下文〈Codex GLOBAL 来源〉），不再要求私人副本。宿主经验日志的创建、检索和共享见 [宿主端记忆入口](skills/luno-platform/references/runtime-host.md#记忆入口)。
-5. **安装与核对**：以运行用户执行 `python3 -B <checkout>/tools/link-install.py --checkout <checkout> --home <home> --ends codex`。使用 daemon 范围 GLOBAL 时再加 `--codex-global-source paseo-append-system-prompt`。先用默认模式看计划，再加 `--apply` 应用，最后用 `--check` 回读。官方版六个 Profile 共用主 Codex 家目录。既有角色家目录中的会话和登录态由原安装保留。安装器只处理受管入口，遇到占位、非受管软链或 `AGENTS.override.md` 时会停止。中断残留见报告的 `residue`，需核对归属后再处理。
-6. **登录**：两个上游都在主 Codex 家目录中配置。使用 `env_key` 的上游沿用获准的环境注入，使用登录态时以运行用户执行 `codex login`。
-7. **paseo 配置**：按 [Paseo 官方原版部署](platforms/paseo/README.md) 合并 `platforms/paseo/config.example.json` 的 `daemon.mcp` 两项、`daemon.agentProfiles` 和 `agents.providers` 条目，只替换 `/home/example/codex-home` 占位符；`daemon.appendSystemPrompt` 不来自示例，Codex 单端显式模式下的私人字段按 [sync-host](skills/luno-core/references/sync.md#branch-sync-host) 维护、角色启动段由受管生成入口渲染，派发契约见 [Paseo 派发通道](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。不要把示例整表覆盖现有配置；监听地址、systemd 环境、登录态和其他 MCP 设置保持现值。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
-8. **隔离实例验收**：在隔离实例上确认技能可以列出；逐一核对 CCHP、GDR 两套 LUNO/LENS/FORGE 六个 Profile，按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#派发通道) 回读实际 provider、模型和权限模式。六个 Profile 各发一次初始正式消息，首行写角色行；GDR 的 Ultrafast 按实际 Codex 模型目录声明回读，不能只看配置。草稿 Speed 只查能力。此步不动现役 systemd。
+5. **安装与核对**：以运行用户执行 `python3 -B <checkout>/tools/link-install.py --checkout <checkout> --home <home> --ends codex`。使用 daemon 范围 GLOBAL 时再加 `--codex-global-source paseo-append-system-prompt`。先用默认模式看计划，再加 `--apply` 应用，最后用 `--check` 回读。示例的六条 Codex Profile 共用配置中的主 Codex 家目录。既有角色家目录中的会话和登录态由原安装保留。安装器只处理受管入口，遇到占位、非受管软链或 `AGENTS.override.md` 时会停止。中断残留见报告的 `residue`，需核对归属后再处理。
+6. **登录**：在主 Codex 家目录中配置两个网关。Claude Code 的家目录与鉴权按各 provider 的实际启动参数配置。使用 `env_key` 的上游沿用获准的环境注入，使用登录态时以运行用户执行 `codex login`。
+7. **paseo 配置**：按 [Paseo 官方原版部署](platforms/paseo/README.md) 合并 `platforms/paseo/config.example.json` 中的 MCP 和 provider 条目并替换占位值，按 ID 替换角色 Profile、移除退役的 GDR 角色 Profile，保留其余 Profile；`daemon.appendSystemPrompt` 不来自示例，Codex 单端显式模式下的私人字段按 [sync-host](skills/luno-core/references/sync.md#branch-sync-host) 维护、角色启动段由受管生成入口渲染，派发契约见 [Paseo 派发通道](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。不要把示例整表覆盖现有配置；监听地址、systemd 环境、登录态和其他 MCP 设置保持现值。合并后按安装版支持的入口运行 `paseo reload`。Relay 是可选入口，部署不依赖它；需要手机经 Relay 连接时再运行 `paseo daemon pair --relay`。仓库根的 `paseo.json` 提供 worktree 初始化检查，以及 `smoke`、`select` 两个测试脚本。开始前确保 Paseo 进程的 `PATH` 能找到装有 PyYAML 的 Python 3.11+。各命令用 `env -i` 保留 `PATH`，测试还传入解析后的临时目录路径，在 macOS 上可处理系统的 `/tmp` 软链。
+8. **隔离实例验收**：在隔离实例上确认技能可以列出；核对 CCHP 和 CCH 的四个 provider 与六条角色 Profile，按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#派发通道) 回读实际 provider、模型和权限模式。在获准的新会话中用首行角色验证实际加载。选择 Claude Code 作为角色 provider 时，按其运行时核对角色启动和实际模型。草稿 Speed 只查能力。此步不动现役 systemd。
 9. **可恢复切换与回读**：隔离实例验收通过后，在同一维护窗口暂停新会话，把现役实例的 Paseo 配置切到已验证的官方配置；原版程序沿用，不替换成补丁包。reload/重启后回读实际加载的包版本、配置、工作目录及全部已授权接收端，再做最小新会话验收。失败时按 [Paseo 回退说明](platforms/paseo/README.md#隔离与前态) 恢复原配置，以及迁移时退役的原程序入口和共享插件，再重新回读。
 10. **升级与回退**：下文 `LI` 代表第 5 步的安装器命令，`CO` 代表以运行用户执行的 `git -C <checkout>`。安装器不 fetch、不切换 Git、包或 systemd 单元，旧版与新版都要已在本地。
    - 预检：`CO fetch origin`，记下当前 HEAD 为旧版、`origin/main` 为新版，运行 `LI --preflight <新版>`。只有检出干净、现有安装一致、新版登记无冲突时才返回就绪；输出列出旧版、新版与将退役的入口。
@@ -251,7 +251,7 @@ GLOBAL 更新需重新 apply/check；没有私人复制授权或完整前态时�
 
 ## Paseo 共享角色体系
 
-`platforms/paseo/config.example.json` 是官方原版双上游、六 Profile 的唯一配置示例。部署、验收与恢复见 [Paseo 官方原版部署](platforms/paseo/README.md)，本端角色派发按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。
+`platforms/paseo/config.example.json` 是 CCHP 和 CCH 两组、四个 provider 和六条角色 Profile 的配置示例。部署、验收与恢复见 [Paseo 官方原版部署](platforms/paseo/README.md)，本端角色派发按 [Paseo 运行端规则](skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)。
 
 ## 测试与历史
 

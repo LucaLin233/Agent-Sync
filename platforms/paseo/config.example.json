@@ -7,7 +7,7 @@
       {
         "id": "cchp-luno",
         "name": "LUNO · CCHP",
-        "provider": "cchp",
+        "provider": "codex-cchp",
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
@@ -16,7 +16,7 @@
       {
         "id": "cchp-lens",
         "name": "LENS · CCHP",
-        "provider": "cchp",
+        "provider": "codex-cchp",
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
@@ -25,54 +25,70 @@
       {
         "id": "cchp-forge",
         "name": "FORGE · CCHP",
-        "provider": "cchp",
+        "provider": "codex-cchp",
         "model": "deepseek-flash",
         "modeId": "full-access",
         "thinkingOptionId": "high",
         "options": {"service_tier": "default"}
       },
       {
-        "id": "gdr-luno",
-        "name": "LUNO · GDR",
-        "provider": "gdr",
+        "id": "cch-luno",
+        "name": "LUNO · CCH",
+        "provider": "codex-cch",
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "ultrafast"}
+        "options": {"service_tier": "default"}
       },
       {
-        "id": "gdr-lens",
-        "name": "LENS · GDR",
-        "provider": "gdr",
+        "id": "cch-lens",
+        "name": "LENS · CCH",
+        "provider": "codex-cch",
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "ultrafast"}
+        "options": {"service_tier": "default"}
       },
       {
-        "id": "gdr-forge",
-        "name": "FORGE · GDR",
-        "provider": "gdr",
-        "model": "gpt-6.2-sol",
+        "id": "cch-forge",
+        "name": "FORGE · CCH",
+        "provider": "codex-cch",
+        "model": "deepseek-flash",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "ultrafast"}
+        "options": {"service_tier": "default"}
       }
     ]
   },
   "agents": {
     "providers": {
-      "cchp": {
+      "codex-cchp": {
         "extends": "codex",
-        "label": "CCHP",
+        "label": "Codex · CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
         "env": {"CODEX_HOME": "/home/example/codex-home"}
       },
-      "gdr": {
+      "claude-cchp": {
+        "extends": "claude",
+        "label": "Claude Code · CCHP",
+        "env": {
+          "CLAUDE_CONFIG_DIR": "/home/example/claude-cchp",
+          "ANTHROPIC_BASE_URL": "https://cchp.example.invalid"
+        }
+      },
+      "codex-cch": {
         "extends": "codex",
-        "label": "GDR",
-        "command": ["codex", "-c", "model_provider=\"gdr\""],
+        "label": "Codex · CCH",
+        "command": ["codex", "-c", "model_provider=\"cch\""],
         "env": {"CODEX_HOME": "/home/example/codex-home"}
+      },
+      "claude-cch": {
+        "extends": "claude",
+        "label": "Claude Code · CCH",
+        "env": {
+          "CLAUDE_CONFIG_DIR": "/home/example/claude-cch",
+          "ANTHROPIC_BASE_URL": "https://cch.example.invalid"
+        }
       },
       "claude": {"enabled": false},
       "codex": {"enabled": false},
