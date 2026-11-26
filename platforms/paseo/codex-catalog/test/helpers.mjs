@@ -1,7 +1,7 @@
 // Shared offline fixtures for the catalog bridge tests: loopback HTTP servers,
 // a synthetic bearer, and temporary directories. No network egress.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -89,13 +89,14 @@ export function fixture(handler) {
   })();
 }
 
-function spawnServer(configPath, extraEnv = {}) {
+function spawnServer(configPath) {
   const dir = dirname(configPath);
-  // The server only reads a config inside CATALOG_CONFIG_ROOT; each test keeps
-  // its config in a fresh temp dir, so that dir is the root for that process.
+  // The server accepts a config under /etc/codex-catalog or under its own
+  // working directory, so each test process starts in its temp config dir.
   return spawn(process.execPath, [SERVER, '--config', configPath], {
+    cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, CATALOG_CONFIG_ROOT: realpathSync(dir), ...extraEnv },
+    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir },
   });
 }
 
@@ -171,16 +172,17 @@ export async function runServerExpectingExit(config, timeoutMs = 3000) {
   return { code, output };
 }
 
-// Launch the server with an explicit --config value plus explicit cwd/root, so
-// the config-path boundary can be exercised directly. A config that instead
-// starts listening resolves as 'started' (the child is killed) instead of
-// hanging the suite.
-export async function runServerWithConfigArg(configArg, { root, cwd, timeoutMs = 3000 } = {}) {
+// Launch the server with an explicit --config value and an explicit working
+// directory, so the config-path boundary can be exercised directly. A config
+// that instead starts listening resolves as 'started' (the child is killed)
+// instead of hanging the suite.
+export async function runServerWithConfigArg(configArg, { cwd, timeoutMs = 3000 } = {}) {
   const base = tempRoot();
+  // cwd is the trusted launch directory the server compares against.
   const child = spawn(process.execPath, [SERVER, '--config', configArg], {
     cwd: cwd ?? base,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: '/usr/bin:/bin', HOME: base, TMPDIR: base, CATALOG_CONFIG_ROOT: realpathSync(root ?? base) },
+    env: { PATH: '/usr/bin:/bin', HOME: base, TMPDIR: base },
   });
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });

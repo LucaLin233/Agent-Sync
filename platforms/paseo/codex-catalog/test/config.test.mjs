@@ -234,42 +234,42 @@ describe('config path boundary', () => {
   test('a relative --config is refused instead of resolving against the cwd', async () => {
     const dir = tempRoot();
     writeFileSync(join(dir, 'catalog.json'), body, { mode: 0o600 });
-    const result = await runServerWithConfigArg('catalog.json', { root: dir, cwd: dir });
+    const result = await runServerWithConfigArg('catalog.json', { cwd: dir });
     assert.equal(result.code, 2, result.output);
     assert.match(result.output, /must be an absolute path/);
     assert.equal(result.output.includes('"event":"listening"'), false);
   });
 
-  test('an absolute path outside the configured root is refused', async () => {
-    const root = tempRoot();
+  test('an absolute path outside the trusted directories is refused', async () => {
+    const launch = tempRoot();
     const elsewhere = tempRoot();
     const outside = join(elsewhere, 'catalog.json');
     writeFileSync(outside, body, { mode: 0o600 });
-    const result = await runServerWithConfigArg(outside, { root });
+    const result = await runServerWithConfigArg(outside, { cwd: launch });
     assert.equal(result.code, 2, result.output);
     assert.match(result.output, /is outside/);
     assert.equal(result.output.includes('"event":"listening"'), false);
   });
 
-  test('a symlink inside the root that escapes it is refused after resolution', async () => {
-    const root = tempRoot();
+  test('a symlink inside the launch directory that escapes it is refused', async () => {
+    const launch = tempRoot();
     const elsewhere = tempRoot();
     const outside = join(elsewhere, 'catalog.json');
     writeFileSync(outside, body, { mode: 0o600 });
-    const link = join(root, 'catalog.json');
+    const link = join(launch, 'catalog.json');
     symlinkSync(outside, link);
-    const result = await runServerWithConfigArg(link, { root });
+    const result = await runServerWithConfigArg(link, { cwd: launch });
     assert.equal(result.code, 2, result.output);
     assert.match(result.output, /is outside/);
     assert.equal(result.output.includes('"event":"listening"'), false);
   });
 
   test('a config over the size bound is refused before parsing', async () => {
-    const root = tempRoot();
-    const oversized = join(root, 'catalog.json');
+    const launch = tempRoot();
+    const oversized = join(launch, 'catalog.json');
     // Valid JSON, but far above the 256 KiB bound.
     writeFileSync(oversized, `{"pad":"${'x'.repeat(300000)}"}`, { mode: 0o600 });
-    const result = await runServerWithConfigArg(oversized, { root });
+    const result = await runServerWithConfigArg(oversized, { cwd: launch });
     assert.equal(result.code, 2, result.output);
     assert.match(result.output, /larger than/);
     assert.equal(result.output.includes('"event":"listening"'), false);

@@ -19,7 +19,7 @@
 //        CATALOG_CONFIG=/path/to/catalog.json node catalog-server.mjs
 import http from 'node:http';
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { isAbsolute, sep } from 'node:path';
 
 const GENERIC_INSTRUCTIONS =
   'You are a coding agent. Work directly in the shared workspace with the user, follow the client tool instructions and repository conventions.';
@@ -221,17 +221,22 @@ function normalizeRoute(path, raw, limits) {
 }
 
 // The config file is named on the command line, so it is the one place where an
-// operator-supplied path reaches the filesystem. Two boundaries keep it honest:
-// the path must be absolute, and after symlink resolution it must sit inside
-// CONFIG_ROOT — a stray or injected argument cannot make the adapter read an
-// unrelated file. The root defaults to the documented deployment location and
-// is overridable for other layouts; the file itself must be a regular file of
-// bounded size, opened O_NOFOLLOW so the final component cannot be swapped for
-// a symlink between the check and the read.
-const CONFIG_ROOT = resolve(process.env.CATALOG_CONFIG_ROOT || '/etc/codex-catalog');
+// operator-supplied path reaches the filesystem. Three rules apply, and every
+// refusal returns from this function before a file is opened:
+//   * the path must be absolute;
+//   * after symlink resolution it must live under `/etc/codex-catalog`, or under
+//     the directory the service was started in — a directory chosen by whoever
+//     launches it, never by the caller of this process;
+//   * it must be a regular file of bounded size, opened O_NOFOLLOW so the final
+//     component cannot be swapped for a symlink between the check and the read.
+// Keeping the launch directory in the comparison lets custom layouts work
+// (start the service from that directory) without letting a stray argument
+// point the reader at an unrelated file such as a key store.
+const DEFAULT_CONFIG_DIR = '/etc/codex-catalog';
+const LAUNCH_DIR = realpathSync(process.cwd());
 const CONFIG_MAX_BYTES = 262144;
 
-function resolveConfigPath(configPath) {
+function readConfigText(configPath) {
   if (typeof configPath !== 'string' || configPath === '') {
     fatal('config: no path given; use --config or CATALOG_CONFIG');
   }
@@ -244,14 +249,13 @@ function resolveConfigPath(configPath) {
   } catch (error) {
     fatal(`cannot read ${configPath}: ${error.code || 'unresolvable path'}`);
   }
-  if (!resolved.startsWith(CONFIG_ROOT + sep)) {
-    fatal(`config: ${configPath} is outside ${CONFIG_ROOT}`);
+  // LAUNCH_DIR is already canonical, so these prefixes compare like for like.
+  // `/` as a working directory gives no boundary and is not accepted.
+  const underDefault = resolved.startsWith(DEFAULT_CONFIG_DIR + sep);
+  const underLaunch = LAUNCH_DIR !== sep && resolved.startsWith(LAUNCH_DIR + sep);
+  if (!underDefault && !underLaunch) {
+    fatal(`config: ${configPath} is outside ${DEFAULT_CONFIG_DIR} and ${LAUNCH_DIR}`);
   }
-  return resolved;
-}
-
-function readConfigText(configPath) {
-  const resolved = resolveConfigPath(configPath);
   let fd;
   try {
     fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
