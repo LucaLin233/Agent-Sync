@@ -41,10 +41,11 @@ import {
 } from "../shared/workspace-repair.ts";
 import {
   regenerateWorkspaceTitle as runWorkspaceRegeneration,
-  RPC_DEADLINE_MS,
+  MANUAL_GENERATION_DEADLINE_MS,
   type RegenerateResult,
   type RegenerateScope,
 } from "./regenerate.ts";
+import { RegenerationJobs, type RegenerationStatusOutcome, type StartRegenerationOutcome } from "./regeneration-jobs.ts";
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state.ts";
 
 const STALE_GENERATING_MS = 3 * 60 * 1000;
@@ -151,6 +152,7 @@ export class ChineseTitlesEngine {
   private readonly repairScanned = new Set<string>();
   private readonly processingAgents = new Set<string>();
   private readonly bootstrapWorkspaceIds = new Set<string>();
+  private readonly regenerationJobs = new RegenerationJobs();
   private bootstrapSucceeded = false;
   private bootstrapProjectId: string | null = null;
   private disposed = false;
@@ -171,6 +173,9 @@ export class ChineseTitlesEngine {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    // A job that outlived its owner may not write a late title; its next write
+    // guard sees this and the panel reads `unknown` after a reload.
+    this.regenerationJobs.dispose();
     if (this.sdkTimer) clearInterval(this.sdkTimer);
     if (this.cliTimer) clearInterval(this.cliTimer);
     this.sdkTimer = null;
@@ -257,58 +262,82 @@ export class ChineseTitlesEngine {
   }
 
   /**
-   * Manual per-workspace and/or per-session regeneration. It ignores automatic
-   * baseline states and the auto-name switches, and shares the automatic claim
-   * sets so the two paths cannot write the same workspace or session at once.
+   * Starts one manual per-workspace and/or per-session regeneration.
+   *
+   * The job runs outside the plugin RPC transport, so a long conversation can
+   * condense several parts and still write; the caller gets its id at once and
+   * polls `regenerationStatus`. The automatic and manual paths share the claim
+   * sets, so a duplicate click or a concurrent automatic naming is refused.
    */
-  async regenerateWorkspaceTitle(
+  startRegeneration(
     workspaceId: string,
     paseo: PaseoApi,
     agentId?: string,
     scope?: RegenerateScope,
-  ): Promise<RegenerateResult> {
-    // Start the budget before any await: a slow state/settings read must not
-    // let the RPC write after the daemon's transport timeout.
-    const deadlineAt = Date.now() + RPC_DEADLINE_MS;
-    await this.ready;
-    const settings = await this.currentSettings();
-    if (!settings) {
-      return { status: "error", reason: "settings_unavailable", workspaceUpdated: false, sessionUpdated: false };
-    }
-    this.attach(paseo);
-    const result = await runWorkspaceRegeneration({
-      paseo,
-      settings,
-      workspaceId,
-      ...(agentId ? { agentId } : {}),
-      ...(scope ? { scope } : {}),
-      claims: this.processingWorkspaces,
-      agentClaims: this.processingAgents,
-      deadlineAt,
-      generateConversation: (request, timeoutMs, generateDeadlineAt) =>
-        generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
-      listAgents: () => this.listAgents(paseo),
-      readConversation: (sessionId) => readSessionConversation(paseo, sessionId, { deadlineAt }),
-      renameSession: async (sessionId, title, timeoutMs) => {
-        const renamed = await renameAgentViaCli(settings, sessionId, title, timeoutMs);
-        return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };
-      },
-    });
-    if (this.state) {
-      let changed = false;
-      if (result.status === "done" || result.status === "partial") {
-        if (result.workspaceUpdated && result.title) {
-          this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
-          changed = true;
-        }
-        if (result.sessionUpdated && result.agentId && result.title) {
-          this.state.agents[result.agentId] = { status: "done", at: now(), title: result.title };
-          changed = true;
-        }
+  ): StartRegenerationOutcome {
+    const wantsWorkspace = (scope ?? "workspace") !== "session";
+    const wantsSession = (scope ?? "workspace") !== "workspace";
+    // A repeated click must not start the work again. The key mirrors the
+    // automatic/manual claim the worker takes, so the two paths stay exclusive.
+    const claimKey = wantsWorkspace ? `workspace:${workspaceId}` : `session:${agentId ?? workspaceId}`;
+    if (this.regenerationJobs.isRunning(claimKey)) return { status: "busy" };
+    if (wantsWorkspace && this.processingWorkspaces.has(workspaceId)) return { status: "busy" };
+    if (wantsSession && agentId && this.processingAgents.has(agentId)) return { status: "busy" };
+    const started = this.regenerationJobs.start({ workspaceId, claimKey }, async (isCancelled) => {
+      // The job owns its own deadline; nothing here depends on the RPC transport.
+      const deadlineAt = Date.now() + MANUAL_GENERATION_DEADLINE_MS;
+      await this.ready;
+      const settings = await this.currentSettings();
+      if (!settings) {
+        return { status: "error", reason: "settings_unavailable", workspaceUpdated: false, sessionUpdated: false };
       }
-      if (changed) await saveState(this.state);
+      this.attach(paseo);
+      const result = await runWorkspaceRegeneration({
+        paseo,
+        settings,
+        workspaceId,
+        ...(agentId ? { agentId } : {}),
+        ...(scope ? { scope } : {}),
+        claims: this.processingWorkspaces,
+        agentClaims: this.processingAgents,
+        deadlineAt,
+        isCancelled,
+        generateConversation: (request, timeoutMs, generateDeadlineAt) =>
+          generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
+        listAgents: () => this.listAgents(paseo),
+        readConversation: (sessionId) => readSessionConversation(paseo, sessionId, { deadlineAt }),
+        renameSession: async (sessionId, title, timeoutMs) => {
+          const renamed = await renameAgentViaCli(settings, sessionId, title, timeoutMs);
+          return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };
+        },
+      });
+      await this.recordRegeneration(workspaceId, result);
+      return result;
+    });
+    return started;
+  }
+
+  /** Reads the bounded live job state the panel polls after starting. */
+  regenerationStatus(input: { jobId?: string; workspaceId?: string }): RegenerationStatusOutcome {
+    return this.regenerationJobs.status(input);
+  }
+
+  private async recordRegeneration(workspaceId: string, result: RegenerateResult): Promise<void> {
+    // After a reload the old process must not rewrite the state file over the
+    // new process's view; the title itself was already written and verified.
+    if (!this.state || this.disposed) return;
+    let changed = false;
+    if (result.status === "done" || result.status === "partial") {
+      if (result.workspaceUpdated && result.title) {
+        this.state.workspaces[workspaceId] = { status: "done", at: now(), title: result.title };
+        changed = true;
+      }
+      if (result.sessionUpdated && result.agentId && result.title) {
+        this.state.agents[result.agentId] = { status: "done", at: now(), title: result.title };
+        changed = true;
+      }
     }
-    return result;
+    if (changed) await saveState(this.state);
   }
 
   /**

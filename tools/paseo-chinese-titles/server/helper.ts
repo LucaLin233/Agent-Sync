@@ -125,6 +125,8 @@ export interface GenerateOptions {
   timeoutMs?: number;
   /** Absolute epoch milliseconds for all work; falls back early when exceeded. */
   deadlineAt?: number;
+  /** Injectable clock for the bounded step budget; defaults to `Date.now`. */
+  now?: () => number;
 }
 
 function fallbackFor(request: GenerationRequest): string {
@@ -255,6 +257,35 @@ interface ModelRun {
 type PromptStep = string | ((messages: readonly string[]) => string);
 
 /**
+ * Bounds for one model turn. A manual summary of a long conversation usually
+ * needs one digest per part plus a synthesis turn, and a real turn takes about
+ * five seconds. A per-step floor keeps a single turn a fair chance instead of
+ * slicing the budget so thin that the first digest can never finish; the final
+ * deadline still caps the whole sequence.
+ */
+const STEP_MAX_MS = 45_000;
+const STEP_MIN_MS = 8_000;
+const STEP_GUARD_MS = 1_500;
+
+/**
+ * The timeout handed to one helper turn. Exported so the regression can show
+ * both halves of the original bug: a fair share of the old 22 s RPC budget gave
+ * the first digest about 3.6 s, shorter than the 5.15 s turn observed in the
+ * field, while the background job's budget keeps every turn above 5 s.
+ */
+export function stepTimeoutMs(input: {
+  remaining: number;
+  stepsLeft: number;
+  startBudget: number;
+}): number {
+  const share = Math.floor((input.remaining - STEP_GUARD_MS) / Math.max(1, input.stepsLeft));
+  return Math.max(
+    1_000,
+    Math.min(input.startBudget, Math.max(share, STEP_MIN_MS), input.remaining - STEP_GUARD_MS),
+  );
+}
+
+/**
  * Runs a least-privilege helper sequence in one helper session and returns only
  * the sanitized answers. Every failure (provider, timeout, empty answer) returns
  * an enum code, never provider details.
@@ -280,8 +311,9 @@ async function runTitleModel(
   },
   options: GenerateOptions,
 ): Promise<ModelRun> {
-  const deadlineAt = options.deadlineAt ?? Date.now() + (options.timeoutMs ?? 45_000) + 10_000;
-  const remaining = () => deadlineAt - Date.now();
+  const now = options.now ?? (() => Date.now());
+  const deadlineAt = options.deadlineAt ?? now() + (options.timeoutMs ?? 45_000) + 10_000;
+  const remaining = () => deadlineAt - now();
   let resolved: Awaited<ReturnType<typeof resolveTitleProvider>> | null = null;
   let workspace: PaseoWorkspaceHandle | null = null;
   let helper: PaseoAgentHandle | null = null;
@@ -345,13 +377,22 @@ async function runTitleModel(
       // turn: once the deadline is this close the run reports `timeout` and
       // the caller writes nothing, instead of starting a turn that cannot be
       // verified in time.
-      if (remaining() <= 1_500) return { messages, errorCode: "timeout" };
-      const stepsLeft = steps.length - index;
-      const cap = Math.min(
-        options.timeoutMs ?? 45_000,
-        input.totalTimeoutMs ?? 45_000,
-        Math.max(1_000, Math.floor(remaining() / stepsLeft) - 500),
+      if (remaining() <= STEP_GUARD_MS) return { messages, errorCode: "timeout" };
+      // Share the time left over the steps that remain, but never below the
+      // per-step floor: a fair share of a short budget used to give the first
+      // digest only a few seconds, so it always lost its turn. A possible
+      // shortening turn counts as one more step while it is still available,
+      // so the synthesis cannot consume the time the rewrite needs. The final
+      // deadline still bounds the whole sequence, and the check after each run
+      // rejects a turn that overran the slice it was given.
+      const needsFollowUp = Boolean(input.followUp) && !followUpUsed;
+      const stepsLeft = steps.length - index + (needsFollowUp ? 1 : 0);
+      const startBudget = Math.min(
+        options.timeoutMs ?? Number.POSITIVE_INFINITY,
+        input.totalTimeoutMs ?? Number.POSITIVE_INFINITY,
+        STEP_MAX_MS,
       );
+      const cap = stepTimeoutMs({ remaining: remaining(), stepsLeft, startBudget });
       const step = steps[index];
       const prompt = typeof step === "string" ? step : step(messages);
       if (!prompt) return { messages, errorCode: "model_failed" };
@@ -362,6 +403,7 @@ async function runTitleModel(
       let timer: ReturnType<typeof setTimeout> | null = null;
       const running = helper.run(prompt, { timeoutMs: cap });
       running.catch(() => undefined);
+      const stepStartedAt = now();
       const outcome = await Promise.race([
         running,
         new Promise<typeof expired>((resolve) => {
@@ -371,6 +413,9 @@ async function runTitleModel(
         if (timer) clearTimeout(timer);
       });
       if (outcome === expired) return { messages, errorCode: "timeout" };
+      // The SDK call carries its own timeout, but a provider that answered
+      // after its slice has already spent time the remaining steps need.
+      if (now() - stepStartedAt >= cap) return { messages, errorCode: "timeout" };
       if (outcome.status !== "idle") throw new Error("helper turn did not finish");
       const message = typeof outcome.lastMessage === "string" ? outcome.lastMessage.trim() : "";
       if (!message) return { messages, errorCode: "model_failed" };

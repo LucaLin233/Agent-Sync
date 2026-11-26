@@ -1,5 +1,11 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { listWorkspaceSessionsRpc, reconcileRpc, regenerateWorkspaceTitleRpc, titleCatalogRpc } from "../shared/rpc";
+import {
+  listWorkspaceSessionsRpc,
+  reconcileRpc,
+  regenerationStatusRpc,
+  startRegenerationRpc,
+  titleCatalogRpc,
+} from "../shared/rpc";
 import { listTitleProviderOptions } from "./provider";
 import { CHINESE_TITLES_SETTINGS } from "../shared/settings";
 import { listAgentIdsViaCli, listProjectIdsViaCli, listWorkspaceIdsViaCli } from "./cli";
@@ -49,8 +55,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(listWorkspaceSessionsRpc, async ({ workspaceId }, { paseo }) => ({
     sessions: await engine.listWorkspaceSessions(workspaceId, paseo),
   }));
-  server.handle(regenerateWorkspaceTitleRpc, async ({ workspaceId, agentId, scope }, { paseo }) =>
-    engine.regenerateWorkspaceTitle(workspaceId, paseo, agentId, scope));
+  // The start call only registers the job, so it returns well inside the
+  // daemon's 30 s RPC transport. The panel then polls the job state.
+  server.handle(startRegenerationRpc, async ({ workspaceId, agentId, scope }, { paseo }) =>
+    engine.startRegeneration(workspaceId, paseo, agentId, scope));
+  server.handle(regenerationStatusRpc, async (input) => engine.regenerationStatus(input));
   server.handle(titleCatalogRpc, async (_input, { paseo }) => listTitleProviderOptions(paseo));
 
   return () => {

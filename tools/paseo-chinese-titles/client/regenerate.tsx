@@ -3,12 +3,22 @@ import {
   useRpc,
   useWorkspace,
 } from "@getpaseo/plugin/client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { listWorkspaceSessionsRpc, regenerateWorkspaceTitleRpc } from "../shared/rpc";
+import {
+  listWorkspaceSessionsRpc,
+  regenerationStatusRpc,
+  startRegenerationRpc,
+  type RegenerateResultPayload,
+} from "../shared/rpc";
 import { panelPalette } from "../shared/palette";
 
 type Scope = "both" | "workspace" | "session";
+
+/** The panel notices a finished job within a few seconds without hammering the daemon. */
+const STATUS_POLL_MS = 1_500;
+/** Stop polling rather than poll forever; a lost job reports `unknown` and can be retried. */
+const STATUS_POLL_LIMIT_MS = 10 * 60 * 1000;
 
 type Phase =
   | { kind: "idle" }
@@ -71,6 +81,7 @@ const MESSAGES: Record<string, string> = {
   no_session: "这个工作区还没有可选的普通会话，未修改原标题。",
   choose_session: "请先选择要概括的会话。",
   session_not_selectable: "所选会话不在这个工作区或不可选，请重新选择。",
+  cancelled: "本次生成已随插件重新加载而中止，未再写入标题；可以重试。",
 };
 
 const activityParts = new Intl.DateTimeFormat("zh-CN", {
@@ -112,7 +123,8 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
   // A new prompt in this workspace means a session may have joined or moved;
   // re-read the picker without touching any saved selection.
   const lastPromptAt = useWorkspace(workspaceId, (workspace) => workspace.lastPromptAt);
-  const regenerate = useRpc(regenerateWorkspaceTitleRpc);
+  const startRegeneration = useRpc(startRegenerationRpc);
+  const regenerationStatus = useRpc(regenerationStatusRpc);
   const loadSessions = useRpc(listWorkspaceSessionsRpc);
   const [sessions, setSessions] = useState<SessionList>({ kind: "loading" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -120,19 +132,34 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [refreshKey, setRefreshKey] = useState(0);
   const running = phase.kind === "running";
+  // The poll loop belongs to this panel: closing or switching workspace stops
+  // it, and a job that outlived the panel keeps its own bounded deadline.
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bumped whenever the watched job is replaced, so a response for the old
+  // workspace or job cannot land in the current one.
+  const pollToken = useRef(0);
+  const alive = useRef(true);
 
-  // A selection belongs to one workspace only.
-  useEffect(() => {
-    setSelectedId(null);
-    setPhase({ kind: "idle" });
-  }, [workspaceId]);
+  const stopPolling = useCallback(() => {
+    pollToken.current += 1;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    pollTimer.current = null;
+  }, []);
 
   useEffect(() => {
-    let alive = true;
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  useEffect(() => {
+    let live = true;
     setSessions({ kind: "loading" });
     void loadSessions({ workspaceId }).then(
       (result) => {
-        if (!alive) return;
+        if (!live) return;
         setSessions({ kind: "ready", sessions: result.sessions });
         // One session is the only choice there is; several need an explicit pick.
         setSelectedId((current) => {
@@ -141,10 +168,10 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
         });
       },
       () => {
-        if (alive) setSessions({ kind: "error" });
+        if (live) setSessions({ kind: "error" });
       },
     );
-    return () => { alive = false; };
+    return () => { live = false; };
   }, [loadSessions, workspaceId, lastPromptAt, refreshKey]);
 
   const styles = useMemo(() => {
@@ -306,48 +333,126 @@ export function ChineseTitlePanel({ theme, layout, workspaceId }: PluginWorkspac
     };
   }, [theme, compact, running, selectedId]);
 
+  const applyResult = useCallback((result: RegenerateResultPayload) => {
+    const title = result.title ?? "";
+    const workspace = result.workspaceUpdated;
+    const session = result.sessionUpdated;
+    if (result.status === "done") {
+      setPhase({
+        kind: "done",
+        title,
+        workspace,
+        session,
+        ...(result.coverage ? { coverage: coverageNote(result.coverage) } : {}),
+      });
+    } else if (result.status === "partial") {
+      setPhase({
+        kind: "partial",
+        title,
+        workspace,
+        session,
+        message: `新标题为「${title}」。${MESSAGES[result.reason ?? ""] ?? "另一处未写入。"}可选择范围后重试。` +
+          (result.coverage ? ` ${coverageNote(result.coverage)}` : ""),
+      });
+    } else if (result.status === "busy") {
+      setPhase({ kind: "busy" });
+    } else if (result.status === "needs_selection") {
+      setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "请先选择要概括的会话。" });
+    } else if (result.status === "skipped") {
+      setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "本次未写入标题。" });
+    } else {
+      setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "生成失败，请重试。" });
+    }
+  }, []);
+
+  /** Polls one job until it finishes, disappears or the panel goes away. */
+  const watch = useCallback((jobId: string) => {
+    stopPolling();
+    const token = pollToken.current;
+    const current = () => alive.current && pollToken.current === token;
+    const deadlineAt = Date.now() + STATUS_POLL_LIMIT_MS;
+    const tick = () => {
+      pollTimer.current = null;
+      void regenerationStatus({ jobId }).then(
+        (state) => {
+          if (!current()) return;
+          if (state.status === "done" && state.result) {
+            applyResult(state.result);
+            setRefreshKey((value) => value + 1);
+            return;
+          }
+          if (state.status === "unknown") {
+            setPhase({ kind: "error", message: "生成任务已丢失（插件或 daemon 可能重启），可以重试。" });
+            setRefreshKey((value) => value + 1);
+            return;
+          }
+          if (Date.now() >= deadlineAt) {
+            setPhase({ kind: "error", message: "生成状态长时间未返回，可以重试。" });
+            return;
+          }
+          pollTimer.current = setTimeout(tick, STATUS_POLL_MS);
+        },
+        () => {
+          if (!current()) return;
+          // A transient status read failure is not the job's result; try again
+          // until the job deadline.
+          if (Date.now() >= deadlineAt) {
+            setPhase({ kind: "error", message: "读取生成状态失败，可以重试。" });
+            return;
+          }
+          pollTimer.current = setTimeout(tick, STATUS_POLL_MS);
+        },
+      );
+    };
+    tick();
+  }, [applyResult, regenerationStatus, stopPolling]);
+
   const press = () => {
     if (running || !selectedId) return;
     setPhase({ kind: "running" });
-    void regenerate({ workspaceId, agentId: selectedId, scope }).then(
-      (result) => {
-        const title = result.title ?? "";
-        const workspace = result.workspaceUpdated;
-        const session = result.sessionUpdated;
-        if (result.status === "done") {
-          setPhase({
-            kind: "done",
-            title,
-            workspace,
-            session,
-            ...(result.coverage ? { coverage: coverageNote(result.coverage) } : {}),
-          });
-        } else if (result.status === "partial") {
-          setPhase({
-            kind: "partial",
-            title,
-            workspace,
-            session,
-            message: `新标题为「${title}」。${MESSAGES[result.reason ?? ""] ?? "另一处未写入。"}可选择范围后重试。` +
-              (result.coverage ? ` ${coverageNote(result.coverage)}` : ""),
-          });
-        } else if (result.status === "busy") {
+    void startRegeneration({ workspaceId, agentId: selectedId, scope }).then(
+      (started) => {
+        if (!alive.current) return;
+        if (started.status === "started" && started.jobId) {
+          watch(started.jobId);
+          return;
+        }
+        if (started.status === "busy") {
           setPhase({ kind: "busy" });
-        } else if (result.status === "needs_selection") {
-          setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "请先选择要概括的会话。" });
-        } else if (result.status === "skipped") {
-          setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "本次未写入标题。" });
-        } else {
-          setPhase({ kind: "error", message: MESSAGES[result.reason ?? ""] ?? "生成失败，请重试。" });
+          setRefreshKey((value) => value + 1);
+          return;
+        }
+        setPhase({ kind: "error", message: MESSAGES[started.reason ?? ""] ?? "无法启动生成，请重试。" });
+      },
+      () => {
+        if (alive.current) setPhase({ kind: "error", message: "请求失败，请重试。" });
+      },
+    );
+  };
+
+  // A panel that remounted while its workspace still has a job reattaches
+  // instead of showing an idle button the server would answer with `busy`.
+  useEffect(() => {
+    // A selection, a result and a poll loop all belong to one workspace.
+    setSelectedId(null);
+    setPhase({ kind: "idle" });
+    stopPolling();
+    let cancelled = false;
+    void regenerationStatus({ workspaceId }).then(
+      (state) => {
+        if (cancelled || !alive.current) return;
+        if (state.status === "running" && state.jobId) {
+          setPhase({ kind: "running" });
+          watch(state.jobId);
         }
       },
-      () => setPhase({ kind: "error", message: "请求失败，请重试。" }),
-    ).finally(() => {
-      // Sessions may have appeared or gone while the request ran; refresh the
-      // picker without changing the explicit selection.
-      setRefreshKey((value) => value + 1);
-    });
-  };
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [regenerationStatus, stopPolling, watch, workspaceId]);
 
   const readySessions = sessions.kind === "ready" ? sessions.sessions : [];
   const multiple = readySessions.length > 1;
