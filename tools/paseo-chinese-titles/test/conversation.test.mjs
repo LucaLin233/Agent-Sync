@@ -714,7 +714,7 @@ test("scenario A: one failed part reports no title instead of claiming a whole-s
   assert.deepEqual(result.segments, { total: 3, used: 2 });
 });
 
-function fakePaseoForModel(lastMessage, { ready = true, sequence = null } = {}) {
+function fakePaseoForModel(lastMessage, { ready = true, sequence = null, status = "idle", statusSequence = null } = {}) {
   const created = [];
   const paseo = {
     config: { get: async () => ({ config: { providers: { cchp: { extends: "codex", label: "CCHP" } } } }) },
@@ -736,7 +736,13 @@ function fakePaseoForModel(lastMessage, { ready = true, sequence = null } = {}) 
               run: async () => {
                 // A sequence lets a multi-step helper return one answer per turn.
                 const answer = sequence && sequence.length > 0 ? sequence.shift() : lastMessage;
-                return { status: "idle", lastMessage: answer };
+                // `status`/`statusSequence` reproduce the SDK's structured
+                // terminal result so a failed helper session can be told apart
+                // from an empty reply.
+                const turnStatus = statusSequence && statusSequence.length > 0
+                  ? statusSequence.shift()
+                  : status;
+                return { status: turnStatus, lastMessage: answer };
               },
               archive: async () => ({}),
               config: input,
@@ -749,6 +755,113 @@ function fakePaseoForModel(lastMessage, { ready = true, sequence = null } = {}) 
   };
   return { paseo, created };
 }
+
+test("a failed helper session is reported apart from an empty reply", async () => {
+  const { generateConversationTitle, generateTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const request = { transcript: "用户：诊断 422\n助手：停用 CCHP 与 GDR", maxChars: 28 };
+
+  // The SDK's terminal status is structured: a turn that ended in `error` (or
+  // asked for a person) is not the same event as an idle turn with no text.
+  // Neither is reported as an upstream/gateway failure: only the status is read.
+  for (const status of ["error", "permission"]) {
+    const failed = fakePaseoForModel(null, { status });
+    assert.deepEqual(
+      await generateConversationTitle(failed.paseo, settings, request),
+      { title: null, errorCode: "helper_failed" },
+      `${status} must be a distinct helper failure, not an empty reply`,
+    );
+  }
+
+  const empty = fakePaseoForModel("", { status: "idle" });
+  assert.deepEqual(
+    await generateConversationTitle(empty.paseo, settings, request),
+    { title: null, errorCode: "model_failed" },
+    "an idle turn without text keeps the existing empty-answer code",
+  );
+
+  const timedOut = fakePaseoForModel(null, { status: "timeout" });
+  assert.deepEqual(
+    await generateConversationTitle(timedOut.paseo, settings, request),
+    { title: null, errorCode: "timeout" },
+    "the SDK's own timeout is reported as a timeout",
+  );
+
+  // Automatic naming keeps its fallback title and its old codes: the new reason
+  // belongs to the manual path only, and the SDK's own timeout is not the
+  // automatic path's pre-existing local-budget timeout.
+  const { generateSessionTitle } = await import("../server/helper.ts");
+  for (const automaticStatus of ["error", "permission", "timeout"]) {
+    const automatic = await generateTitle(
+      fakePaseoForModel(null, { status: automaticStatus }).paseo,
+      settings,
+      { kind: "workspace", prompt: "Fix login bug", maxChars: 28 },
+    );
+    assert.equal(automatic.source, "fallback");
+    assert.equal(automatic.errorCode, "model_failed", `${automaticStatus}: workspace path keeps model_failed`);
+
+    // Both automatic paths keep their old code, so their retry rules are untouched.
+    const session = await generateSessionTitle(
+      fakePaseoForModel(null, { status: automaticStatus }).paseo,
+      settings,
+      { question: "先看 Codex 为什么走 WebSocket", answer: "因为要保持长连接。", maxChars: 28 },
+    );
+    assert.equal(session.title, null);
+    assert.equal(session.errorCode, "model_failed", `${automaticStatus}: session path keeps model_failed`);
+  }
+});
+
+test("a failed shortening turn keeps the helper failure instead of rewrite_failed", async () => {
+  const { generateConversationTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const tooLong = "诊断 422 后关闭 CCHP 与 GDR 的 WebSocket 长连接并复核偶数";
+  // The first draft is over the limit, so the one shortening turn runs; that
+  // second turn ends in the SDK's structured `error` with no text.
+  const fake = fakePaseoForModel("", {
+    sequence: [tooLong],
+    statusSequence: ["idle", "error"],
+  });
+  let calls = 0;
+  const originalCreate = fake.paseo.workspaces.create;
+  fake.paseo.workspaces.create = async (options) => {
+    const workspace = await originalCreate(options);
+    const originalAgents = workspace.agents.create;
+    workspace.agents.create = async (input) => {
+      const agent = await originalAgents(input);
+      const originalRun = agent.run;
+      agent.run = async (prompt, runOptions) => {
+        calls += 1;
+        return originalRun(prompt, runOptions);
+      };
+      return agent;
+    };
+    return workspace;
+  };
+  const result = await generateConversationTitle(fake.paseo, settings, {
+    transcript: "用户：诊断 422\n助手：停用 CCHP 与 GDR",
+    maxChars: 28,
+  });
+  assert.equal(result.title, null);
+  assert.equal(result.errorCode, "helper_failed", "not folded into rewrite_failed");
+  assert.equal(calls, 2, "the shortening turn did run once");
+});
+
+test("the SDK's own timeout is only a timeout on the manual path", async () => {
+  const { generateConversationTitle, generateTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const manual = await generateConversationTitle(
+    fakePaseoForModel(null, { status: "timeout" }).paseo,
+    settings,
+    { transcript: "用户：先排查", maxChars: 28 },
+  );
+  assert.deepEqual(manual, { title: null, errorCode: "timeout" });
+  const automatic = await generateTitle(
+    fakePaseoForModel(null, { status: "timeout" }).paseo,
+    settings,
+    { kind: "workspace", prompt: "Fix login bug", maxChars: 28 },
+  );
+  assert.equal(automatic.errorCode, "model_failed");
+});
 
 test("manual conversation titles come only from the model, never from a fallback", async () => {
   const { generateConversationTitle, generateTitle } = await import("../server/helper.ts");
