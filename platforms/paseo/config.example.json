@@ -65,8 +65,11 @@
       "codex-cchp": {
         "extends": "codex",
         "label": "Codex · CCHP",
-        "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/example/agent/codex-home"}
+        "command": ["/home/example/agent/runtime/bin/codex", "-c", "model_provider=\"cchp\""],
+        "env": {
+          "CODEX_HOME": "/home/example/agent/codex-home",
+          "PATH": "/home/example/agent/runtime/bin:/usr/local/bin:/usr/bin:/bin"
+        }
       },
       "claude-cchp": {
         "extends": "claude",
@@ -79,18 +82,22 @@
       "codex-cch": {
         "extends": "codex",
         "label": "Codex · CCH",
-        "command": ["codex", "-c", "model_provider=\"cch\""],
-        "env": {"CODEX_HOME": "/home/example/agent/codex-home"}
+        "command": ["/home/example/agent/runtime/bin/codex", "-c", "model_provider=\"cch\""],
+        "env": {
+          "CODEX_HOME": "/home/example/agent/codex-home",
+          "PATH": "/home/example/agent/runtime/bin:/usr/local/bin:/usr/bin:/bin"
+        }
       },
       "claude-cch": {
         "extends": "claude",
         "label": "Claude Code · CCH",
+        "command": ["/home/example/agent/bin/claude-cch"],
         "env": {
           "CLAUDE_CONFIG_DIR": "/home/example/agent/claude-home",
           "ANTHROPIC_BASE_URL": "https://cch.example.invalid"
         }
       },
-      "claude": {"enabled": false},
+      "claude": {"enabled": false, "command": ["/home/example/agent/bin/claude-cchp"]},
       "codex": {"enabled": false},
       "copilot": {"enabled": false},
       "opencode": {"enabled": false},

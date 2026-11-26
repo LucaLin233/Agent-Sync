@@ -17,7 +17,11 @@
 
 ## 配置内容
 
-`config.example.json` 为 CCHP 与 CCH 各登记一个 Codex 和一个 Claude Code provider。Codex 入口用 `-c model_provider="<网关>"` 选择上游，两组共用同一 `CODEX_HOME`。Claude Code 入口用各自的 Anthropic 兼容 `ANTHROPIC_BASE_URL` 选择上游，两组共用同一 `CLAUDE_CONFIG_DIR`。部署时替换 agent 根目录和网关地址占位值，按各自的实际启动环境配置鉴权。
+`config.example.json` 为 CCHP 与 CCH 各登记一个 Codex 和一个 Claude Code provider。两条 Codex 入口用同一个 mise 管理的官方 `codex` 绝对路径，共用显式 `PATH` 和 `CODEX_HOME`，分别用 `-c model_provider="cchp"` 和 `-c model_provider="cch"` 选择网关。部署时将 `/home/example/agent/runtime/bin/codex` 替换为实际 CLI 路径，并为两个入口填写相同的 `PATH`，包含运行该 CLI 所需的 Node 可执行文件目录。
+
+`claude-cchp` 从禁用的 `claude` 基座继承 `command`，启动 `bin/claude-cchp`。`claude-cch` 显式指定 `command`，启动 `bin/claude-cch`。合并既有配置时，移除 `claude-cchp` 残留的 `command`，使其使用基座命令。两条入口共用 `CLAUDE_CONFIG_DIR`，各自在 provider 的 `env` 中声明 `ANTHROPIC_BASE_URL`。
+
+两个包装脚本由部署者准备。每个脚本清理继承来的 Anthropic 路由与鉴权设置，注入本组网关与独立鉴权，再通过 `exec` 启动官方 Claude Code CLI，原样转发 Paseo 传入的参数。脚本使用的网关地址和 `CLAUDE_CONFIG_DIR` 须与对应 provider 的 `env` 一致。部署时替换示例路径和网关地址，仓库只保存占位值，鉴权由部署环境提供。
 
 每组各有 LUNO、LENS 和 FORGE 三条 Profile，示例均用该组的 Codex provider。LUNO、LENS 用 `gpt-6.2-sol`，FORGE 用 `deepseek-flash`。六条均配置 `full-access`、`high` 与 `service_tier: "default"`。部署时按父权限和目标模型能力核对这些值。显式传递 `service_tier` 可覆盖同 provider 派发时继承的父会话值。Profile 的 `options` 只放所选 provider 支持的选项。
 
@@ -33,7 +37,7 @@ agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/
 - 两组共用一个 `CLAUDE_CONFIG_DIR` 后，其中 `settings.json` 的 `env` 不写 `ANTHROPIC_BASE_URL` 或鉴权变量，网关和鉴权只由各 provider 的启动环境提供，避免两组打到同一网关。
 - Claude Code 的自动记忆集中放在 agent 根下的 `memory`：在 `CLAUDE_CONFIG_DIR/settings.json` 用 `autoMemoryDirectory` 指向它，所有会话共用一份（偏好与反馈）；Claude Code 2.1.332 实测该设置对新会话生效，升级后复核。该目录与 Codex 自带记忆一样属官方程序数据，不手工改动，也不作为 LUNO 经验日志。
 - 自动压缩由 `settings.json` 的 `autoCompactWindow`（不小于 100000 的 token 数，或 `auto`）控制；程序先扣除最多 2 万的输出预留，实际触发点约为配置值减 2 万（2.1.332 实测，配置 250000 时有效窗口 230000）。这是用户配置，规则安装器不管理。
-- 包装脚本只给 `CLAUDE_CONFIG_DIR` 一个缺省值，生效的主设置是 daemon 的 systemd drop-in 与交互 shell 的导出；三处值必须一致。
+- 包装脚本提供的 `CLAUDE_CONFIG_DIR` 缺省值须与 daemon 进程环境、交互 shell 和两条 Claude Code provider 的 `env` 一致。
 
 迁移既有目录时先停用相关会话，按原样复制到新位置并核对。由两个 Claude 配置目录合为一个时，逐项核对 `settings.json`、`.claude.json` 与登录态，有冲突交负责人取舍，`projects/` 按会话目录合并。改名 HOME 下的 `.paseo` 前先停止 daemon（至少先停用中文标题插件），把插件状态移入 `paseo-home/plugin-data/paseo-chinese-titles/daemons/<哈希>/` 并核对文件。HOME 下原有的 `.claude`、`.codex`、`.agents`、`.gemini`、`.paseo` 先改名保留作回退，再建立指向 agent 根下对应目录的链接，然后切换环境、重启 daemon，并重新启用插件。
 
