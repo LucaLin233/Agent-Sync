@@ -66,16 +66,17 @@ const loading = { kind: "loading" };
 const off = { kind: "unavailable", reason: "累计统计已关闭" };
 
 test("the pill shows only the cumulative rate with one decimal and a percent sign", () => {
-  assert.equal(formatPillLabel(ready(0.989)), "累计 98.9%");
-  assert.equal(formatPillLabel(ready(0.949)), "累计 94.9%");
-  assert.equal(formatPillLabel(ready(0.9)), "累计 90.0%");
+  assert.equal(formatPillLabel(ready(0.989)), "98.9%");
+  assert.equal(formatPillLabel(ready(0.949)), "94.9%");
+  assert.equal(formatPillLabel(ready(0.9)), "90.0%");
   // Real zero is a measurement, not a missing value.
-  assert.equal(formatPillLabel(ready(0)), "累计 0.0%");
+  assert.equal(formatPillLabel(ready(0)), "0.0%");
   // 100 is the widest reading and keeps its one decimal like the panel.
-  assert.equal(formatPillLabel(ready(1)), "累计 100.0%");
-  // Ordinary spaces only: no narrow or full no-break space, no percent
-  // stripping, and no recent or speed field on the button.
+  assert.equal(formatPillLabel(ready(1)), "100.0%");
+  // The visible label drops the "累计" prefix entirely; no narrow or full
+  // no-break space, no percent stripping, and no recent or speed field.
   for (const label of [formatPillLabel(ready(0.989)), formatPillLabel(loading), formatPillLabel(off)]) {
+    assert.doesNotMatch(label, /累计/);
     assert.doesNotMatch(label, /t\/s|token/i);
     assert.doesNotMatch(label, /\u202F|\u00A0/);
     assert.doesNotMatch(label, /最近/);
@@ -84,11 +85,11 @@ test("the pill shows only the cumulative rate with one decimal and a percent sig
 });
 
 test("a loading or unavailable cumulative read keeps its own placeholder", () => {
-  assert.equal(formatPillLabel(loading), "累计 …");
-  assert.equal(formatPillLabel(off), "累计 —");
-  assert.equal(formatPillLabel({ kind: "unavailable", reason: "累计读取失败" }), "累计 —");
+  assert.equal(formatPillLabel(loading), "…");
+  assert.equal(formatPillLabel(off), "—");
+  assert.equal(formatPillLabel({ kind: "unavailable", reason: "累计读取失败" }), "—");
   // A finished read without a valid snapshot is missing, never zero and never the recent sample.
-  assert.equal(formatPillLabel(ready(null)), "累计 —");
+  assert.equal(formatPillLabel(ready(null)), "—");
 });
 
 test("the pill title names the cumulative base and explains a missing rate", () => {
@@ -119,8 +120,8 @@ test("the pill title names the cumulative base and explains a missing rate", () 
 test("the widest labels stay inside the 160 px style bound", () => {
   // Paseo v0.17.4 public styles: 160 max width minus 12 + 12 padding, an 8 gap
   // and the 16 px icon leave 112 px for the single-line label. At the host's
-  // 12 px label size "累计 100.0%" is about 2 CJK glyphs plus 6 latin ones,
-  // roughly 65 px. This is a style-bound estimate, not a real layout result.
+  // 12 px label size "100.0%" is about 6 latin digits and symbols,
+  // roughly 37 px. This is a style-bound estimate, not a real layout result.
   const PILL_TEXT_BUDGET = 160 - 12 - 12 - 8 - 16; // 112 px
   const estimated = (text) => [...text].reduce((sum, char) => sum + (
     char === " " ? 3.4 : char === "%" ? 7 : char === "." ? 3.4 : char.charCodeAt(0) < 0x2e80 ? 6.7 : 12
@@ -158,7 +159,7 @@ test("the panel keeps distinct recent and cumulative speeds while the pill carri
   assert.equal(formatTokenSpeed(recentSpeed), "900.0 t/s");
   assert.equal(formatTokenSpeed(cumulativeSpeed), "82.7 t/s");
   // …and neither leaks into the composer pill, which shows only the cumulative cache rate.
-  assert.equal(formatPillLabel(ready(0.949)), "累计 94.9%");
+  assert.equal(formatPillLabel(ready(0.949)), "94.9%");
 });
 
 test("cumulative speed is weighted by whole-turn duration, not averaged", () => {
