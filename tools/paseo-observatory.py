@@ -242,7 +242,9 @@ def _feedback_status(feedback, entry_id):
 
 def project_report(job):
     """只投影已确认非秘密字段。"""
-    report = job.get("report") if isinstance(job.get("report"), dict) else {}
+    report = job.get("report")
+    if not isinstance(report, dict):
+        raise Fail(RC_INPUT, "report_unavailable")
     feedback = job.get("findingFeedback") if isinstance(job.get("findingFeedback"), dict) else {}
     items = []
     for finding in report.get("findings") or []:

@@ -244,6 +244,23 @@ class ReportShowTest(Base):
         self.assertEqual(json.loads(out)["code"], "job_not_found")
         self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
 
+    def test_show_unavailable_report_body_is_input_error(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"]["job"]["report"] = None
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_INPUT, out)
+        self.assertEqual(json.loads(out)["code"], "report_unavailable")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_show_valid_empty_report_still_succeeds(self):
+        scenario = base_scenario()
+        scenario["response"]["observatory.insights.report"]["job"]["report"] = {"findings": []}
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("report", "show", "--job-id", "job-1")
+        self.assertEqual(rc, M.RC_OK, out)
+        self.assertEqual(json.loads(out)["findings"], [])
+
     def test_show_job_id_mismatch_stops(self):
         scenario = base_scenario()
         scenario["response"]["observatory.insights.report"]["job"]["id"] = "job-other"
@@ -365,6 +382,16 @@ class WriteTest(Base):
                                 "--finding-id", "f-1", "--status", "resolved")
         self.assertEqual(rc, M.RC_INPUT, out)
         self.assertEqual(json.loads(out)["code"], "job_not_found")
+        self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
+
+    def test_unavailable_report_on_close_is_input_error_and_zero_write(self):
+        scenario = base_scenario(writeOutcome="apply")
+        scenario["response"]["observatory.insights.report"]["job"]["report"] = None
+        write_scenario(self.sdk, scenario)
+        rc, out = self.run_tool("finding", "close", "--job-id", "job-1",
+                                "--finding-id", "f-1", "--status", "resolved")
+        self.assertEqual(rc, M.RC_INPUT, out)
+        self.assertEqual(json.loads(out)["code"], "report_unavailable")
         self.assertEqual([c["method"] for c in self.calls()], ["observatory.insights.report"])
 
     def test_read_job_id_mismatch_blocks_write(self):
