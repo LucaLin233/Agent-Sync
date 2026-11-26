@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pickFirstTaskOwner, planWorkspaceRepair, planWorkspaceRetry } from "../shared/workspace-repair.ts";
@@ -240,8 +239,7 @@ test("first-task ownership is decided from metadata, not message text", () => {
 
 /** Seeds the plugin's persisted state for the sandbox's synthetic daemon. */
 async function writeState(root, workspaces, agents) {
-  const namespace = createHash("sha256").update(join(root, "paseo-home")).digest("hex").slice(0, 32);
-  const dir = join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace);
+  const dir = join(root, "paseo-home", "plugin-data", "paseo-chinese-titles");
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   await fs.writeFile(join(dir, "state.json"), JSON.stringify({
     version: 1, initialized: true, installedAt: "2026-01-01T00:00:00.000Z", projects: {}, workspaces, agents,

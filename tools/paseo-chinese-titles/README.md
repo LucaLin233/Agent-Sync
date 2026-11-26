@@ -15,24 +15,24 @@ paseo --home "$PASEO_HOME" plugin install \
 
 ## 存储位置与旧状态迁移
 
-插件状态不再把 `PASEO_HOME` 当文件系统路径，而是：
+插件状态放在所属 daemon 的 `PASEO_HOME` 下，与其他插件的 `plugin-data` 及 Paseo 自身的 `plugin-settings` 同处：
 
-- 固定 base：`$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/`；
-- 每个 daemon 一个 32 位十六进制 SHA-256 namespace（输入是 `PASEO_HOME`），因此不同 daemon 状态隔离；
-- `helper/` 与 `bootstrap/` 也位于该 namespace 下。
+- 固定 base：`$PASEO_HOME/plugin-data/paseo-chinese-titles/`，`PASEO_HOME` 按 daemon 相同规则解析（缺省 `~/.paseo`，展开 `~` 后取绝对路径），不同 daemon 天然隔离；
+- `state.json`、`helper/` 与 `helper/bootstrap/` 均位于该目录下。
 
-旧版曾使用 `$PASEO_HOME/plugin-data/paseo-chinese-titles/state.json`。升级时由部署者一次性迁移，插件代码不读取旧任意路径：
+上一版曾使用 `$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/<namespace>/`（namespace 为 `PASEO_HOME` 的 SHA-256 前 32 位十六进制）。升级时由部署者一次性迁移，插件代码不读取旧路径。目标目录若还留着更早版本的 `state.json`，先改名保留，不与新状态合并：
 
 ```sh
 NS=$(printf '%s' "$PASEO_HOME" | sha256sum | cut -c1-32)
-OLD="$PASEO_HOME/plugin-data/paseo-chinese-titles/state.json"
-NEW="$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/$NS/state.json"
-mkdir -p "$(dirname "$NEW")"
-# 在插件已 disable/停止写入的窗口内，单写入者串行复制
-cp "$OLD" "$NEW.tmp" && chmod 600 "$NEW.tmp" && mv "$NEW.tmp" "$NEW"
+OLD="$HOME/.paseo/plugin-data/paseo-chinese-titles/daemons/$NS"
+NEW="$PASEO_HOME/plugin-data/paseo-chinese-titles"
+# 在插件已 disable/停止写入的窗口内，单写入者执行
+[ -e "$NEW/state.json" ] && mv "$NEW/state.json" "$NEW/state.json.pre-$NS"
+mkdir -p "$NEW" && chmod 700 "$NEW"
+cp -a "$OLD/state.json" "$NEW/state.json"
 ```
 
-保留旧文件作为回滚副本；不要在新旧版本同时运行时复制，避免重复命名。迁移后安装/更新从已合并提交构建的插件，再按实际需要启用。
+保留旧目录作为回滚副本；不要在新旧版本同时运行时复制，避免重复命名。旧 `helper/` 关联的后台工作区已归档时无需迁移，新版首次生成标题时在新位置重建 `helper/`。
 
 ## 设置屏
 

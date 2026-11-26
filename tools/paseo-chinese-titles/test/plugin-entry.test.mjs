@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,8 +123,7 @@ function makePaseo(state) {
 }
 
 async function seedState(root, agentEntry) {
-  const dir = join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons",
-    createHash("sha256").update(join(root, "paseo-home")).digest("hex").slice(0, 32));
+  const dir = join(root, "paseo-home", "plugin-data", "paseo-chinese-titles");
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   await fs.writeFile(join(dir, "state.json"), JSON.stringify({
     version: 1,
@@ -161,8 +159,7 @@ async function contributed(root, state) {
 }
 
 function agentStatePath(root) {
-  const namespace = createHash("sha256").update(join(root, "paseo-home")).digest("hex").slice(0, 32);
-  return join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace, "state.json");
+  return join(join(root, "paseo-home", "plugin-data", "paseo-chinese-titles"), "state.json");
 }
 
 async function readAgentState(root) {

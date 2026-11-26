@@ -1,12 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { settingsSchema } from "../shared/settings.ts";
 
-// The engine stores its state under $HOME/.paseo/plugin-data; point HOME and
+// The engine stores its state under $PASEO_HOME/plugin-data; point HOME and
 // PASEO_HOME at a private temp root so the test never touches real data.
 const liveEngines = [];
 
@@ -169,8 +168,7 @@ async function harness(root, overrides = {}) {
 
 /** Seeds the plugin's own persisted state for the synthetic daemon namespace. */
 async function writeState(root, agentEntry) {
-  const namespace = createHash("sha256").update(join(root, "paseo-home")).digest("hex").slice(0, 32);
-  const dir = join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace);
+  const dir = join(root, "paseo-home", "plugin-data", "paseo-chinese-titles");
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   await fs.writeFile(join(dir, "state.json"), JSON.stringify({
     version: 1,
@@ -184,8 +182,7 @@ async function writeState(root, agentEntry) {
 
 /** Reads the plugin's own persisted state for the synthetic daemon namespace. */
 async function agentState(root) {
-  const namespace = createHash("sha256").update(join(root, "paseo-home")).digest("hex").slice(0, 32);
-  const file = join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace, "state.json");
+  const file = join(join(root, "paseo-home", "plugin-data", "paseo-chinese-titles"), "state.json");
   const raw = await fs.readFile(file, "utf8").catch(() => null);
   if (!raw) return {};
   return JSON.parse(raw).agents?.a1 ?? {};

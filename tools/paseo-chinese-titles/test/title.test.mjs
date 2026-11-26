@@ -15,6 +15,7 @@ import {
   truncateChars,
 } from "../shared/title.ts";
 import { settingsSchema } from "../shared/settings.ts";
+import { join } from "node:path";
 
 test("model titles are cleaned and validated as Chinese", () => {
   assert.equal(sanitizeModelTitle("  修复登录问题  ", 20), "修复登录问题");
@@ -174,17 +175,20 @@ test("plugin data paths cannot escape the plugin directory", async () => {
   assert.throws(() => assertPluginPath(`${root}/../escape`));
 });
 
-test("plugin storage is scoped by hashed PASEO_HOME, not by the env path", async () => {
-  const { createHash } = await import("node:crypto");
+test("plugin storage lives under the daemon's PASEO_HOME, resolved like the daemon", async () => {
+  const { homedir } = await import("node:os");
   const { pluginDataDir } = await import("../server/state.ts");
   const previous = process.env.PASEO_HOME;
   try {
     process.env.PASEO_HOME = "/synthetic/daemon-a";
     const a = pluginDataDir();
-    assert.ok(a.endsWith(createHash("sha256").update("/synthetic/daemon-a").digest("hex").slice(0, 32)));
-    assert.ok(!a.includes("/synthetic/daemon-a"));
+    assert.equal(a, "/synthetic/daemon-a/plugin-data/paseo-chinese-titles");
     process.env.PASEO_HOME = "/synthetic/daemon-b";
     assert.notEqual(pluginDataDir(), a);
+    process.env.PASEO_HOME = "~/agent-paseo";
+    assert.equal(pluginDataDir(), join(homedir(), "agent-paseo", "plugin-data", "paseo-chinese-titles"));
+    delete process.env.PASEO_HOME;
+    assert.equal(pluginDataDir(), join(homedir(), ".paseo", "plugin-data", "paseo-chinese-titles"));
   } finally {
     if (previous === undefined) delete process.env.PASEO_HOME;
     else process.env.PASEO_HOME = previous;

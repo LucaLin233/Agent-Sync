@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -32,11 +31,15 @@ export interface ChineseTitlesState {
   agents: Record<string, EntityTitleState>;
 }
 
-/** Stable OS-home base; PASEO_HOME is used only as a hash namespace, never as a path. */
+/**
+ * Daemon-scoped base under PASEO_HOME, next to the plugin-data of other plugins and
+ * Paseo's own plugin-settings. Falls back to ~/.paseo like the daemon itself.
+ */
 function pluginRoot(): string {
-  const configured = process.env.PASEO_HOME?.trim() || join(homedir(), ".paseo");
-  const namespace = createHash("sha256").update(configured).digest("hex").slice(0, 32);
-  return resolve(homedir(), ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace);
+  // Same resolution as the daemon's resolvePaseoHome: default ~/.paseo, expand ~, then resolve.
+  const raw = process.env.PASEO_HOME ?? "~/.paseo";
+  const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? join(homedir(), raw.slice(2)) : raw;
+  return resolve(expanded, "plugin-data", "paseo-chinese-titles");
 }
 
 /** Resolve a path and prove it stays inside this plugin's data directory. */
