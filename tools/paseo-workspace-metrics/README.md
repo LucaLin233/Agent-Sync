@@ -2,31 +2,27 @@
 
 适用 Paseo 0.16.0 及以上。在插件已启用的 daemon 主机上安装源码，安装无需构建。
 
-当前正式使用本地目录来源，不从仓库安装，也不按仓库提交更新。这样仓库里的其他提交不会让这个插件一直提示有更新；插件只在当前目录的源码实际变化后，由运行 ID 重载读取。
+正式安装采用 Git 来源，固定到已核对的已合并提交（完整 SHA）。
 
 首次安装：
 
 ```sh
 PLUGIN_ID=${PLUGIN_ID:?先按本次部署选定运行 ID}
-paseo plugin install "$PWD" --id "$PLUGIN_ID"
-```
-
-已有本地安装：源码更新后在同一目录用运行 ID 重载。`reload` 读取当前目录，不走仓库 `update`：
-
-```sh
-PLUGIN_ID=${PLUGIN_ID:?先确认现有安装的运行 ID}
-paseo plugin reload "$PLUGIN_ID"
-```
-
-如果某个部署仍留有旧 Git 安装，先确认它已不再需要仓库更新，再在获得该对象的迁移授权后改成本地目录来源；不要继续用 `paseo plugin update --ref` 追仓库提交。旧路径仅作迁移参考：
-
-```sh
-PLUGIN_ID=${PLUGIN_ID:?先确认现有安装的运行 ID}
-REF=${REF:?填已核对的已合并提交}
+REF=${REF:?填已核对的已合并提交完整 SHA}
 paseo plugin install github:LucaLin233/Agent-Sync:tools/paseo-workspace-metrics --id "$PLUGIN_ID" --ref "$REF"
 ```
 
-所有安装或重载写入前，确认目标 daemon、运行 ID 和本次写授权；reload 只读取该运行 ID 当前的源码目录。
+已有 Git 安装沿用现有运行 ID，更新到选定的已合并提交。Paseo 0.17.5 支持 `update --ref`，其他版本以目标 CLI 的 `paseo plugin update --help` 为准。
+
+```sh
+PLUGIN_ID=${PLUGIN_ID:?先确认现有安装的运行 ID}
+REF=${REF:?填已核对的已合并提交完整 SHA}
+paseo plugin update "$PLUGIN_ID" --ref "$REF"
+```
+
+本地开发可从源码目录安装。修改源码后用该安装的运行 ID 执行 `paseo plugin reload "$PLUGIN_ID"`，重载会读取该安装指向的目录。
+
+所有安装、更新或重载前，确认目标 daemon、运行 ID 和本次写授权。
 
 运行 ID 未知时用 `paseo --quiet plugin ls` 取 ID-only 输出；目标不支持该全局选项时说明缺口，不回退到完整记录。已知 ID 只核目标项：由可信本地进程调用目标的结构化入口，在工具输出前只投影运行 ID、允许的来源字段、已安装修订和运行状态，不输出目录或错误文本；失败只报失败，不转储 stderr，也不为补齐而读取完整记录。现有安装继续沿用读到的运行 ID，新部署按本次部署选定。安装来源不匹配时，先在授权范围内确定迁移方案，不直接按同一 ID 覆盖。
 
