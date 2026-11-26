@@ -776,8 +776,12 @@ module.main(sys.argv[2:])
             self.assertEqual(fragment["extends"], runtime)
             gateways.setdefault(gateway, set()).add(runtime)
             if runtime == "codex":
-                self.assertIn('model_provider="%s"' % gateway, fragment["command"])
-                self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/agent/codex-home"})
+                self.assertEqual(fragment["command"], [
+                    "/home/example/agent/runtime/bin/codex", "-c", 'model_provider="%s"' % gateway])
+                self.assertEqual(fragment["env"], {
+                    "CODEX_HOME": "/home/example/agent/codex-home",
+                    "PATH": "/home/example/agent/runtime/bin:/usr/local/bin:/usr/bin:/bin",
+                })
             else:
                 self.assertEqual(fragment["env"], {
                     "CLAUDE_CONFIG_DIR": "/home/example/agent/claude-home",
@@ -786,7 +790,15 @@ module.main(sys.argv[2:])
         self.assertTrue(gateways)
         for runtimes in gateways.values():
             self.assertEqual(runtimes, {"codex", "claude"})
-        for builtin in ("claude", "codex", "copilot", "opencode", "pi", "omp"):
+        codex_entries = [providers["codex-" + gateway] for gateway in gateways]
+        self.assertEqual(len({entry["command"][0] for entry in codex_entries}), 1)
+        self.assertEqual(len({entry["env"]["PATH"] for entry in codex_entries}), 1)
+        # Claude 基座提供 CCHP 的包装脚本，claude-cch 显式指定自己的脚本。
+        self.assertEqual(providers["claude"],
+                         {"enabled": False, "command": ["/home/example/agent/bin/claude-cchp"]})
+        self.assertNotIn("command", providers["claude-cchp"])
+        self.assertEqual(providers["claude-cch"]["command"], ["/home/example/agent/bin/claude-cch"])
+        for builtin in ("codex", "copilot", "opencode", "pi", "omp"):
             self.assertEqual(providers[builtin], {"enabled": False})
 
         profiles = config["daemon"]["agentProfiles"]
