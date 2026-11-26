@@ -1,7 +1,7 @@
 // Shared offline fixtures for the catalog bridge tests: loopback HTTP servers,
 // a synthetic bearer, and temporary directories. No network egress.
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -89,11 +89,13 @@ export function fixture(handler) {
   })();
 }
 
-function spawnServer(configPath) {
+function spawnServer(configPath, extraEnv = {}) {
   const dir = dirname(configPath);
+  // The server only reads a config inside CATALOG_CONFIG_ROOT; each test keeps
+  // its config in a fresh temp dir, so that dir is the root for that process.
   return spawn(process.execPath, [SERVER, '--config', configPath], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir },
+    env: { PATH: '/usr/bin:/bin', HOME: dir, TMPDIR: dir, CATALOG_CONFIG_ROOT: realpathSync(dir), ...extraEnv },
   });
 }
 
@@ -152,6 +154,34 @@ export async function runServerExpectingExit(config, timeoutMs = 3000) {
   const configPath = join(dir, 'catalog.json');
   writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
   const child = spawnServer(configPath);
+  let output = '';
+  child.stdout.on('data', (chunk) => { output += chunk; });
+  child.stderr.on('data', (chunk) => { output += chunk; });
+  const code = await new Promise((resolve) => {
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+    child.once('exit', (exitCode) => {
+      clearTimeout(timer);
+      resolve(timedOut ? 'started' : exitCode);
+    });
+  });
+  return { code, output };
+}
+
+// Launch the server with an explicit --config value plus explicit cwd/root, so
+// the config-path boundary can be exercised directly. A config that instead
+// starts listening resolves as 'started' (the child is killed) instead of
+// hanging the suite.
+export async function runServerWithConfigArg(configArg, { root, cwd, timeoutMs = 3000 } = {}) {
+  const base = tempRoot();
+  const child = spawn(process.execPath, [SERVER, '--config', configArg], {
+    cwd: cwd ?? base,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { PATH: '/usr/bin:/bin', HOME: base, TMPDIR: base, CATALOG_CONFIG_ROOT: realpathSync(root ?? base) },
+  });
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });

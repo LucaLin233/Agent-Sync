@@ -1,7 +1,12 @@
 // Startup validation and secret hygiene — offline, synthetic inputs.
 import assert from 'node:assert/strict';
 import { after, describe, test } from 'node:test';
-import { FAKE_TOKEN, cleanupRoots, fixture, get, json, runServerExpectingExit, startServer } from './helpers.mjs';
+import { join } from 'node:path';
+import { symlinkSync, writeFileSync } from 'node:fs';
+import {
+  FAKE_TOKEN, cleanupRoots, fixture, get, json, runServerExpectingExit, runServerWithConfigArg,
+  startServer, tempRoot,
+} from './helpers.mjs';
 
 const SUCCESS = ['gpt-example-large', 'gpt-example-mini'];
 // Synthetic stand-in for "something that looks like a credential"; asserted absent from output.
@@ -219,5 +224,54 @@ describe('anonymous metadata and log hygiene', () => {
       await server.stop();
       await upstream.close();
     }
+  });
+});
+
+describe('config path boundary', () => {
+  const route = { gatewayLabel: 'Alpha', upstream: 'https://alpha.example.invalid/v1/models' };
+  const body = JSON.stringify({ listen: { host: '127.0.0.1', port: 0 }, routes: { '/alpha/v1/models': route } });
+
+  test('a relative --config is refused instead of resolving against the cwd', async () => {
+    const dir = tempRoot();
+    writeFileSync(join(dir, 'catalog.json'), body, { mode: 0o600 });
+    const result = await runServerWithConfigArg('catalog.json', { root: dir, cwd: dir });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /must be an absolute path/);
+    assert.equal(result.output.includes('"event":"listening"'), false);
+  });
+
+  test('an absolute path outside the configured root is refused', async () => {
+    const root = tempRoot();
+    const elsewhere = tempRoot();
+    const outside = join(elsewhere, 'catalog.json');
+    writeFileSync(outside, body, { mode: 0o600 });
+    const result = await runServerWithConfigArg(outside, { root });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /is outside/);
+    assert.equal(result.output.includes('"event":"listening"'), false);
+  });
+
+  test('a symlink inside the root that escapes it is refused after resolution', async () => {
+    const root = tempRoot();
+    const elsewhere = tempRoot();
+    const outside = join(elsewhere, 'catalog.json');
+    writeFileSync(outside, body, { mode: 0o600 });
+    const link = join(root, 'catalog.json');
+    symlinkSync(outside, link);
+    const result = await runServerWithConfigArg(link, { root });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /is outside/);
+    assert.equal(result.output.includes('"event":"listening"'), false);
+  });
+
+  test('a config over the size bound is refused before parsing', async () => {
+    const root = tempRoot();
+    const oversized = join(root, 'catalog.json');
+    // Valid JSON, but far above the 256 KiB bound.
+    writeFileSync(oversized, `{"pad":"${'x'.repeat(300000)}"}`, { mode: 0o600 });
+    const result = await runServerWithConfigArg(oversized, { root });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /larger than/);
+    assert.equal(result.output.includes('"event":"listening"'), false);
   });
 });

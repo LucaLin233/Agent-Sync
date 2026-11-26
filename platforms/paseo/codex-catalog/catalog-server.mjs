@@ -18,7 +18,8 @@
 // Usage: node catalog-server.mjs [--config /path/to/catalog.json]
 //        CATALOG_CONFIG=/path/to/catalog.json node catalog-server.mjs
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, resolve, sep } from 'node:path';
 
 const GENERIC_INSTRUCTIONS =
   'You are a coding agent. Work directly in the shared workspace with the user, follow the client tool instructions and repository conventions.';
@@ -219,12 +220,61 @@ function normalizeRoute(path, raw, limits) {
   return route;
 }
 
+// The config file is named on the command line, so it is the one place where an
+// operator-supplied path reaches the filesystem. Two boundaries keep it honest:
+// the path must be absolute, and after symlink resolution it must sit inside
+// CONFIG_ROOT — a stray or injected argument cannot make the adapter read an
+// unrelated file. The root defaults to the documented deployment location and
+// is overridable for other layouts; the file itself must be a regular file of
+// bounded size, opened O_NOFOLLOW so the final component cannot be swapped for
+// a symlink between the check and the read.
+const CONFIG_ROOT = resolve(process.env.CATALOG_CONFIG_ROOT || '/etc/codex-catalog');
+const CONFIG_MAX_BYTES = 262144;
+
+function resolveConfigPath(configPath) {
+  if (typeof configPath !== 'string' || configPath === '') {
+    fatal('config: no path given; use --config or CATALOG_CONFIG');
+  }
+  if (!isAbsolute(configPath)) {
+    fatal(`config: ${configPath} must be an absolute path`);
+  }
+  let resolved;
+  try {
+    resolved = realpathSync(configPath);
+  } catch (error) {
+    fatal(`cannot read ${configPath}: ${error.code || 'unresolvable path'}`);
+  }
+  if (!resolved.startsWith(CONFIG_ROOT + sep)) {
+    fatal(`config: ${configPath} is outside ${CONFIG_ROOT}`);
+  }
+  return resolved;
+}
+
+function readConfigText(configPath) {
+  const resolved = resolveConfigPath(configPath);
+  let fd;
+  try {
+    fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = fstatSync(fd);
+    if (!info.isFile()) fatal(`config: ${configPath} is not a regular file`);
+    if (info.size > CONFIG_MAX_BYTES) {
+      fatal(`config: ${configPath} is larger than ${CONFIG_MAX_BYTES} bytes`);
+    }
+    return readFileSync(fd, 'utf8');
+  } catch (error) {
+    fatal(`cannot read ${configPath}: ${error.code || 'unreadable'}`);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 function loadConfig(configPath) {
+  const text = readConfigText(configPath);
   let raw;
   try {
-    raw = JSON.parse(readFileSync(configPath, 'utf8'));
-  } catch (error) {
-    fatal(`cannot read ${configPath}: ${error.code || 'parse error'}`);
+    raw = JSON.parse(text);
+  } catch {
+    fatal(`cannot read ${configPath}: parse error`);
   }
 
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fatal('config: expected an object');

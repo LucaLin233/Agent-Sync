@@ -12,38 +12,40 @@ describe('primary list and optional supplement error semantics', () => {
   // caller bearer, so it must share the primary origin.
   let gateway;
   let redirectTarget;
-  const behaviour = {};
+  // A Map, not an object keyed by the request path: the fixture can only
+  // dispatch to handlers that were registered here by name.
+  const behaviour = new Map();
 
   before(async () => {
     redirectTarget = await fixture((req, res) => json(res, { data: [{ id: 'hijacked-model' }] }));
     gateway = await fixture((req, res) => {
-      const handler = behaviour[req.url.split('?')[0]];
+      const handler = behaviour.get(req.url.split('?')[0]);
       if (handler) return handler(req, res);
       json(res, { error: 'unexpected path' }, 404);
     });
     const ids = (list) => ({ data: list.map((id) => ({ id })) });
-    behaviour['/alpha/primary'] = (req, res) => json(res, ids(SUCCESS));
-    behaviour['/alpha/supplement'] = (req, res) =>
-      json(res, ids([...SUCCESS, 'text-embedding-3-small', 'unlisted-model']));
-    behaviour['/alpha/extras'] = (req, res) =>
-      json(res, ids(['extra-one', 'extra-two', 'extra-three']));
-    behaviour['/alpha/supplement-500'] = (req, res) => json(res, { error: 'boom' }, 500);
-    behaviour['/alpha/supplement-garbage'] = (req, res) => {
+    behaviour.set('/alpha/primary', (req, res) => json(res, ids(SUCCESS)));
+    behaviour.set('/alpha/supplement', (req, res) =>
+      json(res, ids([...SUCCESS, 'text-embedding-3-small', 'unlisted-model'])));
+    behaviour.set('/alpha/extras', (req, res) =>
+      json(res, ids(['extra-one', 'extra-two', 'extra-three'])));
+    behaviour.set('/alpha/supplement-500', (req, res) => json(res, { error: 'boom' }, 500));
+    behaviour.set('/alpha/supplement-garbage', (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('not-json');
-    };
-    behaviour['/alpha/supplement-slow'] = (req, res) =>
-      respondLater(res, 4000, ids(['text-embedding-3-small']));
-    behaviour['/alpha/supplement-redirect'] = (req, res) => {
+    });
+    behaviour.set('/alpha/supplement-slow', (req, res) =>
+      respondLater(res, 4000, ids(['text-embedding-3-small'])));
+    behaviour.set('/alpha/supplement-redirect', (req, res) => {
       res.writeHead(302, { location: `${redirectTarget.url}/steal` });
       res.end();
-    };
-    behaviour['/alpha/primary-500'] = (req, res) => json(res, { error: 'boom' }, 500);
-    behaviour['/alpha/primary-401'] = (req, res) => json(res, { error: 'nope' }, 401);
-    behaviour['/alpha/primary-garbage'] = (req, res) => {
+    });
+    behaviour.set('/alpha/primary-500', (req, res) => json(res, { error: 'boom' }, 500));
+    behaviour.set('/alpha/primary-401', (req, res) => json(res, { error: 'nope' }, 401));
+    behaviour.set('/alpha/primary-garbage', (req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end('not-json');
-    };
+    });
   });
 
   after(async () => {

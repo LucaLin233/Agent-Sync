@@ -26,6 +26,8 @@ Codex 允许 provider 用 `model_catalog_url` 拉取模型清单，但要求条�
 
 ## 配置字段
 
+配置文件的路径由启动参数给出，因此有明确的输入边界：必须是**绝对路径**，解析软链后必须位于 `CATALOG_CONFIG_ROOT`（默认 `/etc/codex-catalog`，可用同名环境变量改成部署自己的目录）之内；必须是常规文件、不超过 256 KiB，且读取时对最后一段使用 `O_NOFOLLOW`，防止检查后把文件换成软链。越界、相对路径、目录或超限都在启动时以退出码 2 拒绝。
+
 完整样例见 [`catalog.example.json`](catalog.example.json)。样例里的 `baseCatalog` 路径只作示意，启动前要换成目标机器上真实存在的官方 `models.json`，或删掉该字段。未知字段一律在启动时拒绝（退出码 2），不会悄悄忽略，以免拼写错误看起来「生效」。
 
 | 字段 | 必填 | 说明 |
@@ -120,6 +122,15 @@ node /opt/codex-catalog/catalog-server.mjs --config /etc/codex-catalog/catalog.j
 ```
 
 也可用环境变量指定配置：`CATALOG_CONFIG=/etc/codex-catalog/catalog.json node catalog-server.mjs`。监听地址与端口来自配置，不读取命令行参数。
+
+配置不必放在默认目录；把 `CATALOG_CONFIG_ROOT` 指向它所在目录即可（该值本身也会被规范化为绝对路径）：
+
+```sh
+CATALOG_CONFIG_ROOT=/srv/codex-catalog \
+CATALOG_CONFIG=/srv/codex-catalog/catalog.json node /opt/codex-catalog/catalog-server.mjs
+```
+
+`CATALOG_CONFIG_ROOT` 只约束**配置文件自身**的读取位置，不影响 `baseCatalog`、上游 URL 或任何出站请求。相对路径会被拒绝，因此 systemd 单元里务必写绝对路径；工作目录不参与解析。
 
 systemd 单元示例（本机专用，`ProtectSystem` 等按目标环境核对）：
 
