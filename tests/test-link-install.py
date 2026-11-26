@@ -777,10 +777,10 @@ module.main(sys.argv[2:])
             gateways.setdefault(gateway, set()).add(runtime)
             if runtime == "codex":
                 self.assertIn('model_provider="%s"' % gateway, fragment["command"])
-                self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/codex-home"})
+                self.assertEqual(fragment["env"], {"CODEX_HOME": "/home/example/agent/codex-home"})
             else:
                 self.assertEqual(fragment["env"], {
-                    "CLAUDE_CONFIG_DIR": "/home/example/" + provider_id,
+                    "CLAUDE_CONFIG_DIR": "/home/example/agent/claude-home",
                     "ANTHROPIC_BASE_URL": "https://" + gateway + ".example.invalid",
                 })
         self.assertTrue(gateways)

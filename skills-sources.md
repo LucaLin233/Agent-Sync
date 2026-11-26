@@ -209,7 +209,7 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## Paseo 官方原版配置
 
-`platforms/paseo/config.example.json` 与 `platforms/paseo/README.md` 只使用 Paseo v0.17.1 固定提交 `043f0995d4d7e91ab12f3eecef1afce055a81972` 的官方 Profile、provider 和 MCP 接口，不复制或分发上游代码，不包含服务端补丁、插件或 wrapper；示例不含 `daemon.appendSystemPrompt`，该字段属 Codex 单端显式模式的私人配置，`trim()` 行为按 v0.17.4 复核。Ultrafast 依 Codex 模型目录声明：官方原版模拟实测已证 `model_catalog_json` 可添加该档位，GDR 的 3 条请求均发出 `ultrafast`；宿主两个上游目前各自已有 `model_catalog_url`，这是通用机制，现场具体 URL/路径不写入仓库。
+`platforms/paseo/config.example.json` 与 `platforms/paseo/README.md` 只使用 Paseo v0.17.1 固定提交 `043f0995d4d7e91ab12f3eecef1afce055a81972` 的官方 Profile、provider 和 MCP 接口，不复制或分发上游代码，不包含服务端补丁、插件或 wrapper；示例不含 `daemon.appendSystemPrompt`，该字段属 Codex 单端显式模式的私人配置，`trim()` 行为按 v0.17.4 复核。「家目录布局」中钩子写入、Claude 会话定位与自带 skills 路径按 v0.17.4 标签的 `agent-hook-installer.ts`、`providers/claude/project-dir.ts`、`orchestration-skills/internal/paths.ts` 核对，只引用不复制。Ultrafast 依 Codex 模型目录声明：官方原版模拟实测已证 `model_catalog_json` 可添加该档位，GDR 的 3 条请求均发出 `ultrafast`；宿主两个上游目前各自已有 `model_catalog_url`，这是通用机制，现场具体 URL/路径不写入仓库。
 
 ## 已移除与退役的来源
 

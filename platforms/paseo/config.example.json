@@ -66,13 +66,13 @@
         "extends": "codex",
         "label": "Codex · CCHP",
         "command": ["codex", "-c", "model_provider=\"cchp\""],
-        "env": {"CODEX_HOME": "/home/example/codex-home"}
+        "env": {"CODEX_HOME": "/home/example/agent/codex-home"}
       },
       "claude-cchp": {
         "extends": "claude",
         "label": "Claude Code · CCHP",
         "env": {
-          "CLAUDE_CONFIG_DIR": "/home/example/claude-cchp",
+          "CLAUDE_CONFIG_DIR": "/home/example/agent/claude-home",
           "ANTHROPIC_BASE_URL": "https://cchp.example.invalid"
         }
       },
@@ -80,13 +80,13 @@
         "extends": "codex",
         "label": "Codex · CCH",
         "command": ["codex", "-c", "model_provider=\"cch\""],
-        "env": {"CODEX_HOME": "/home/example/codex-home"}
+        "env": {"CODEX_HOME": "/home/example/agent/codex-home"}
       },
       "claude-cch": {
         "extends": "claude",
         "label": "Claude Code · CCH",
         "env": {
-          "CLAUDE_CONFIG_DIR": "/home/example/claude-cch",
+          "CLAUDE_CONFIG_DIR": "/home/example/agent/claude-home",
           "ANTHROPIC_BASE_URL": "https://cch.example.invalid"
         }
       },
