@@ -31,6 +31,9 @@ agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/
 - 交互 shell 也须导出这三个变量，直接运行的 CLI 与 daemon 使用相同目录。未设置 `PASEO_HOME` 时，Paseo CLI 按 HOME 下的 `.paseo` 查找 daemon 并在其中写客户端标识，连不到 agent 根下的 daemon。
 - HOME 下被固定使用的目录统一链接到 agent 根，不改程序：`.claude` 链接到 `claude-home`；`.codex` 链接到 `codex-home`（旧 Codex 副本清理与未带 `CODEX_HOME` 启动的 Codex 都落到同一目录）；`.agents`、`.gemini` 链接到 `agents-home`、`gemini-home`（Paseo 写入自带 skills，Codex 读取 `.agents/skills`）；`.paseo` 链接到 `paseo-home`。最后一项使未设置 `PASEO_HOME` 的 CLI 也连到同一 daemon，并让 [中文标题插件](../../tools/paseo-chinese-titles/README.md) 的状态随 `paseo-home` 存放：该插件刻意只把 `PASEO_HOME` 当哈希命名空间、不当路径（避免 CodeQL 路径注入告警），状态固定在 HOME 下 `.paseo/plugin-data/paseo-chinese-titles/daemons/<哈希>/`，链接后插件代码与命名空间均不变，前提是 daemon 的 `PASEO_HOME` 字符串保持不变；改写法（如改用 HOME 下 `.paseo`、增减尾斜杠）或从缺省切换时，命名空间随之改变，按插件 README 的迁移步骤处理。HOME 下原有的 `.paseo` 若含另一 daemon 的配置或数据，先核对再处理，不直接覆盖 `paseo-home` 中的同名文件。
 - 两组共用一个 `CLAUDE_CONFIG_DIR` 后，其中 `settings.json` 的 `env` 不写 `ANTHROPIC_BASE_URL` 或鉴权变量，网关和鉴权只由各 provider 的启动环境提供，避免两组打到同一网关。
+- Claude Code 的自动记忆集中放在 agent 根下的 `memory`：在 `CLAUDE_CONFIG_DIR/settings.json` 用 `autoMemoryDirectory` 指向它，所有会话共用一份（偏好与反馈）；Claude Code 2.1.332 实测该设置对新会话生效，升级后复核。该目录与 Codex 自带记忆一样属官方程序数据，不手工改动，也不作为 LUNO 经验日志。
+- 自动压缩由 `settings.json` 的 `autoCompactWindow`（不小于 100000 的 token 数，或 `auto`）控制；程序先扣除最多 2 万的输出预留，实际触发点约为配置值减 2 万（2.1.332 实测，配置 250000 时有效窗口 230000）。这是用户配置，规则安装器不管理。
+- 包装脚本只给 `CLAUDE_CONFIG_DIR` 一个缺省值，生效的主设置是 daemon 的 systemd drop-in 与交互 shell 的导出；三处值必须一致。
 
 迁移既有目录时先停用相关会话，按原样复制到新位置并核对。由两个 Claude 配置目录合为一个时，逐项核对 `settings.json`、`.claude.json` 与登录态，有冲突交负责人取舍，`projects/` 按会话目录合并。改名 HOME 下的 `.paseo` 前先停止 daemon（至少先停用中文标题插件），把插件状态移入 `paseo-home/plugin-data/paseo-chinese-titles/daemons/<哈希>/` 并核对文件。HOME 下原有的 `.claude`、`.codex`、`.agents`、`.gemini`、`.paseo` 先改名保留作回退，再建立指向 agent 根下对应目录的链接，然后切换环境、重启 daemon，并重新启用插件。
 
