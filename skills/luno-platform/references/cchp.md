@@ -5,9 +5,9 @@ CCHP 任务先完整核读下列来源的官方技能入口和命中资源。官
 ## 现查资料
 
 - 官方技能原文先用当前环境的 `cchp version` 核 CLI 与内置规范版本，再查 `cchp skill show --help`。支持时用 `cchp skill show` 完整读取内置入口，按入口的相对路径以 `cchp skill show --file <相对路径>` 读取命中资源。具体命令与参数查该子命令的 `--help`，本机内置操作契约查 `cchp schema <operationId>`。读取原文不安装技能。
-- CLI 缺失、版本无法核实、子命令不支持、原文不全或不能安全执行时，已核本机 CLI 版本的，从 [CCHP 官方 CLI 发行页](https://github.com/CCH-HQ/cchp-cli/releases) 定位匹配发行，核对标签对应的提交后读取该提交的官方技能入口及命中资源。无可核本机 CLI 版本时，直接完整读取 [v0.2.1 固定提交的官方技能入口](https://raw.githubusercontent.com/CCH-HQ/cchp-cli/28dcf3c3ae445aeb6240a211359360c475c9e15c/skills/cchp/SKILL.md)，并沿该入口的相对链接读取同一提交的命中资源。远端原文仅作官方资料，本机命令、内置契约和实例状态须分别核实。所需原文仍不可得时，只停依赖项。
+- CLI 缺失、版本无法核实、子命令不支持、原文不全或不能安全执行时，已核本机 CLI 版本的，从 [CCHP 官方 CLI 发行页](https://github.com/CCH-HQ/cchp-cli/releases) 定位匹配发行，核对标签对应的提交后读取该提交的官方技能入口及命中资源。无可核本机 CLI 版本时，直接完整读取 [v0.2.2 固定提交的官方技能入口](https://raw.githubusercontent.com/CCH-HQ/cchp-cli/8c7c96776bdc52547a4cfd7a07fb1e831815d097/skills/cchp/SKILL.md)，并沿该入口的相对链接读取同一提交的命中资源。远端原文仅作官方资料，本机命令、内置契约和实例状态须分别核实。所需原文仍不可得时，只停依赖项。
 - 产品行为查[官网文档](https://cch-plus.com/zh-CN/docs/cli)与[发布说明](https://cch-plus.com/zh-CN/release-notes)。在本端安全和缓存写入授权允许时，可用 `cchp docs` 检索或阅读，引用公开原文。其他情形直读官网。只向官方公开站点发送公开术语或已知公开 URL，不得外发秘密、实例地址、内部 ID、内部字段值或请求内容。公开查询不运行 `status` 或 `login`。
-- CLI 资料查询从最外层使用无凭据的最小白名单，不读保存登录态。对有启动探测的版本，显式设 `CCHP_CREDENTIAL_STORE=file` 以跳过钥匙串探测。2026-11-23 在 Linux amd64 实测，不提供 `HOME` 或 `XDG_*` 时，显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 后，v0.2.0 与 v0.2.1 的 `version`、`schema` 均成功，v0.2.1 缺前两项会启动即报找不到配置或缓存目录。v0.2.1 的纯帮助、`skill show` 及 5 个引用文件也已在无凭据模式核对。只对已确认无需真实目录的离线命令使用 `/dev/null`，`docs`、`cache` 和实际更新按各自目录、写入及授权要求处理。
+- CLI 资料查询从最外层使用无凭据的最小白名单，不读保存登录态。对有启动探测的版本，显式设 `CCHP_CREDENTIAL_STORE=file` 以跳过钥匙串探测。2026-11-23 在 Linux amd64 实测，不提供 `HOME` 或 `XDG_*` 时，显式设 `CCHP_CONFIG_DIR=/dev/null`、`CCHP_CACHE_DIR=/dev/null` 后，v0.2.0 与 v0.2.1 的 `version`、`schema` 均成功，v0.2.1 缺前两项会启动即报找不到配置或缓存目录。v0.2.1 的纯帮助、`skill show` 及 5 个引用文件也已在无凭据模式核对。2026-11-27 同法核对了 v0.2.2 的 `version`、`schema`、纯帮助、`skill show` 及 5 个引用文件。只对已确认无需真实目录的离线命令使用 `/dev/null`，`docs`、`cache` 和实际更新按各自目录、写入及授权要求处理。
 - `update --check --json` 只做公开版本检查，实际执行更新仍需授权。v0.2.1 在本机 direct 安装、2026-11-23 Linux amd64 实测退出 0，`check_only` 为 true、`updated` 为 false；`install_method` 为 `direct` 仅是该安装端的识别结果，不外推到其他安装方式。
 - 实例版本、权限、生效值及其来源，只能在当次授权范围内取证；官网、发布说明和本机 schema 均不证明实例状态。
 
@@ -27,7 +27,9 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 
 ## 部署与升级
 
-Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installation/docker-compose)执行，属主与运行角色保持隔离：`migrate` 是独立的一次性服务（`entrypoint=/usr/local/bin/migrate`、`command=apply`），用数据库属主密码执行迁移并重设受限运行角色的密码；`cchp` 只用该受限角色连接数据库，不把迁移写进 `cchp` 的启动命令。升级前先备份数据库和部署目录的 `.env`（含密钥，放受控位置、不展示内容），记下当前版本；更新 `compose.yml` 时只向 `.env` 补新增变量，不用新样例覆盖原文件，随后 `docker compose pull && docker compose stop cchp && docker compose up -d`，确认 `migrate` 为 `Exited (0)`、`cchp` 为 `healthy`。迁移只向前执行，不能回退。
+Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installation/docker-compose)执行，属主与运行角色保持隔离：`migrate` 是独立的一次性服务（`entrypoint=/usr/local/bin/migrate`、`command=apply`），用数据库属主密码执行迁移并重设受限运行角色的密码；`cchp` 只用该受限角色连接数据库，不把迁移写进 `cchp` 的启动命令。升级前先备份数据库和部署目录的 `.env`（含密钥，放受控位置、不展示内容），记下当前版本；更新 `compose.yml` 时只向 `.env` 补新增变量，不用新样例覆盖原文件，按目标版本发布说明和现场拓扑确定升级顺序，符合官方单机流程时沿用 `docker compose pull && docker compose stop cchp && docker compose up -d`。确认 `migrate` 为 `Exited (0)`、`cchp` 为 `healthy`。迁移只向前执行。旧版与迁移后的数据库不兼容时，按官方流程用升级前的备份恢复。
+
+升级到 [v1.0.17](https://cch-plus.com/zh-CN/release-notes/1.0.17) 时，同批部署 `plugin-runner`（Compose 为 `cchp-plugin-runner`）。`media` 可选，未部署时图片原样转发。分离部署时 worker 不晚于网关升级。升级前核对旧插件依赖。自动执行的数据迁移会退役旧插件，移除相关覆写、设置、任务及自定义角色和管理令牌中的旧插件权限。`migrate contract` 会删除旧表并提高兼容性下限，须获授权且所有实例已升级到目标版本后才能执行。若错序导致计费调整失败，待所有 worker 升级后先用 `gateway billing usage-adjustments` 预览，获准补记时才加 `--apply`。
 
 ## 本组织写入约定
 
@@ -38,8 +40,8 @@ Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installat
 - **名称与优先级**：key 名称用 `厂家-服务商`，不带数字；优先级 = 用户确定的名次 × 10 + 厂家位（DeepSeek=1、OpenAI=2、Claude=3、Gemini=4，名次从 1 开始）。增减服务商导致名次变化时，在授权内整体重排。这不证明调度行为。
 - **倍率**：新建 provider 的 `cost_multiplier_ppm` 设为 1000000（1.0），不回改已有 provider；人工倍率只在 key 层调整。固定 key 手设倍率时保留现行 `upstream_probe.ratio.key_denylist` 防覆盖策略；其他方式及名单优先关系按当次契约核实，不推定唯一办法。
 - **会话复用**：按实时优先级，优先级 1–19 的 key 在 `provider_key` 作用域显式设本级 `session.reuse_enabled=true`，其余 key（含停用但未撤销的 key）显式设本级 `false`；撤销的 key 跳过。两类都写明确布尔值，不移除覆盖，不把无本级覆盖当作已关闭。写后回读本级值与生效值：两项均正确即一致；本级被上级阻断而任一项不符，或本级已正确但生效值不符，则报告人工处理，不强行改写；先核 provider × key 的组合，不假定下级 true 能抵消上级 false。
-- **密钥管理入口**：控制台在供应商密钥的新增/编辑对话框设置会话复用（新增时展开 **更多设置** → **会话复用**，编辑时在 **会话复用** 分区，可选 **开启 / 关闭 / 继承上层** [v1.0.16+]），见[供应商密钥](https://cch-plus.com/zh-CN/docs/providers/keys#manage)。CLI 0.2.1（内置规范 v1.0.16）的 `updateProviderKey` 请求体没有会话复用字段；该项用 `getConfigM2Page` 核对、`saveSystemConfig` 写入（scope=`provider_key:<id>`，body 的 `values` 写明确布尔），动手前按当次 `cchp schema` 复核 `saveSystemConfig` 与 `getConfigM2Page` 契约。
-- **测活**：provider 有启用 key 后先查既有任务，没有才建一条，已有就维护。每小时一次（`0 * * * *`）、enabled、不通知；只含其下已启用且符合接口状态的 key。模型取 `getProviderKeyLivenessContexts` 派生默认值，不自行指定模型或 endpoint；契约或派生结果不给模型就停止该项。占位 key 替换真实秘密并启用后才加入；key 增减、启停或撤销后同步 targets，回读任务及调度。
+- **密钥管理入口**：控制台在供应商密钥的新增/编辑对话框设置会话复用（新增时展开 **更多设置** → **会话复用**，编辑时在 **会话复用** 分区，可选 **开启 / 关闭 / 继承上层** [v1.0.16+]），见[供应商密钥](https://cch-plus.com/zh-CN/docs/providers/keys#manage)。CLI 0.2.2（内置规范 v1.0.17）的 `updateProviderKey` 请求体仍无会话复用字段；该项用 `getConfigM2Page` 核对、`saveSystemConfig` 写入（scope=`provider_key:<id>`，body 的 `values` 写明确布尔），动手前按当次 `cchp schema` 复核 `saveSystemConfig` 与 `getConfigM2Page` 契约。
+- **供应商定时测活（v1.0.17）**：升级会转换旧测活任务和设置。先用 `listProviderTestTasks` 查既有及迁移任务，再用 `getProviderTestTask` 核对详情，只维护归属已确认的任务。供应商有合格的启用 key 且确认没有对应任务时，才建一条。用 `listProviderTestKeyContexts` 查看各 key 的默认端点、模型和模板，再用 `listProviderTestTargetCandidates` 核实共同可用的模板、模型和目标资格。`createProviderTestTask` / `updateProviderTestTask` 均须提供 `name`、`cron`、`templateRef`、`modelName`、`prompts`，每条任务只用一个模型。每小时一次（`0 * * * *`），保持启用和不通知，用显式目标模式和 `selectedKeyIds` 选入该供应商下全部合格的启用 key。占位 key 替换真实秘密并启用后才加入。key 增减、启停或撤销后同步目标，回读任务及调度。所有合格目标之间没有共同可用的模板和模型组合、任务归属不明或出现新的取舍时，报告并停止相关写入。不得自行拆任务、扩大目标、启用失败自动停用或立即运行测试。`upstream_probe` 单独用于余额与倍率探测。 [CLI 契约变更](https://github.com/CCH-HQ/cchp-cli/pull/14)
 - **撤销删除的引用清理**：只移除本次 key 在 `upstream_probe.ratio.key_denylist` 的 ID，或本次 provider 在 ratio/balance 的 `provider_denylist` 中的 ID，不清理历史失效项。两类名单不混用。
 
 ## 用量与配额
@@ -52,7 +54,7 @@ Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installat
 
 逐键核合并/替换和移除覆盖的语义，不把生效值写成本地覆盖；恢复后核值和 origin，值等于默认不证明覆盖消失。替换数组前完整读取，在现值上只增删授权项、去重保留其余；提交前重读，有并发变化就重算，写后比对全数组。无法完整读取或无并发保护就不做依赖写入。
 
-配置回读不等于转发可用。用当次获准的调用方发最小真实请求，以 requestId 关联用量及尝试链，核目标 provider、最终模型、状态和计费，排除失败后被其他 provider 接管。没有调用授权或链路证据时只报告「配置已回读、链路未验证」。允许新旧并存的替换先建新并验证，再按授权停旧；验证失败保留旧路径。安全事件按当次隔离授权，不机械等待验证。
+配置回读不等于转发可用。用当次获准的调用方发最小真实请求，以 requestId 关联用量及尝试链，用 `delivered` 核对响应是否由目标 provider 和预期模型交付，并核请求状态。另按 `billed`、`costUnits` 核对尝试计费。v1.0.17 的竞速落败尝试可能在响应交付后才计费。没有调用授权或链路证据时只报告「配置已回读、链路未验证」。允许新旧并存的替换先建新并验证，再按授权停旧；验证失败保留旧路径。安全事件按当次隔离授权，不机械等待验证。
 
 ## 本端经验边界
 
