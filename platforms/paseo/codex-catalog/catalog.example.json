@@ -1,0 +1,142 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 18923
+  },
+  "baseCatalog": "/opt/codex-catalog/base-models.json",
+  "limits": {
+    "upstreamTimeoutMs": 4000,
+    "metadataTimeoutMs": 1200,
+    "supplementTimeoutMs": 2500,
+    "totalBudgetMs": 4500,
+    "maxBodyBytes": 524288,
+    "maxMetadataBytes": 131072,
+    "maxModels": 200
+  },
+  "routes": {
+    "/alpha/v1/models": {
+      "gatewayLabel": "Alpha",
+      "upstream": "https://alpha.example.invalid/v1/models",
+      "inheritBaseTiers": true,
+      "metadata": {
+        "url": "https://alpha-public.example.invalid/api/public/catalog/models"
+      },
+      "models": {
+        "gpt-6.2-sol": {
+          "serviceTiers": [
+            {
+              "id": "priority",
+              "name": "Fast",
+              "description": "Faster responses"
+            },
+            {
+              "id": "ultrafast",
+              "name": "Ultrafast",
+              "description": "Fastest available responses"
+            }
+          ]
+        },
+        "gpt-6.2-astra": {
+          "serviceTiers": [
+            {
+              "id": "priority",
+              "name": "Fast",
+              "description": "Faster responses"
+            },
+            {
+              "id": "ultrafast",
+              "name": "Ultrafast",
+              "description": "Fastest available responses"
+            }
+          ]
+        },
+        "deepseek-flash": {
+          "reasoningLevels": [
+            {
+              "effort": "none",
+              "description": "No extra reasoning; fastest responses"
+            },
+            {
+              "effort": "low",
+              "description": "Fast responses with lighter reasoning"
+            },
+            {
+              "effort": "high",
+              "description": "Greater reasoning depth for complex problems"
+            },
+            {
+              "effort": "max",
+              "description": "Maximum reasoning depth for the hardest problems"
+            }
+          ],
+          "defaultReasoningLevel": "none"
+        }
+      }
+    },
+    "/beta/v1/models": {
+      "gatewayLabel": "Beta",
+      "upstream": "https://beta.example.invalid/v1/responses/models",
+      "inheritBaseTiers": false,
+      "supplement": {
+        "url": "https://beta.example.invalid/v1/models?api_type=openai",
+        "allowIds": [
+          "text-embedding-3-small"
+        ],
+        "modelDescriptions": {
+          "text-embedding-3-small": "Text embedding model listed by the Beta gateway; returns embeddings, not chat completions."
+        }
+      },
+      "models": {
+        "gpt-6.2-sol": {
+          "serviceTiers": [
+            {
+              "id": "priority",
+              "name": "Fast",
+              "description": "Faster responses"
+            },
+            {
+              "id": "ultrafast",
+              "name": "Ultrafast",
+              "description": "Fastest available responses"
+            }
+          ]
+        },
+        "gpt-6.2-astra": {
+          "serviceTiers": [
+            {
+              "id": "priority",
+              "name": "Fast",
+              "description": "Faster responses"
+            },
+            {
+              "id": "ultrafast",
+              "name": "Ultrafast",
+              "description": "Fastest available responses"
+            }
+          ]
+        },
+        "deepseek-flash": {
+          "reasoningLevels": [
+            {
+              "effort": "none",
+              "description": "No extra reasoning; fastest responses"
+            },
+            {
+              "effort": "low",
+              "description": "Fast responses with lighter reasoning"
+            },
+            {
+              "effort": "high",
+              "description": "Greater reasoning depth for complex problems"
+            },
+            {
+              "effort": "max",
+              "description": "Maximum reasoning depth for the hardest problems"
+            }
+          ],
+          "defaultReasoningLevel": "none"
+        }
+      }
+    }
+  }
+}

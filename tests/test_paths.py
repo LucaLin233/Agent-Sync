@@ -43,6 +43,8 @@ PATHS_RULES = (
      ('group', 'identity'), '署名机械检查器、其测试与署名规则 → identity'),
     (('tools/minis-verify.py', 'tests/test-minis-verify.py'),
      ('case', 'test-minis-verify.py'), 'Minis 本端验收工具或工具测试 → minis-verify'),
+    (('platforms/paseo/codex-catalog/*',),
+     ('case', 'catalog-server.mjs'), '目录适配器源码、配置样例、说明或测试 → catalog'),
     (('tools/body_contract.py', 'tests/test-body-contract.py'),
      ('case', 'test-minis-verify.py'), '正文契约变更 → Minis 验收消费者'),
     (('tools/sync-targets.json',),
@@ -58,6 +60,8 @@ PATHS_RULES = (
      ('group', 'cchp'), '运行器、选路表或 CI 测试 workflow → cchp 消费者'),
     (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
      ('case', 'test-paseo-observatory.py'), '运行器、选路表或 CI 测试 workflow → observatory 消费者'),
+    (('tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
+     ('case', 'catalog-server.mjs'), '运行器、选路表或 CI 测试 workflow → catalog 消费者'),
     # 拆出的运行器行为回归与按需包内校验入口：各自只由自身、运行器/选路表/workflow 变更命中。
     (('tests/test-runner.sh',),
      ('case', 'test-runner.sh'), '运行器、信号与选路回归 → runner'),

@@ -304,9 +304,14 @@ REAL_CASES=[l.split('|') for l in RUNNER[start+7:end-2].splitlines() if l]
 
 # 登记一致性：tests/ 下每个测试入口都在用例表里，且每条选路规则都能选到入口
 names={c[0] for c in REAL_CASES};groups={c[1] for c in REAL_CASES}
+check('用例表入口名合法',all(re.fullmatch(r'[A-Za-z0-9_.-]+',n) for n in names) and not any('/' in n for n in names),str(sorted(names)))
 entries={f.name for f in (ROOT/'tests').iterdir() if re.match(r'test-.*\.(py|sh)$',f.name)}
 check('tests/ 下测试入口全部登记',entries<=names,str(sorted(entries-names)))
-check('用例表入口文件均存在',all((ROOT/'tests'/n).is_file() or (ROOT/'tools'/n).is_file() for n in names))
+# 入口可落在 tests/、tools/ 或 platforms/<平台>/<组件>/（如目录适配器的源码即测试对象）。
+def entry_file(n):
+    return next((p for p in (ROOT/'tests'/n,ROOT/'tools'/n,*ROOT.glob('platforms/*/*/'+n)) if p.is_file()),None)
+check('用例表入口文件均存在',all(entry_file(n) for n in names),
+      str([n for n in names if not entry_file(n)]))
 spec2=importlib.util.spec_from_file_location('paths',ROOT/'tests/test_paths.py')
 P=importlib.util.module_from_spec(spec2);spec2.loader.exec_module(P)
 bad=[s for _,s,_ in P.PATHS_RULES if not (s==('full',) or (s[0]=='group' and s[1] in groups) or (s[0]=='case' and s[1] in names))]

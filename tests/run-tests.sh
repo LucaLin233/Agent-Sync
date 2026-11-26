@@ -24,6 +24,7 @@
 #   脱敏实现与读取模板 → privacy
 #   署名机械检查器、其测试与署名规则 → identity
 #   Minis 本端验收工具或工具测试 → minis-verify
+#   目录适配器源码、配置样例、说明或测试 → catalog
 #   正文契约变更 → Minis 验收消费者
 #   对象登记变更 → Minis 验收消费者
 #   运行器、选路表或 CI 测试 workflow → auth 消费者
@@ -31,6 +32,7 @@
 #   运行器、选路表或 CI 测试 workflow → minis-verify 消费者
 #   运行器、选路表或 CI 测试 workflow → cchp 消费者
 #   运行器、选路表或 CI 测试 workflow → observatory 消费者
+#   运行器、选路表或 CI 测试 workflow → catalog 消费者
 #   运行器、信号与选路回归 → runner
 #   按需包内校验（结构守卫＋技能包校验）与运行器变更 → 包内校验
 #   运行器、选路表或 CI 测试 workflow → runner 消费者
@@ -62,6 +64,7 @@ test-surge-scripts.py|surge|cd tests && python3 -B -m unittest -v test-surge-scr
 test-commit-identities.py|identity|cd tests && python3 -B -m unittest -v test-commit-identities|0
 test-minis-verify.py|minis-verify|cd tests && python3 -B -m unittest -v test-minis-verify|0
 test-link-install.py|host|cd tests && python3 -B -m unittest -v test-link-install|0
+catalog-server.mjs|catalog|node --test platforms/paseo/codex-catalog/test/*.test.mjs|0
 '
 
 mode=${1:-smoke}
@@ -386,18 +389,21 @@ def stop_own():
     return ok
 
 
-OBS_ENTRY = 'test-paseo-observatory.py'
+# CI 只在既有 observatory-node 步骤里解析一次 Node 绝对路径，按既有变量名传入；
+# 目录适配器复用同一个变量，不改 workflow，也不放宽白名单里其它变量。
+NODE_ENTRIES = ('test-paseo-observatory.py', 'catalog-server.mjs')
 
 
 def entry_env(name):
-    """只给观测台入口在白名单 PATH 前加一个本轮自建目录，里面仅有一个 node 软链。
+    """只给需要真实 Node 的入口在白名单 PATH 前加一个本轮自建目录，里面仅有一个 node 软链。
 
-    该入口需要真实 Node 跑 SDK 桥；受限 CI 的最小 PATH 里没有 node，故由工作流外层解析
-    绝对可执行路径后按名传入。这里不把调用方路径直接交给被测代码，而是核实是绝对常规可执行
-    文件后，在本轮独占 WORK 下建 700 目录并只放一个 node 软链，再前置到该入口的 PATH。
-    变量缺失或不可用时不加，用例照旧因解析不到 node 而失败，不跳过。其他入口用原白名单。
+    这类入口（观测台 SDK 桥、目录适配器）需要真实 Node；受限 CI 的最小 PATH 里没有 node，
+    故由工作流外层解析绝对可执行路径后按名传入。这里不把调用方路径直接交给被测代码，而是
+    核实是绝对常规可执行文件后，在本轮独占 WORK 下建 700 目录并只放一个 node 软链，再前置
+    到该入口的 PATH。变量缺失或不可用时不加，用例照旧因解析不到 node 而失败，不跳过。
+    其他入口用原白名单。
     """
-    if name != OBS_ENTRY:
+    if name not in NODE_ENTRIES:
         return child_env
     node = os.environ.get('OBSERVATORY_TEST_NODE') or ''
     if not os.path.isabs(node) or not os.path.isfile(node) or not os.access(node, os.X_OK):
