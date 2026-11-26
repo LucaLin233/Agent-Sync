@@ -995,6 +995,110 @@ module.main(sys.argv[2:])
         self.assertIn("registry_end_invalid_role_startup", [e["code"] for e in report["errors"]])
         self.assertEqual(self.snapshot(), before)
 
+    def enable_claude(self, present=True):
+        """夹具登记补 claude 端：prompt 用 claude-main 生成，skill 直接软链。"""
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            if obj["type"] == "prompt":
+                obj["ends"]["claude"] = {"present": present, "kind": "generated",
+                                         "paths": ["~/.claude/CLAUDE.md"], "renderer": "claude-main"}
+            elif obj["type"] == "skill" and obj["ends"]["codex"]["present"]:
+                obj["ends"]["claude"] = {"present": present, "kind": "link",
+                                         "paths": ["~/.claude/skills/" + obj["id"]]}
+            else:
+                obj["ends"]["claude"] = {"present": False}
+        registry_file.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
+
+    def claude_options(self):
+        return ("--home", str(self.home), "--ends", "claude", "--claude-home", str(self.home / "claude-home"))
+
+    def test_claude_end_installs_claude_md_and_skills_only_in_explicit_layout(self):
+        self.enable_claude()
+        options = self.claude_options()
+        claude_home = self.home / "claude-home"
+        # 默认全端不处理 claude：既不创建目录，也不要求 --claude-home。
+        self.assertEqual(self.call("--apply")[0], 0)
+        self.assertFalse(claude_home.exists())
+        self.assertFalse((self.home / ".claude").exists())
+        before = self.snapshot()
+        rc, report = self.call(*options)
+        self.assertEqual((rc, report["status"], report["claudeHome"]), (0, "planned", str(claude_home)))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.call(*options, "--check")[0], 1)
+        rc, report = self.call(*options, "--apply")
+        self.assertEqual((rc, report["status"]), (0, "completed"))
+        self.assertEqual(self.call(*options, "--check")[0], 0)
+        self.assertEqual((claude_home / "CLAUDE.md").read_bytes(), self.expected_role_startup())
+        self.assertEqual(os.readlink(claude_home / "CLAUDE.md"),
+                         str(self.home / ".luno/generated/claude/CLAUDE.md"))
+        self.assertNotIn(b"private global fixture", (claude_home / "CLAUDE.md").read_bytes())
+        registry = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        for obj in registry["objects"]:
+            if obj["type"] == "skill" and obj["ends"]["claude"]["present"]:
+                self.assertEqual(os.readlink(claude_home / "skills" / obj["id"]),
+                                 str((self.checkout / obj["source"]).parent))
+        rc, report = self.call(*options, "--apply")
+        self.assertEqual((rc, report["created"]), (0, []))
+
+    def test_claude_end_without_registry_key_is_absent_not_an_error(self):
+        # 旧登记没有 claude 键：显式选择该端只得到空计划，也不影响默认全端的严格校验。
+        before = self.snapshot()
+        rc, report = self.call(*self.claude_options(), "--apply")
+        self.assertEqual((rc, report["status"], report["actions"]), (0, "completed", []))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.call("--check")[0], 1)
+
+    def test_claude_layout_requires_selected_end_and_contained_root(self):
+        self.enable_claude()
+        inside = str(self.home / "claude-home")
+        cases = ((["--ends", "claude"], "invalid_claude_layout"),
+                 (["--claude-home", inside], "invalid_claude_layout"),
+                 (["--ends", "claude", "codex", "--claude-home", inside], "invalid_claude_layout"),
+                 (["--ends", "claude", "--claude-home", "relative"], "invalid_claude_layout"),
+                 (["--ends", "claude", "--claude-home", str(self.home)], "invalid_claude_layout"),
+                 (["--ends", "claude", "--claude-home", str(self.root / "outside")],
+                  "claude_home_outside_install_root"),
+                 (["--ends", "claude", "--claude-home", str(self.home / ".luno")],
+                  "claude_home_overlaps_managed_area"),
+                 (["--ends", "claude", "--claude-home", str(self.home / ".luno/generated/claude")],
+                  "claude_home_overlaps_managed_area"),
+                 (["--ends", "claude", "--claude-home", inside, "--codex-global-source",
+                   "paseo-append-system-prompt"], "codex_global_source_requires_codex_only"))
+        before = self.snapshot()
+        for options, expected in cases:
+            with self.subTest(options=options):
+                rc, report = self.call("--home", str(self.home), *options, "--apply")
+                self.assertEqual(rc, 2)
+                self.assertEqual(report["errors"][0]["code"], expected)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_claude_conflicts_stop_without_overwriting(self):
+        self.enable_claude()
+        options = self.claude_options()
+        claude_home = self.home / "claude-home"
+        claude_home.mkdir()
+        (claude_home / "CLAUDE.md").write_bytes(b"user instructions")
+        before = self.snapshot()
+        rc, report = self.call(*options, "--apply")
+        self.assertEqual(rc, 2)
+        self.assertIn({"code": "path_conflict", "path": str(claude_home / "CLAUDE.md")}, report["errors"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual((claude_home / "CLAUDE.md").read_bytes(), b"user instructions")
+
+    def test_claude_renderer_and_end_must_match(self):
+        self.enable_claude()
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        prompt = next(obj for obj in registry["objects"] if obj["type"] == "prompt")
+        prompt["ends"]["claude"]["renderer"] = "codex-main"
+        registry_file.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
+        before = self.snapshot()
+        rc, report = self.call(*self.claude_options(), "--apply")
+        self.assertEqual(rc, 2)
+        self.assertIn("registry_renderer_end_mismatch", [e["code"] for e in report["errors"]])
+        self.assertEqual(self.snapshot(), before)
+
 
 class NativeRoleTest(unittest.TestCase):
     """原生 Codex 两角色：TOML 字节、注册只读核对与只读准入；不读真实配置。"""

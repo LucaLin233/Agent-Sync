@@ -15,6 +15,9 @@ import tomllib
 import yaml
 
 ENDS = ("codex", "paseo")
+# claude 端是可选端：只在显式 --ends claude --claude-home 时处理；旧登记没有该键按缺位处理。
+CLAUDE_END = "claude"
+ALL_ENDS = ENDS + (CLAUDE_END,)
 CODEX_GLOBAL_SOURCES = ("agents-md", "paseo-append-system-prompt")
 ROLE_DESCRIPTIONS = {
     "lens": "LUNO 体系的 LENS：审查、规划、验收及所有领域的制稿与改稿。仅在负责人按 luno-core 派发时使用。",
@@ -110,6 +113,16 @@ def codex_destination(value, home, codex_home):
     raise InstallError("unsupported_native_codex_destination", value)
 
 
+def claude_destination(value, home, claude_home):
+    """claude 端只落在显式给出的 CLAUDE_CONFIG_DIR：~/.claude/X 映射为 claude_home/X。"""
+    home_path(value, home)
+    if claude_home is None:
+        raise InstallError("claude_home_required", value)
+    if value.startswith("~/.claude/"):
+        return claude_home / value[len("~/.claude/"):]
+    raise InstallError("unsupported_claude_destination", value)
+
+
 def git_bytes(checkout, *args):
     proc = subprocess.run(
         ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(checkout), *args],
@@ -173,6 +186,7 @@ def staging_residue(actions, tree):
 
 
 NATIVE_ROLE_RENDERER = "codex-role"
+CLAUDE_RENDERER = "claude-main"
 NATIVE_ROLE_KEYS = ("description", "config_file")
 
 
@@ -241,6 +255,11 @@ def render(obj, target, checkout, home, tree, read, codex_global_source="agents-
         text = "model = \"" + toml_string(model) + "\"\nmodel_reasoning_effort = \"" + toml_string(effort) \
                + "\"\ndeveloper_instructions = \"" + toml_string(instructions.decode("utf-8")) + "\"\n"
         return None, text.encode("utf-8")
+    if renderer == CLAUDE_RENDERER:
+        # Paseo Claude 会话：与 codex-main 的 paseo-append 模式同一角色启动段与共享提示词，
+        # GLOBAL 由 daemon 的 appendSystemPrompt 提供，不内嵌。
+        content = role_startup_text(text_bytes(source, read).decode("utf-8"), checkout, source).encode("utf-8")
+        return home / ".luno/generated/claude/CLAUDE.md", content
     if renderer == "codex-main":
         if codex_global_source == "paseo-append-system-prompt":
             content = text_bytes(source, read)
@@ -327,7 +346,7 @@ def duplicate_skills(home, names, tree):
 
 
 def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=None, priors=None,
-            codex_global_source="agents-md"):
+            codex_global_source="agents-md", claude_home=None):
     """baseline=True 只用于读取旧基线：整版没有宿主端键时才允许返回空动作。
 
     当前检出与预检目标都必须证明是完整登记的宿主版本；任一对象缺键或 present 非严格布尔即停止，
@@ -359,7 +378,9 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
                 continue  # 只可能是 baseline：整版没有宿主端键，按首装基线处理
             errors.append({"code": "registry_end_missing", "path": str(registry_path), "object": obj["id"]})
             continue
-        for end in ENDS:
+        for end in ALL_ENDS:
+            if end == CLAUDE_END and end not in object_ends:
+                continue  # 可选端：缺键即缺位，不当作登记错误
             target = object_ends[end]
             present = target.get("present") if isinstance(target, dict) else None
             if not isinstance(present, bool):
@@ -373,7 +394,12 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
                 continue
             if not present or end not in ends:
                 continue
+            if target.get("kind") == "generated" and (target.get("renderer") == CLAUDE_RENDERER) != (end == CLAUDE_END):
+                errors.append({"code": "registry_renderer_end_mismatch", "path": str(registry_path),
+                               "object": obj["id"], "end": end})
+                continue
             destinations = [codex_destination(p, home, codex_home) if end == "codex"
+                            else claude_destination(p, home, claude_home) if end == CLAUDE_END
                             else home_path(p, home) for p in target["paths"]]
             if target["kind"] == "generated":
                 if target["renderer"] == NATIVE_ROLE_RENDERER and (end != "codex" or codex_home is None):
@@ -518,9 +544,9 @@ def native_role_registration(tree, codex_home, actions):
 
 
 def plan(checkout, home, tree, read=Path.read_bytes, ends=ENDS, codex_home=None, priors=None,
-         codex_global_source="agents-md"):
+         codex_global_source="agents-md", claude_home=None):
     actions, errors = desired(checkout, home, tree, read, ends=ends, codex_home=codex_home, priors=priors,
-                              codex_global_source=codex_global_source)
+                              codex_global_source=codex_global_source, claude_home=claude_home)
     for action in actions:
         if action["kind"] == "link" and action["path"].name == "AGENTS.md":
             override = action["path"].with_name("AGENTS.override.md")
@@ -742,7 +768,7 @@ def git_blob_hash(data):
 
 
 def run_previous_check(checkout, home, codex_home, commit, blob, ends=("codex",),
-                       codex_global_source="agents-md"):
+                       codex_global_source="agents-md", claude_home=None):
     """用 O 自己的安装器字节在同一实际根只读执行 check，取真实旧动作投影。"""
     data = git_bytes(checkout, "show", commit + ":tools/link-install.py")
     if git_blob_hash(data) != blob:
@@ -760,6 +786,8 @@ def run_previous_check(checkout, home, codex_home, commit, blob, ends=("codex",)
             command.extend(["--codex-home", str(codex_home)])
         if codex_global_source != "agents-md":
             command.extend(["--codex-global-source", codex_global_source])
+        if claude_home is not None:
+            command.extend(["--claude-home", str(claude_home)])
         proc = subprocess.run(command + ["--check"], stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=120)
         return proc.returncode, json.loads(proc.stdout)
@@ -846,7 +874,7 @@ def upgrade_delta(previous, current):
     return []
 
 
-def installer_upgrade(checkout, home, tree, target, ends, codex_home, codex_global_source):
+def installer_upgrade(checkout, home, tree, target, ends, codex_home, codex_global_source, claude_home=None):
     """只读跨安装器准入：旧 HEAD 与目标提交各用原字节 check，同一实际根、同一选择。"""
     commit, read = revision_reader(checkout, target)
     base_commit = git_value(checkout, "rev-parse", "HEAD")
@@ -860,11 +888,11 @@ def installer_upgrade(checkout, home, tree, target, ends, codex_home, codex_glob
     if errors:
         return [], errors, [base_commit, commit, old_blob, new_blob]
     previous_code, previous = run_previous_check(
-        checkout, home, codex_home, base_commit, old_blob, ends, codex_global_source)
+        checkout, home, codex_home, base_commit, old_blob, ends, codex_global_source, claude_home)
     if previous_code != 0 or previous.get("status") != "match" or previous.get("errors"):
         errors.append({"code": "upgrade_previous_check_failed", "path": str(checkout)})
     actions, plan_errors = plan(checkout, home, tree, read, ends=ends, codex_home=codex_home,
-                                codex_global_source=codex_global_source)
+                                codex_global_source=codex_global_source, claude_home=claude_home)
     errors.extend(plan_errors)
     if not errors:
         errors.extend(upgrade_delta(previous, actions))
@@ -878,9 +906,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkout", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--home", type=Path, default=Path.home(), help="受管安装根；不改变 CLI 的 HOME")
-    parser.add_argument("--ends", nargs="+", choices=ENDS, default=ENDS, help="只处理所选登记端，默认全部")
+    parser.add_argument("--ends", nargs="+", choices=ALL_ENDS, default=ENDS, help="只处理所选登记端，默认全部")
     parser.add_argument("--codex-home", type=Path,
                         help="仅 --ends codex：安装根内的 CODEX_HOME；技能采用 0.170.0 兼容根 skills")
+    parser.add_argument("--claude-home", type=Path,
+                        help="仅 --ends claude：安装根内的 CLAUDE_CONFIG_DIR；生成 CLAUDE.md 并链接 skills")
     parser.add_argument("--previous", help="--apply 时清理此本地 Git 版本独有的受管入口；不删除目录或登录态")
     parser.add_argument("--codex-global-source", choices=CODEX_GLOBAL_SOURCES, default="agents-md",
                         help="codex-main 的 GLOBAL 来源：agents-md 内嵌（默认）或 paseo-append-system-prompt")
@@ -905,7 +935,7 @@ def main(argv=None):
         if not args.checkout.is_absolute():
             raise InstallError("checkout_must_be_absolute", args.checkout)
         checkout, home = args.checkout.resolve(), args.home
-        ends, codex_home = tuple(args.ends), args.codex_home
+        ends, codex_home, claude_home = tuple(args.ends), args.codex_home, args.claude_home
         if args.codex_global_source != "agents-md" and ends != ("codex",):
             raise InstallError("codex_global_source_requires_codex_only", home)
         if not home.is_absolute() or ".." in home.parts:
@@ -919,8 +949,22 @@ def main(argv=None):
                 raise InstallError("codex_home_outside_install_root", codex_home) from None
             if not relative.parts:
                 raise InstallError("invalid_native_codex_layout", codex_home)
+        if claude_home is not None or CLAUDE_END in ends:
+            if ends != (CLAUDE_END,) or claude_home is None or not claude_home.is_absolute() \
+                    or ".." in claude_home.parts:
+                raise InstallError("invalid_claude_layout", claude_home or home)
+            try:
+                relative = claude_home.relative_to(home)
+            except ValueError:
+                raise InstallError("claude_home_outside_install_root", claude_home) from None
+            if not relative.parts:
+                raise InstallError("invalid_claude_layout", claude_home)
+            if relative.parts[0] == ".luno":
+                raise InstallError("claude_home_overlaps_managed_area", claude_home)
         tree = HomeTree(home)
         report.update(home=str(home), ends=list(ends), codexHome=str(codex_home) if codex_home else None)
+        if claude_home is not None:
+            report["claudeHome"] = str(claude_home)
         report.update(checkout=str(checkout), head=git_value(checkout, "rev-parse", "HEAD"),
                       trackedState="dirty" if git_value(checkout, "status", "--porcelain") else "clean")
         previous, previous_errors, priors = [], [], {}
@@ -928,7 +972,8 @@ def main(argv=None):
             report["previousHead"], read = revision_reader(checkout, args.previous)
             previous, previous_errors = desired(checkout, home, tree, read, baseline=True, ends=ends,
                                                 codex_home=codex_home,
-                                                codex_global_source=args.codex_global_source)
+                                                codex_global_source=args.codex_global_source,
+                                                claude_home=claude_home)
             priors = {str(a["path"]): a["content"] for a in previous if a["kind"] == "native-role"}
         if args.check_native_role_adoption:
             errors = []
@@ -948,13 +993,13 @@ def main(argv=None):
                 errors.append({"code": "checkout_dirty", "path": str(checkout)})
             actions, upgrade_errors, binding = installer_upgrade(
                 checkout, home, tree, args.check_installer_upgrade,
-                ends, codex_home, args.codex_global_source)
+                ends, codex_home, args.codex_global_source, claude_home)
             errors.extend(upgrade_errors)
             report.update(previousHead=binding[0], targetHead=binding[1],
                           previousInstallerBlob=binding[2], targetInstallerBlob=binding[3])
         else:
             actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home, priors=priors,
-                                   codex_global_source=args.codex_global_source)
+                                   codex_global_source=args.codex_global_source, claude_home=claude_home)
         errors.extend(previous_errors)
         if args.previous:
             errors.extend(compatibility_errors(checkout, report["previousHead"], read, previous, actions))
@@ -966,7 +1011,8 @@ def main(argv=None):
             installed = actions
             candidate, candidate_errors = plan(checkout, home, tree, read, ends=ends,
                                                codex_home=codex_home,
-                                               codex_global_source=args.codex_global_source)
+                                               codex_global_source=args.codex_global_source,
+                                               claude_home=claude_home)
             # 预检只做预览：旧版登记看不到角色，按当前真实已核角色内容作候选的精确 prior；
             # 严格的旧版本字节比对仍由 --apply --previous 执行。
             for action in candidate:
@@ -1009,7 +1055,7 @@ def main(argv=None):
             for action in retired:
                 delete_retired(action, tree)
             actions, errors = plan(checkout, home, tree, ends=ends, codex_home=codex_home,
-                                   codex_global_source=args.codex_global_source)
+                                   codex_global_source=args.codex_global_source, claude_home=claude_home)
             report["actions"] = [public_action(a) for a in actions]
             report["errors"] = errors
             matched = not errors and all(a["state"] == "match" for a in actions)
