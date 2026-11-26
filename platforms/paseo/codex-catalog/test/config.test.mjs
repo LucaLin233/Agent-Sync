@@ -251,6 +251,19 @@ describe('config path boundary', () => {
     assert.equal(result.output.includes('"event":"listening"'), false);
   });
 
+  test('a working directory of / authorizes nothing by itself', async () => {
+    const elsewhere = tempRoot();
+    const outside = join(elsewhere, 'catalog.json');
+    writeFileSync(outside, body, { mode: 0o600 });
+    // Typical systemd units start in `/`; that must neither widen the boundary
+    // nor break the default deployment. Here the path is outside both trusted
+    // directories, so the plain "is outside" refusal applies.
+    const result = await runServerWithConfigArg(outside, { cwd: '/' });
+    assert.equal(result.code, 2, result.output);
+    assert.match(result.output, /is outside/);
+    assert.equal(result.output.includes('"event":"listening"'), false);
+  });
+
   test('a symlink inside the launch directory that escapes it is refused', async () => {
     const launch = tempRoot();
     const elsewhere = tempRoot();

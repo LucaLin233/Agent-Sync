@@ -221,59 +221,68 @@ function normalizeRoute(path, raw, limits) {
 }
 
 // The config file is named on the command line, so it is the one place where an
-// operator-supplied path reaches the filesystem. Three rules apply, and every
-// refusal returns from this function before a file is opened:
-//   * the path must be absolute;
-//   * after symlink resolution it must live under `/etc/codex-catalog`, or under
-//     the directory the service was started in — a directory chosen by whoever
-//     launches it, never by the caller of this process;
-//   * it must be a regular file of bounded size, opened O_NOFOLLOW so the final
-//     component cannot be swapped for a symlink between the check and the read.
-// Keeping the launch directory in the comparison lets custom layouts work
-// (start the service from that directory) without letting a stray argument
-// point the reader at an unrelated file such as a key store.
+// operator-supplied path reaches the filesystem. Two directories are trusted,
+// and the read happens only inside a branch that positively matched one of
+// them, so a refusal can never fall through to opening the file:
+//   * `/etc/codex-catalog` — the documented deployment location;
+//   * the directory the service was started in — chosen by whoever launches it,
+//     never by the caller of this process.
+// A working directory of `/` gives the prefix `//`, which no canonical path
+// starts with, so it authorizes nothing extra while the default directory keeps
+// working exactly as before (typical systemd units start in `/`).
+// The path must be absolute, and the file must be regular and of bounded size,
+// opened O_NOFOLLOW so the last component cannot become a symlink after the
+// check. Reading a config is not a general file-read service: anything outside
+// the two directories is refused with exit code 2.
 const DEFAULT_CONFIG_DIR = '/etc/codex-catalog';
 const LAUNCH_DIR = realpathSync(process.cwd());
 const CONFIG_MAX_BYTES = 262144;
 
 function readConfigText(configPath) {
   if (typeof configPath !== 'string' || configPath === '') {
-    fatal('config: no path given; use --config or CATALOG_CONFIG');
+    throw new Error('config: no path given; use --config or CATALOG_CONFIG');
   }
   if (!isAbsolute(configPath)) {
-    fatal(`config: ${configPath} must be an absolute path`);
+    throw new Error(`config: ${configPath} must be an absolute path`);
   }
-  let resolved;
-  try {
-    resolved = realpathSync(configPath);
-  } catch (error) {
-    fatal(`cannot read ${configPath}: ${error.code || 'unresolvable path'}`);
-  }
-  // LAUNCH_DIR is already canonical, so these prefixes compare like for like.
-  // `/` as a working directory gives no boundary and is not accepted.
-  const underDefault = resolved.startsWith(DEFAULT_CONFIG_DIR + sep);
-  const underLaunch = LAUNCH_DIR !== sep && resolved.startsWith(LAUNCH_DIR + sep);
-  if (!underDefault && !underLaunch) {
-    fatal(`config: ${configPath} is outside ${DEFAULT_CONFIG_DIR} and ${LAUNCH_DIR}`);
-  }
-  let fd;
-  try {
-    fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = fstatSync(fd);
-    if (!info.isFile()) fatal(`config: ${configPath} is not a regular file`);
-    if (info.size > CONFIG_MAX_BYTES) {
-      fatal(`config: ${configPath} is larger than ${CONFIG_MAX_BYTES} bytes`);
+  const resolved = realpathSync(configPath);
+
+  if (resolved.startsWith(DEFAULT_CONFIG_DIR + sep)) {
+    const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile()) throw new Error(`config: ${configPath} is not a regular file`);
+      if (info.size > CONFIG_MAX_BYTES) {
+        throw new Error(`config: ${configPath} is larger than ${CONFIG_MAX_BYTES} bytes`);
+      }
+      return readFileSync(fd, 'utf8');
+    } finally {
+      closeSync(fd);
     }
-    return readFileSync(fd, 'utf8');
-  } catch (error) {
-    fatal(`cannot read ${configPath}: ${error.code || 'unreadable'}`);
-  } finally {
-    if (fd !== undefined) closeSync(fd);
   }
+  if (resolved.startsWith(LAUNCH_DIR + sep)) {
+    const fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = fstatSync(fd);
+      if (!info.isFile()) throw new Error(`config: ${configPath} is not a regular file`);
+      if (info.size > CONFIG_MAX_BYTES) {
+        throw new Error(`config: ${configPath} is larger than ${CONFIG_MAX_BYTES} bytes`);
+      }
+      return readFileSync(fd, 'utf8');
+    } finally {
+      closeSync(fd);
+    }
+  }
+  throw new Error(`config: ${configPath} is outside ${DEFAULT_CONFIG_DIR} and ${LAUNCH_DIR}`);
 }
 
 function loadConfig(configPath) {
-  const text = readConfigText(configPath);
+  let text;
+  try {
+    text = readConfigText(configPath);
+  } catch (error) {
+    fatal(error.message);
+  }
   let raw;
   try {
     raw = JSON.parse(text);
