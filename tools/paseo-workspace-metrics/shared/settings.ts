@@ -9,6 +9,8 @@ export const metricsSettings = defineSettings({
   schema: z.object({
     /** Optional daemon-local Codex home. Empty means auto-discover. */
     codexHome: z.string().trim().min(1).optional(),
+    /** Optional daemon-local Claude config dir (CLAUDE_CONFIG_DIR). Empty means auto-discover. */
+    claudeHome: z.string().trim().min(1).optional(),
     /** Explicit cumulative switch. Missing documents fall back to the legacy allowlist. */
     cumulativeEnabled: z.boolean().optional(),
     /** Legacy unrestricted switch kept for saved documents and the advanced UI. */

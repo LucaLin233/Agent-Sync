@@ -6,6 +6,7 @@ import {
   type PillCacheBasis,
 } from "../shared/metrics.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
+import { settingsRetryDelayMs } from "./subscription-retry.ts";
 
 export interface PillHandle {
   update(patch: { title?: string; label?: string }): void;
@@ -381,29 +382,45 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     },
   });
 
-  const unsubscribeSettings = deps.subscribeSettings({
-    next(event) {
-      if (disposed) return;
-      generation += 1;
-      scope = event;
-      cumulative.clear();
-      lastRequest.clear();
-      clearRoutine();
-      clearFollowUps();
-      reconcile();
-      scheduleRoutine();
-    },
-    closed() {
-      if (disposed) return;
-      generation += 1;
-      scope = EMPTY_SCOPE;
-      cumulative.clear();
-      clearRoutine();
-      clearFollowUps();
-      reconcile();
-      scheduleRoutine();
-    },
-  });
+  let releaseSettings: () => void;
+  let settingsRetry: ReturnType<typeof setTimeout> | undefined;
+  let settingsCloses = 0;
+
+  // The host never replays a rejected or closed subscription (for example one
+  // retried while the plugin is still loading after a daemon restart).
+  const openSettings = () => {
+    releaseSettings = deps.subscribeSettings({
+      next(event) {
+        if (disposed) return;
+        settingsCloses = 0;
+        generation += 1;
+        scope = event;
+        cumulative.clear();
+        lastRequest.clear();
+        clearRoutine();
+        clearFollowUps();
+        reconcile();
+        scheduleRoutine();
+      },
+      closed() {
+        if (disposed) return;
+        generation += 1;
+        scope = EMPTY_SCOPE;
+        cumulative.clear();
+        clearRoutine();
+        clearFollowUps();
+        reconcile();
+        scheduleRoutine();
+        const delay = settingsRetryDelayMs(settingsCloses);
+        settingsCloses += 1;
+        settingsRetry = setTimeout(() => {
+          releaseSettings();
+          openSettings();
+        }, delay);
+      },
+    });
+  };
+  openSettings();
 
   return {
     dispose() {
@@ -413,7 +430,8 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       clearRoutine();
       clearFollowUps();
       unsubscribeAgents();
-      unsubscribeSettings();
+      clearTimeout(settingsRetry);
+      releaseSettings();
       for (const pill of pills.values()) pill.handle.remove();
       pills.clear();
       agents.clear();

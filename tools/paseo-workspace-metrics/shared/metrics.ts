@@ -28,6 +28,13 @@ export function latestCacheSample(
   return { input, cached };
 }
 
+/** The native runtime behind an agent; custom providers keep the adapter marker. */
+export function sessionKindOf(provider: unknown, persistenceProvider?: unknown): "codex" | "claude" | null {
+  if (provider === "codex" || persistenceProvider === "codex") return "codex";
+  if (provider === "claude" || persistenceProvider === "claude") return "claude";
+  return null;
+}
+
 export interface CacheSummary {
   input: number;
   cached: number;
@@ -68,7 +75,7 @@ export function summarizeLatestSamples(samples: readonly (CacheSample | null)[])
 export type TurnSignal =
   | { kind: "start" | "failed" | "canceled"; turnId: string; timestamp: number }
   | { kind: "assistant"; turnId: string; timestamp: number; visible: boolean }
-  | { kind: "completed"; turnId: string; timestamp: number; outputTokens: number | null }
+  | { kind: "completed"; turnId: string; timestamp: number; outputTokens: number | null; providerFirstTokenMs?: number | null }
   | { kind: "gap" }
   | { kind: "replacement" };
 
@@ -80,6 +87,34 @@ export interface TurnMeasurement {
   outcome: "completed" | "failed" | "canceled";
   /** Only when that same turn reported a usable output count (Claude). */
   outputPerSecond: number | null;
+  /** The provider's own first-token time for this turn (Claude SDK `TTFT`), if reported. */
+  providerFirstTokenMs: number | null;
+}
+
+/**
+ * Reads Paseo's formatted turn duration metric back into milliseconds:
+ * "<0.1s", "1.2s" (tenths) or "1m 5s". Anything else is not a reading.
+ */
+export function parseMetricDuration(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (text === "<0.1s") return 0;
+  let match = /^(\d+(?:\.\d+)?)s$/.exec(text);
+  if (match) return Math.round(Number(match[1]) * 1_000);
+  match = /^(\d+)m (\d+)s$/.exec(text);
+  if (match) return (Number(match[1]) * 60 + Number(match[2])) * 1_000;
+  return null;
+}
+
+/** The "TTFT" entry of a turn's metrics, in milliseconds. */
+export function metricFirstTokenMs(metrics: unknown): number | null {
+  if (!Array.isArray(metrics)) return null;
+  for (const metric of metrics) {
+    if (metric && typeof metric === "object" && (metric as { label?: unknown }).label === "TTFT") {
+      return parseMetricDuration((metric as { value?: unknown }).value);
+    }
+  }
+  return null;
 }
 
 export interface TurnObservation {
@@ -128,6 +163,7 @@ export function observeTurn(state: TurnObservation, signal: TurnSignal): TurnObs
       elapsedMs,
       outcome: signal.kind,
       outputPerSecond,
+      providerFirstTokenMs: signal.kind === "completed" ? signal.providerFirstTokenMs ?? null : null,
     },
   };
 }

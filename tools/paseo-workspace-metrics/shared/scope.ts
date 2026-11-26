@@ -19,10 +19,14 @@ export const workspaceScopeRpc = defineRpc({
   output: workspaceScopeOutput,
 });
 
-/** Pushes the effective scope whenever the host settings change. */
+/**
+ * Pushes the effective scope whenever the host settings change. `attempt` only
+ * changes the subscription identity, so a client can reopen it after the host
+ * dropped or rejected it; the handler ignores the value.
+ */
 export const workspaceSettingsSubscription = defineSubscription({
   name: "workspace-metrics.settings",
-  input: z.object({}),
+  input: z.object({ attempt: z.number().int().nonnegative().optional() }),
   event: workspaceScopeOutput,
 });
 
