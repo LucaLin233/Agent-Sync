@@ -2,6 +2,10 @@
 
 本目录提供 Paseo 的配置示例与迁移说明，使用官方配置和 MCP 工具。维护者先在与目标 daemon 同版本的隔离实例核对示例，再到目标实例合并配置并验收。
 
+## 目录适配器
+
+[`codex-catalog/`](codex-catalog/README.md) 是一个仅监听回环的目录适配器，把若干固定网关的模型目录转换成 Codex 的 `model_catalog_url` 格式，并显式表达按路由、按模型的思考档位与速度档位（Fast/Ultrafast 等）。它与本目录的 Paseo provider 示例配合使用：本目录管 provider/Profile，适配器管模型清单与能力声明。部署、字段与回滚见该目录的 [README](codex-catalog/README.md)。
+
 ## 固定来源
 
 下列接口的原始依据取自 Paseo v0.17.1 固定提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`。派发使用的清单和 Profile 字段沿用相同接口，现场按实际版本回读。
