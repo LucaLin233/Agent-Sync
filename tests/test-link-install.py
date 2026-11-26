@@ -1041,8 +1041,28 @@ module.main(sys.argv[2:])
         rc, report = self.call(*options, "--apply")
         self.assertEqual((rc, report["created"]), (0, []))
 
+    def test_claude_end_with_real_registry_links_every_present_skill(self):
+        # 不经夹具改写：当前仓库登记里 prompt 与全部 codex 在位技能都有 claude 入口，子代理没有。
+        options = self.claude_options()
+        self.assertEqual(self.call(*options, "--apply")[0], 0)
+        self.assertEqual(self.call(*options, "--check")[0], 0)
+        registry = json.loads((self.checkout / "tools/sync-targets.json").read_text())
+        claude_home = self.home / "claude-home"
+        linked = sorted(p.name for p in (claude_home / "skills").iterdir())
+        expected = sorted(o["id"] for o in registry["objects"]
+                          if o["type"] == "skill" and o["ends"]["claude"]["present"])
+        self.assertEqual(linked, expected)
+        self.assertTrue(expected)
+        self.assertEqual((claude_home / "CLAUDE.md").read_bytes(), self.expected_role_startup())
+        self.assertEqual(sorted(p.name for p in claude_home.iterdir()), ["CLAUDE.md", "skills"])
+
     def test_claude_end_without_registry_key_is_absent_not_an_error(self):
         # 旧登记没有 claude 键：显式选择该端只得到空计划，也不影响默认全端的严格校验。
+        registry_file = self.checkout / "tools/sync-targets.json"
+        registry = json.loads(registry_file.read_text())
+        for obj in registry["objects"]:
+            obj["ends"].pop("claude", None)
+        registry_file.write_text(json.dumps(registry, ensure_ascii=False, indent=2) + "\n")
         before = self.snapshot()
         rc, report = self.call(*self.claude_options(), "--apply")
         self.assertEqual((rc, report["status"], report["actions"]), (0, "completed", []))

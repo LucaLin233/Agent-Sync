@@ -44,6 +44,14 @@
         },
         "paseo": {
           "present": false
+        },
+        "claude": {
+          "present": true,
+          "kind": "generated",
+          "paths": [
+            "~/.claude/CLAUDE.md"
+          ],
+          "renderer": "claude-main"
         }
       }
     },
@@ -78,6 +86,9 @@
             "~/.luno/homes/lens-codex/AGENTS.md",
             "~/.luno/homes/lens-gdr/AGENTS.md"
           ]
+        },
+        "claude": {
+          "present": false
         }
       }
     },
@@ -112,6 +123,9 @@
             "~/.luno/homes/forge-codex/AGENTS.md",
             "~/.luno/homes/forge-gdr/AGENTS.md"
           ]
+        },
+        "claude": {
+          "present": false
         }
       }
     },
@@ -133,6 +147,9 @@
           "present": false
         },
         "paseo": {
+          "present": false
+        },
+        "claude": {
           "present": false
         }
       },
@@ -180,6 +197,13 @@
             "~/.luno/homes/lens-gdr/skills/luno-core",
             "~/.luno/homes/forge-gdr/skills/luno-core"
           ]
+        },
+        "claude": {
+          "present": true,
+          "kind": "link",
+          "paths": [
+            "~/.claude/skills/luno-core"
+          ]
         }
       }
     },
@@ -219,6 +243,13 @@
             "~/.luno/homes/lens-gdr/skills/luno-ops",
             "~/.luno/homes/forge-gdr/skills/luno-ops"
           ]
+        },
+        "claude": {
+          "present": true,
+          "kind": "link",
+          "paths": [
+            "~/.claude/skills/luno-ops"
+          ]
         }
       }
     },
@@ -257,6 +288,13 @@
             "~/.luno/homes/lens-gdr/skills/luno-authoring",
             "~/.luno/homes/forge-gdr/skills/luno-authoring"
           ]
+        },
+        "claude": {
+          "present": true,
+          "kind": "link",
+          "paths": [
+            "~/.claude/skills/luno-authoring"
+          ]
         }
       }
     },
@@ -274,6 +312,7 @@
         "skills/luno-platform/references/minis.md",
         "skills/luno-platform/references/runtime-minis.md",
         "skills/luno-platform/references/runtime-host.md",
+        "skills/luno-platform/references/runtime-claude.md",
         "skills/luno-platform/references/runtime-codex.md",
         "skills/luno-platform/references/runtime-paseo.md"
       ],
@@ -301,6 +340,13 @@
             "~/.luno/homes/forge-codex/skills/luno-platform",
             "~/.luno/homes/lens-gdr/skills/luno-platform",
             "~/.luno/homes/forge-gdr/skills/luno-platform"
+          ]
+        },
+        "claude": {
+          "present": true,
+          "kind": "link",
+          "paths": [
+            "~/.claude/skills/luno-platform"
           ]
         }
       },
@@ -351,6 +397,13 @@
             "~/.luno/homes/forge-codex/skills/luno-surge",
             "~/.luno/homes/lens-gdr/skills/luno-surge",
             "~/.luno/homes/forge-gdr/skills/luno-surge"
+          ]
+        },
+        "claude": {
+          "present": true,
+          "kind": "link",
+          "paths": [
+            "~/.claude/skills/luno-surge"
           ]
         }
       }

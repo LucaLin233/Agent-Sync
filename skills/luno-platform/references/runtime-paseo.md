@@ -1,6 +1,6 @@
 # paseo 叠加适配
 
-分支为 paseo-operations、paseo-dispatch、paseo-resume。触发见 `luno-platform`〈运行端〉。paseo-dispatch 与 paseo-resume 两分支共读本节，paseo-operations 不适用本节。其余槽位仍按 `references/runtime-codex.md` 与 `references/runtime-host.md`。义务、授权和停止条件以引用处为准。
+分支为 paseo-operations、paseo-dispatch、paseo-resume。触发见 `luno-platform`〈运行端〉。paseo-dispatch 与 paseo-resume 两分支共读本节，paseo-operations 不适用本节。其余槽位 Codex 端按 `references/runtime-codex.md`，Claude Code 端按 `references/runtime-claude.md`，均与 `references/runtime-host.md` 合用。义务、授权和停止条件以引用处为准。
 
 ## 共同前置
 
@@ -35,7 +35,7 @@ Paseo 的查询、管理、配置或恢复，先按目标 daemon 和预期结果
 
 官方 `paseo` 技能中按 `notes` 选 Profile、复制 `featureValues` 和无匹配时发现 provider 的步骤适用于通用派发。Paseo 受管角色按下文匹配实时配置。
 
-- Paseo 主会话和独立 Codex CLI 的所有委派（含通用兜底）按用户偏好默认使用已核验的 Paseo agent 通道。派发条件、角色归属和独立资格按 `luno-core/references/review.md`〔分支 delegation〕。只有用户明确指定才使用 Codex 原生 LENS/FORGE，按 `references/runtime-codex.md`〈派发通道〉核验。使用 Paseo 前按运行元数据核实会话归属、目标 daemon 和所需父子关系。归属不明或无已核通道时，只停依赖该派发的步骤并报告缺口。受派方不得再委派。
+- Paseo 主会话、独立 Codex CLI 和 Claude Code 的所有委派（含通用兜底）按用户偏好默认使用已核验的 Paseo agent 通道。派发条件、角色归属和独立资格按 `luno-core/references/review.md`〔分支 delegation〕。只有用户明确指定才使用 Codex 原生 LENS/FORGE，按 `references/runtime-codex.md`〈派发通道〉核验。使用 Paseo 前按运行元数据核实会话归属、目标 daemon 和所需父子关系。归属不明或无已核通道时，只停依赖该派发的步骤并报告缺口。受派方不得再委派。
 - **角色入口。**在目标 daemon 上把派发用的 provider 登记为 `<运行时>-<网关>`，把角色 Profile 登记为 `<网关>-<角色小写>`。运行时前缀为 `codex` 或 `claude`；网关标识由小写 ASCII 字母或数字组成，可用单个连字符连接多段。维护者配置时须核对 provider 实际使用该网关和相应运行时，ID 是派发用的登记约定。旧会话继续保留原 provider 记录，已禁用或不符合登记约定的旧 ID 不参与新派发。角色是提示词层软角色，不构成独立身份或权限隔离。LENS/FORGE 开始前须完整读取部署的对应 `subagents/` 原文，项目指令及权限仍按实际加载核验。Claude 角色须先核实其启动入口能识别首条任务的角色行，并加载对应受管原文；不得从 Codex 的启动规则推定 Claude 已加载。
 - **GLOBAL、角色启动与鉴权。**Codex 单端显式选择 `--codex-global-source paseo-append-system-prompt` 时，私人 GLOBAL 存放在已核 daemon 的 `daemon.appendSystemPrompt`，该提示词另附加到同一 daemon 启动的所有 agent，包括 LUNO、LENS、FORGE 及其他；原文同步由用户在 Minis 发起。授权、字节核对、切换、回读及全部接收端的新会话验收按 `luno-core/references/sync.md`〔分支 sync-host〕，不做 provider 级过滤。该模式的 Codex 生成入口按登记渲染角色启动段与共享提示词，首条任务的角色选择在 LUNO 职责段之前生效；安装器只处理受管生成文件，不读写该字段，独立 CLI 不直接获得它。需登录的鉴权由用户分别完成，`env_key` 沿用当次授权注入。安装器不读取、复制凭据或登录态，也不预置权限配置。
 - **选取角色 Profile。**每次新派发前，从父会话同一活线程的运行元数据取得实际 provider。在目标 daemon 的 `list_providers` 核对该 ID 已启用且可用，按〈角色入口〉去掉运行时前缀及其后的连字符，得到完整网关标识。从同一 daemon 的 `list_profiles` 按 `<网关>-<角色小写>` 精确选出唯一 `profile.id`。子会话使用该 Profile 指定的 provider；按同一口径核对该 ID 已启用、可用且网关标识与父会话完全相同，并符合目标运行时的启动与权限要求。缺读取入口、ID 不合约定、匹配不唯一、必要字段缺失或网关不一致时，停止该次派发并报告缺口。不得换网关、换模型，或按显示名或 `notes` 兜底。

@@ -234,6 +234,8 @@ rc0只表示所选范围、所给可信投影及本次可验证文件视图下�
 
 `--home` 是已存在的受管安装根，不改变进程 HOME。`--ends` 只选择登记端；省略时处理 `codex` 和 `paseo` 两端。`--codex-home` 仅允许与 `--ends codex` 合用，且须是安装根内的绝对目录：把登记 Codex 的全局入口映射到该目录的 `AGENTS.md`，把技能入口映射到该目录的 `skills/<名称>`；生成物和 GLOBAL 仍在安装根的 `.luno/` 布局中。登记对象、源文件与默认模板不变，不新增同步对象或私有实例登记。
 
+**Claude Code 端（可选）**：`--ends claude --claude-home <CLAUDE_CONFIG_DIR>` 把登记的 Claude Code 入口映射到该配置目录：`CLAUDE.md` 由 renderer `claude-main` 生成（角色启动段加 `prompt/LUNO.md`，不内嵌 GLOBAL，GLOBAL 仍由 daemon 的 `daemon.appendSystemPrompt` 提供），`skills/<技能名>` 软链到受管检出。该端默认不处理；`--ends` 须只含 `claude`，`--claude-home` 须是安装根内的绝对目录且不得落在安装根的 `.luno` 之内，不与 `--codex-home` 或 `--codex-global-source` 合用。登记缺 `claude` 键按缺位处理，不影响其余两端的严格校验。该端引入分两步：先合并安装器，沿 `--check-installer-upgrade` 准入并快进受管检出；再合并登记与规则正文，按同一安装器的 `--preflight`、`--apply --previous` 与 `--check` 升级，最后对 claude 端单独执行 `--apply` 与 `--check`。Claude 端的槽位取值见 `skills/luno-platform/references/runtime-claude.md`。
+
 实际 HOME 下的 `.agents/skills` 不随 CODEX_HOME 改变。此模式明确采用 0.170.0 仍支持、但已弃用的 `$CODEX_HOME/skills` 兼容根，避免改 HOME 或建立根外链接；版本变化必须重核，不承诺未来继续支持。对应官方源码与指令优先级见 `skills/luno-platform/references/runtime-codex.md`。要采用其他根或改 HOME，另定方案，不由安装器自动迁移。
 
 先按 `skills/luno-core/references/sync.md`〔分支 sync-host〕准备已授权私人 GLOBAL 副本，再运行下列命令；路径变量均为本次明确核实的非秘密值，不是自动探测入口：

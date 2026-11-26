@@ -12,7 +12,8 @@ description: 当前运行端（Minis、宿主端 Codex 及 paseo）的派发、�
 
 - Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`。
 - Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`。
-- Codex 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，完整读取 `references/runtime-paseo.md`〔分支 paseo-dispatch〕。
+- Claude Code 端（宿主为 Claude Code）读 `references/runtime-claude.md` 和 `references/runtime-host.md`。
+- Codex 或 Claude Code 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，完整读取 `references/runtime-paseo.md`〔分支 paseo-dispatch〕。
 - Paseo 的查询、管理、配置或恢复前，完整读取 `references/runtime-paseo.md`〔分支 paseo-operations〕。
 - 接续 Paseo 主会话前，完整读取 `references/runtime-paseo.md`〔分支 paseo-resume〕。涉及子代理操作时同时读取〔分支 paseo-dispatch〕。
 
