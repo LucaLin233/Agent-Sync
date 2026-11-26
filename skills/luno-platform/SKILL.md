@@ -1,6 +1,6 @@
 ---
 name: luno-platform
-description: 当前运行端（Minis、宿主端 Codex 及 paseo）的派发、文件编辑、临时目录、截断与执行环境等端机制；跨任务记忆读写、更正、事故复发与规则固化（共同规则、Minis 端自持）；CCHP 控制面与官方 CLI；Minis/iSH 配置运行时。
+description: 当前运行端（Minis、宿主端 Codex、Claude Code 及 paseo）的派发、文件编辑、临时目录、截断与执行环境等端机制；跨任务记忆读写、更正、事故复发与规则固化（共同规则、Minis 端自持）；CCHP 控制面与官方 CLI；Minis/iSH 配置运行时。
 ---
 # LUNO｜平台配置、运行时与本端记忆
 
