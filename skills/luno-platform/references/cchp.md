@@ -60,6 +60,7 @@ Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installat
 
 - 请求排障不能只筛 failed：还要覆盖网关拒绝。429 本身不能区分额度/策略、上游限流或鉴权，缺尝试链也不证明本地拒绝。
 - 占位 key 只用用户明确要求的可辨认非秘密串；创建后立即 disable 并回读，披露创建到停用间可能被调度。真实秘密替换完成前不启用、不测活、不验证链路。
+- **托管搜索与抓取取证**：核验网关托管的搜索或抓取时，用当次 requestId 取请求用量概览，只看 `overview.webSearchHandling`、`overview.webSearchProviders[].type`（期望类型按被测目标确定）、`overview.webSearchCount`、`overview.webFetchCount` 等最小非秘密字段，核对实际提供商和次数；再按协议返回的工具结果确认调用方确实拿到了搜索内容或正文。HTTP 200 或出现工具调用项不单独证明链路已按预期完成。官方说明见[web-search](https://cch-plus.com/zh-CN/docs/providers/web-search)和 [Keenable MCP](https://docs.keenable.ai/mcp-server)，文档不代替现场证据。
 - 请求覆写只改自有规则，不把继承规则复制成本级或绕过上级锁。CLI 0.1.3 历史样本允许不存在 ID 通过 validate，当前未复测；验证成功不能证明 ID 存在或锁行为正确。历史修订恢复是写入新版本，不是回退指针，须另核授权。
 - 服务端 1.0.15+build.56（2026-11-21，CLI 0.1.4）：直接改全局余额与倍率探测任务 `upstream_probe` 的调度曾返回 422 `30111`（由 owner page 决定）；改系统设置 `upstream_probe.interval_minutes` 后，`global:*` 生效 60 分钟、任务重算为 `@every 1h`。仅在当次契约与现场证据支持、且明确授权写该全局设置并发现生效值与目标不符时才写，回读设置和调度；不写固定延迟，不改供应商模型测活任务。
 - 判读账单与路由前核生效值及其来源，不凭版本推断升级结果；不凭倍率配置或单次探测推断排序、计费或全部 key 的测活行为。
