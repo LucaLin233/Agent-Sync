@@ -17,9 +17,20 @@
 
 ## 配置内容
 
-`config.example.json` 为 CCHP 与 CCH 各登记一个 Codex 和一个 Claude Code provider。Codex 入口用 `-c model_provider="<网关>"` 选择上游。Claude Code 入口各有独立的 `CLAUDE_CONFIG_DIR` 和对应的 Anthropic 兼容 `ANTHROPIC_BASE_URL`。部署时替换家目录和网关地址占位值，按各自的实际启动环境配置鉴权。
+`config.example.json` 为 CCHP 与 CCH 各登记一个 Codex 和一个 Claude Code provider。Codex 入口用 `-c model_provider="<网关>"` 选择上游，两组共用同一 `CODEX_HOME`。Claude Code 入口用各自的 Anthropic 兼容 `ANTHROPIC_BASE_URL` 选择上游，两组共用同一 `CLAUDE_CONFIG_DIR`。部署时替换 agent 根目录和网关地址占位值，按各自的实际启动环境配置鉴权。
 
 每组各有 LUNO、LENS 和 FORGE 三条 Profile，示例均用该组的 Codex provider。LUNO、LENS 用 `gpt-6.2-sol`，FORGE 用 `deepseek-flash`。六条均配置 `full-access`、`high` 与 `service_tier: "default"`。部署时按父权限和目标模型能力核对这些值。显式传递 `service_tier` 可覆盖同 provider 派发时继承的父会话值。Profile 的 `options` 只放所选 provider 支持的选项。
+
+## 家目录布局
+
+agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/agent`：`paseo-home` 作 `PASEO_HOME`，`codex-home` 作 `CODEX_HOME`，`claude-home` 作 `CLAUDE_CONFIG_DIR`。Codex 与 Claude Code 只用官方环境变量指定家目录，不改 HOME。以下行为按 Paseo v0.17.4 源码核对，升级后按实际版本复核。
+
+- daemon 进程环境同时设置这三个变量，值与 provider `env` 一致。Paseo 按 daemon 环境的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 写入终端 agent 钩子（[agent-hook-installer.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/terminal/agent-hooks/agent-hook-installer.ts)），缺省落到 HOME 下的 `.codex`、`.claude`。
+- Claude provider 读取会话记录（时间线、回退、续聊）时按 provider `env` 的 `CLAUDE_CONFIG_DIR` 定位 `projects/`（[project-dir.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/agent/providers/claude/project-dir.ts)）。只在启动脚本里设置该变量时，Claude Code 与 Paseo 会读写不同目录。
+- Paseo 自带 skills 固定装到 HOME 下的 `.agents/skills`、`.claude/skills`、`.gemini/config/skills`，并只从 `.codex/skills` 清理旧副本（[paths.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/orchestration-skills/internal/paths.ts)）。Codex 按官方用户 skills 位置读取 `.agents/skills`。Claude Code 改用 `CLAUDE_CONFIG_DIR` 后不再读 HOME 下的 `.claude/skills`，因此 HOME 下的 `.claude` 链接到 `claude-home`，使 Paseo 写入与 Claude Code 读取同一目录。
+- 交互 shell 同样导出这三个变量，直接运行的 CLI 与 daemon 使用相同目录；未设置 `PASEO_HOME` 时，Paseo CLI 会在 HOME 下的 `.paseo` 写客户端标识。
+
+迁移既有目录时先停用相关会话，按原样复制到新位置并核对，旧目录改名保留作回退，再切换环境并重启 daemon。
 
 ## 内置项与显示范围
 
