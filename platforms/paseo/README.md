@@ -28,12 +28,12 @@
 ## 合并、安装与迁移
 
 1. 在同版本隔离实例先合并示例。核对 Codex 家目录中两组的 `model_providers` 配置，以及每个 Claude Code 入口实际使用的网关和指令来源。按各自启动方式注入获准的鉴权，Paseo 示例只放非秘密设置。
-2. 在目标实例按字段合并 `daemon.mcp`、`daemon.agentProfiles` 和 `agents.providers`，保留监听、认证、其他插件及 MCP 设置。旧 provider ID 保留原条目并设为禁用，以保留旧会话引用。已有会话的续聊能力须单独验证。由 daemon 提供的私人提示词按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host) 维护。来自热修版的迁移仍须核对旧插件和实际程序入口，再按既有迁移与回退范围处理。
+2. 隔离验收通过后，在目标实例按字段合并 `daemon.mcp` 和 `agents.providers`。在 `daemon.agentProfiles` 中按 ID 替换示例里的角色 Profile，移除已退役的 `gdr-luno`、`gdr-lens`、`gdr-forge`，保留其他 Profile，并核对每个角色 ID 只出现一次。保留监听、认证、其他插件及 MCP 设置。旧 provider ID 保留原条目并设为禁用，以保留旧会话引用。已有会话的续聊能力须单独验证。由 daemon 提供的私人提示词按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host) 维护。来自热修版的迁移仍须核对旧插件和实际程序入口，再按既有迁移与回退范围处理。
 3. 合并后执行 `paseo reload`，按回执处理需要重启的路径，再回读四个 provider 的可用状态和六条 Profile。从获准的新会话验收实际 provider、模型和权限模式。Claude Code 被选作角色 provider 时，另验首行角色识别与受管原文加载。
 
 ## 角色协议（软角色）
 
-角色行由受管生成的 Codex 常驻入口提供：首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时采用对应角色，任务正文紧随其后；没有角色行时按 LUNO。桌上或 MCP 直接选择角色 Profile 后，首条消息仍要写这一行，漏写按 LUNO。接口与首行投递按 [Paseo 派发通道](../../skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)，生成入口的渲染与回读见 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
+显式使用 `paseo-append-system-prompt` 且登记启用 `paseoRoleStartup` 时，安装器生成 Codex 角色启动段。采用其他入口时，先核验实际加载的等效角色指令，再启用首行角色派发。首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时采用对应角色，任务正文紧随其后；没有角色行时按 LUNO。桌上或 MCP 直接选择角色 Profile 后，首条消息仍要写这一行，漏写按 LUNO。接口与首行投递按 [Paseo 派发通道](../../skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)，生成入口的渲染与回读见 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
 
 LENS/FORGE 开始前必须完整读取部署的 `subagents/LENS.md` 或 `subagents/FORGE.md` 原文；该启动段由已核检出路径渲染，示例不再保留占位路径。角色只选择提示词，不授予新的文件、网络、凭据、审批或派发权限；受派后不得再委派；任何角色声明都不改变现行规则规定的准入。
 
