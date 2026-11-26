@@ -29,7 +29,7 @@ CLI/spec 与服务端版本不同或未知不单独禁止操作；每个动作�
 
 Docker Compose 部署按[官方说明](https://cch-plus.com/zh-CN/docs/installation/docker-compose)执行，属主与运行角色保持隔离：`migrate` 是独立的一次性服务（`entrypoint=/usr/local/bin/migrate`、`command=apply`），用数据库属主密码执行迁移并重设受限运行角色的密码；`cchp` 只用该受限角色连接数据库，不把迁移写进 `cchp` 的启动命令。升级前先备份数据库和部署目录的 `.env`（含密钥，放受控位置、不展示内容），记下当前版本；更新 `compose.yml` 时只向 `.env` 补新增变量，不用新样例覆盖原文件，按目标版本发布说明和现场拓扑确定升级顺序，符合官方单机流程时沿用 `docker compose pull && docker compose stop cchp && docker compose up -d`。确认 `migrate` 为 `Exited (0)`、`cchp` 为 `healthy`。迁移只向前执行。旧版与迁移后的数据库不兼容时，按官方流程用升级前的备份恢复。
 
-升级到 [v1.0.17](https://cch-plus.com/zh-CN/release-notes/1.0.17) 时，同批部署 `plugin-runner`（Compose 为 `cchp-plugin-runner`）。`media` 可选，未部署时图片原样转发。分离部署时 worker 不晚于网关升级。升级前核对旧插件依赖。自动执行的数据迁移会退役旧插件，移除相关覆写、设置、任务及自定义角色和管理令牌中的旧插件权限。`migrate contract` 会删除旧表并提高兼容性下限，须获授权且所有实例已升级到目标版本后才能执行。若错序导致计费调整失败，待所有 worker 升级后先用 `gateway billing usage-adjustments` 预览，获准补记时才加 `--apply`。
+升级到 [v1.0.17](https://cch-plus.com/zh-CN/release-notes/1.0.17) 时，如使用新插件系统，须同批部署 `plugin-runner`（Compose 为 `cchp-plugin-runner`）。`media` 可选，未部署时图片原样转发。分离部署时 worker 不晚于网关升级。升级前核对旧插件依赖。自动执行的数据迁移会退役旧插件，移除相关覆写、设置、任务及自定义角色和管理令牌中的旧插件权限。`migrate contract` 会删除旧表并提高兼容性下限，须获授权且所有实例已升级到目标版本后才能执行。若错序导致计费调整失败，待所有 worker 升级后先用 `gateway billing usage-adjustments` 预览，获准补记时才加 `--apply`。
 
 ## 本组织写入约定
 
