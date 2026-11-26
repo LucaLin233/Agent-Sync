@@ -25,7 +25,9 @@ credential-env-inheritance 对应）：
   证据、配置、连接信息或 SDK 错误原文。
 - dry-run 只发读调用，零写；close 由显式动作、条目与目标状态表达意图，回执不明时
   先回读、不重写。
-- 退出码：0 成功且已核实；1 参数/输入不合法；2 环境（CLI/SDK/Node）不合格；
+- 版本不作静态门禁：CLI 只核官方包身份、其自带 SDK 包与入口；连接后按 server_info 的
+  serverId 与 features.plugins 能力位判定，缺失在首次 RPC 前停止。
+- 退出码：0 成功且已核实；1 参数/输入不合法；2 环境（CLI/SDK/Node/daemon 能力）不合格；
   3 需要认证或认证失败；4 daemon 身份不符；5 写入后回读不符或不明。
 """
 import argparse
@@ -38,9 +40,8 @@ import sys
 
 FINDING_STATUSES = ("open", "resolved", "false_positive")
 SUGGESTION_STATUSES = ("open", "adopted", "done", "dismissed")
-PASEO_VERSION = "0.17.4"
-SDK_VERSION = "0.17.4"
 RPC_PLUGIN = "agent-observatory"
+REQUIRED_DAEMON_FEATURE = "plugins"
 # 固定方法白名单：run_bridge 只放行这里登记的方法，读/写分类供调用方核对。
 METHODS = {
     "observatory.insights.list": "read",
@@ -76,6 +77,14 @@ const { createHostClient } = require(path.join(clientPkg, 'dist', 'node', 'index
     out.daemonVersion = info && typeof info.version === 'string' ? info.version : null;
     if (!out.serverId || (req.serverId && out.serverId !== req.serverId)) {
       process.stdout.write(JSON.stringify({ ok: false, code: 'identity_mismatch', stage: 'identity',
+        serverId: out.serverId, daemonVersion: out.daemonVersion }));
+      return;
+    }
+    // server_info.features 是 daemon 自报的公开能力位；缺插件能力时在首次 RPC 前停，
+    // 不比对固定版本号，也不把客户端版本当作服务端支持。
+    const features = info && typeof info.features === 'object' && info.features ? info.features : {};
+    if (features[req.requiredFeature] !== true) {
+      process.stdout.write(JSON.stringify({ ok: false, code: 'capability_missing', stage: 'identity',
         serverId: out.serverId, daemonVersion: out.daemonVersion }));
       return;
     }
@@ -158,14 +167,14 @@ def resolve_cli(explicit):
         pkg = _read_manifest(cli_root) if os.path.isdir(cli_root) else None
         if not pkg or pkg.get("name") != "@getpaseo/cli":
             continue
-        if pkg.get("version") != PASEO_VERSION:
-            raise Fail(RC_ENV, "paseo_version_unexpected")
         sdk_root = os.path.join(cli_root, "node_modules", "@getpaseo", "client")
         sdk_pkg = _read_manifest(sdk_root) if os.path.isdir(sdk_root) else None
         if not sdk_pkg or sdk_pkg.get("name") != "@getpaseo/client":
             raise Fail(RC_ENV, "sdk_package_missing")
-        if sdk_pkg.get("version") != SDK_VERSION:
-            raise Fail(RC_ENV, "sdk_version_unexpected")
+        # 只要求 CLI 自带的官方客户端包与入口存在；固定 release 会在正常升级后误伤。
+        # 兼容性由连接后 daemon 自报的能力位判定，不以包版本号冒充能力或实测。
+        if not isinstance(sdk_pkg.get("version"), str) or not sdk_pkg.get("version"):
+            raise Fail(RC_ENV, "sdk_package_invalid")
         if not os.path.isfile(os.path.join(sdk_root, "dist", "node", "index.js")):
             raise Fail(RC_ENV, "sdk_entry_missing")
         return cli_root
@@ -180,6 +189,7 @@ def run_bridge(cli_root, target, server_id, calls, allow_password, timeout_s, no
     request = json.dumps({
         "cliRoot": cli_root, "target": target, "serverId": server_id,
         "plugin": RPC_PLUGIN, "timeoutMs": min(timeout_s, 30) * 1000,
+        "requiredFeature": REQUIRED_DAEMON_FEATURE,
         "allowedMethods": sorted(METHODS),
         "calls": [{"method": m, "input": i} for m, i in calls],
     })
@@ -204,6 +214,8 @@ def run_bridge(cli_root, target, server_id, calls, allow_password, timeout_s, no
     code = payload.get("code")
     if code == "identity_mismatch":
         raise Fail(RC_IDENTITY, "daemon_identity_mismatch")
+    if code == "capability_missing":
+        raise Fail(RC_ENV, "daemon_capability_missing")
     if code == "method_not_allowed":
         raise Fail(RC_ENV, "rpc_method_not_allowed")
     if code == "auth":

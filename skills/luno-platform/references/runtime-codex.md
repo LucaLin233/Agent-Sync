@@ -2,7 +2,7 @@
 
 本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；Paseo 派发与接续按 `luno-platform`〈运行端〉读对应分支。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
-本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式选择 `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 改由受管生成入口按登记渲染：启用 `paseoRoleStartup` 时在前置角色启动段并把 LUNO 职责段改为按当前角色适用，GLOBAL 不再进入生成文件，改由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；安装器只处理受管生成文件，不读写该配置。原文同步由用户在 Minis 发起，字段与生成入口在同一受控窗口切换和回读。该字段是 daemon 范围，覆盖同一 daemon 启动的所有 agent（LUNO、LENS、FORGE 及其他），不做 provider 级过滤；授权、切换、回读及全部接收端的新会话验收按 `luno-core/references/sync.md`〔分支 sync-host〕。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；原生 CLI 不经该 daemon，不直接获得它，但若与 daemon 共用同一实际 `CODEX_HOME`，它会读到同一生成物，切换前核入口归属。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
+本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式选择 `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 改由受管生成入口按登记渲染：启用 `paseoRoleStartup` 时在前置角色启动段并把 LUNO 职责段改为按当前角色适用，GLOBAL 不再进入生成文件，改由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；该字段的接收范围、来源、授权、切换、回读、验收与恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；原生 CLI 不经该 daemon，不直接获得它，但若与 daemon 共用同一实际 `CODEX_HOME`，它会读到同一生成物，切换前核入口归属。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
 
 ## 原生安装与技能发现
 

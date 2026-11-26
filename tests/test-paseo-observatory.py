@@ -38,7 +38,8 @@ exports.createHostClient = (target, config) => {
     },
     getLastServerInfoMessage() {
       const s = readScenario();
-      return {status: 'server_info', serverId: s.serverId, version: '0.17.4'};
+      return {status: 'server_info', serverId: s.serverId, version: s.daemonVersion === undefined ? '9.9.9' : s.daemonVersion,
+              features: s.features === undefined ? {plugins: true} : s.features};
     },
     async invokePluginRpc(plugin, method, input) {
       const s = readScenario();
@@ -82,16 +83,16 @@ exports.createHostClient = (target, config) => {
 """
 
 
-def make_fake_cli(root, scenario):
+def make_fake_cli(root, scenario, cli_version="9.1.0", sdk_version="9.1.0"):
     cli = pathlib.Path(root) / "cli"
     sdk = cli / "node_modules" / "@getpaseo" / "client" / "dist" / "node"
     sdk.mkdir(parents=True)
     (cli / "package.json").write_text(
-        json.dumps({"name": "@getpaseo/cli", "version": M.PASEO_VERSION}), encoding="utf-8")
+        json.dumps({"name": "@getpaseo/cli", "version": cli_version}), encoding="utf-8")
     sdk_pkg = cli / "node_modules" / "@getpaseo" / "client"
     sdk_pkg.mkdir(parents=True, exist_ok=True)
     (sdk_pkg / "package.json").write_text(
-        json.dumps({"name": "@getpaseo/client", "version": M.SDK_VERSION}), encoding="utf-8")
+        json.dumps({"name": "@getpaseo/client", "version": sdk_version}), encoding="utf-8")
     (sdk / "index.js").write_text(FAKE_SDK, encoding="utf-8")
     write_scenario(sdk, scenario)
     return str(cli), sdk
@@ -420,6 +421,25 @@ class GateTest(Base):
         self.assertEqual(json.loads(out)["code"], "daemon_identity_mismatch")
         self.assertEqual(self.calls(), [])
 
+    def test_daemon_without_plugin_capability_stops_before_rpc(self):
+        write_scenario(self.sdk, base_scenario(features={"plugins": False}))
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_ENV, out)
+        self.assertEqual(json.loads(out)["code"], "daemon_capability_missing")
+        self.assertEqual(self.calls(), [])
+
+    def test_missing_features_is_not_assumed_supported(self):
+        write_scenario(self.sdk, base_scenario(features=None))
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_ENV, out)
+        self.assertEqual(json.loads(out)["code"], "daemon_capability_missing")
+        self.assertEqual(self.calls(), [])
+
+    def test_unknown_daemon_version_does_not_block_capable_daemon(self):
+        write_scenario(self.sdk, base_scenario(daemonVersion=None))
+        rc, out = self.run_tool("report", "list")
+        self.assertEqual(rc, M.RC_OK, out)
+
     def test_identity_match_allows_rpc(self):
         rc, out = self.run_tool("report", "list")
         self.assertEqual(rc, M.RC_OK, out)
@@ -447,19 +467,27 @@ class GateTest(Base):
             M.resolve_cli(str(shim))
         self.assertEqual(box.exception.code, "paseo_cli_not_package")
 
-    def test_version_mismatch_rejected(self):
-        pkg = pathlib.Path(self.cli) / "package.json"
-        pkg.write_text(json.dumps({"name": "@getpaseo/cli", "version": "0.0.0"}), encoding="utf-8")
-        with self.assertRaises(M.Fail) as box:
-            M.resolve_cli(self.cli)
-        self.assertEqual(box.exception.code, "paseo_version_unexpected")
+    def test_two_releases_run_entry_and_rpc_without_version_gate(self):
+        # 两个可用 release 都走真实入口并实际发出读 RPC；版本号本身不参与准入。
+        import contextlib
+        import io
+        for version in ("0.17.5", "0.16.0"):
+            root = pathlib.Path(self.tmp) / f"cli-{version}"
+            cli, sdk = make_fake_cli(root, base_scenario(), version, version)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = M.main(["--paseo-cli", cli, "--target", "127.0.0.1:6767",
+                             "--server-id", "srv-synthetic", "report", "list"])
+            self.assertEqual(rc, M.RC_OK, out.getvalue())
+            calls = json.loads((sdk / "scenario.json").read_text(encoding="utf-8"))["calls"]
+            self.assertEqual([c["method"] for c in calls], ["observatory.insights.list"])
 
-    def test_sdk_version_mismatch_rejected(self):
+    def test_empty_sdk_version_rejected(self):
         pkg = pathlib.Path(self.cli) / "node_modules" / "@getpaseo" / "client" / "package.json"
-        pkg.write_text(json.dumps({"name": "@getpaseo/client", "version": "0.0.0"}), encoding="utf-8")
+        pkg.write_text(json.dumps({"name": "@getpaseo/client", "version": ""}), encoding="utf-8")
         with self.assertRaises(M.Fail) as box:
             M.resolve_cli(self.cli)
-        self.assertEqual(box.exception.code, "sdk_version_unexpected")
+        self.assertEqual(box.exception.code, "sdk_package_invalid")
 
     def test_sdk_package_missing_rejected(self):
         pkg = pathlib.Path(self.cli) / "node_modules" / "@getpaseo" / "client" / "package.json"
