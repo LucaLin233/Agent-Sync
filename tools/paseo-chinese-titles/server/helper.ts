@@ -101,6 +101,8 @@ export interface SessionRequest {
 export type GenerationErrorCode =
   | "provider_unavailable"
   | "model_failed"
+  /** The helper session ended in a non-idle terminal status (error, permission, ...). */
+  | "helper_failed"
   | "invalid_title"
   /** The model answered over the limit or mid-phrase and the one shortening turn did not fix it. */
   | "rewrite_failed"
@@ -308,6 +310,13 @@ async function runTitleModel(
      * Used by the manual summary to shorten an over-long or truncated title.
      */
     followUp?: (messages: readonly string[]) => string | null;
+    /**
+     * Set only by the manual summary. The SDK's own `timeout` and a non-idle
+     * terminal then become distinct reasons the panel can explain; the two
+     * automatic paths keep their previous `model_failed`, so their fallback and
+     * retry rules do not change.
+     */
+    reportTerminalStatus?: boolean;
   },
   options: GenerateOptions,
 ): Promise<ModelRun> {
@@ -416,7 +425,17 @@ async function runTitleModel(
       // The SDK call carries its own timeout, but a provider that answered
       // after its slice has already spent time the remaining steps need.
       if (now() - stepStartedAt >= cap) return { messages, errorCode: "timeout" };
-      if (outcome.status !== "idle") throw new Error("helper turn did not finish");
+      // The SDK reports one structured status per turn, so a session that ended
+      // in `error` or asked for a person is not the same event as an idle turn
+      // with no text. Only the status is read; its free-text `error` and the raw
+      // response never leave this function. Any other status keeps the previous
+      // `model_failed` for the automatic paths.
+      if (outcome.status === "timeout") {
+        return { messages, errorCode: input.reportTerminalStatus ? "timeout" : "model_failed" };
+      }
+      if (outcome.status !== "idle") {
+        return { messages, errorCode: input.reportTerminalStatus ? "helper_failed" : "model_failed" };
+      }
       const message = typeof outcome.lastMessage === "string" ? outcome.lastMessage.trim() : "";
       if (!message) return { messages, errorCode: "model_failed" };
       messages.push(message);
@@ -430,9 +449,15 @@ async function runTitleModel(
   }
 }
 
+/**
+ * `runTitleModel` decides which reasons exist per caller: the automatic paths
+ * only ever report `model_failed` for a non-idle terminal, so passing
+ * `helper_failed` through here cannot change them.
+ */
 function failureCode(run: ModelRun, fallback: GenerationErrorCode): GenerationErrorCode {
   if (run.errorCode === "provider_unavailable") return "provider_unavailable";
   if (run.errorCode === "timeout") return "timeout";
+  if (run.errorCode === "helper_failed") return "helper_failed";
   return fallback;
 }
 
@@ -519,6 +544,7 @@ export async function generateConversationTitle(
       systemPrompt: CONVERSATION_PROMPT,
       prompts: [conversationPrompt({ ...request, transcript: segments[0] })],
       followUp: summaryFollowUp(request),
+      reportTerminalStatus: true,
     }, options);
     return summaryResult(run, request.maxChars);
   }
@@ -544,6 +570,7 @@ export async function generateConversationTitle(
     prompts: steps,
     totalTimeoutMs: options.timeoutMs,
     followUp: summaryFollowUp(request),
+    reportTerminalStatus: true,
   }, options);
   // The planned turns are one digest per segment plus the title turn; at most
   // one optional shortening turn follows them.
@@ -597,9 +624,16 @@ function summaryResult(
   const verdict = checkConversationSummaryTitle(raw, maxChars);
   if (verdict.kind === "ok") return { title: verdict.title, ...tail };
   if (verdict.kind === "invalid") return { title: null, errorCode: "invalid_title", ...tail };
+  // The shortening turn itself can end in a timeout or a non-idle helper
+  // terminal; that structured reason survives instead of becoming
+  // `rewrite_failed`, which means the model answered but stayed unusable.
   return {
     title: null,
-    errorCode: run.errorCode === "timeout" ? "timeout" : "rewrite_failed",
+    errorCode: run.errorCode === "timeout"
+      ? "timeout"
+      : run.errorCode === "helper_failed"
+        ? "helper_failed"
+        : "rewrite_failed",
     ...tail,
   };
 }

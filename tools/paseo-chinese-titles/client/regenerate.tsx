@@ -74,6 +74,7 @@ const MESSAGES: Record<string, string> = {
   internal_failed: "生成失败，请重试。",
   provider_unavailable: "标题模型不可用，未修改原标题；检查插件设置里的 provider 后重试。",
   model_failed: "标题模型未返回可用结果，未修改原标题；可以重试。",
+  helper_failed: "辅助会话本轮没有正常结束（报错或等待授权），未修改原标题；可以重试。",
   invalid_title: "模型结果不是合格的中文标题，未修改原标题；可以重试。",
   rewrite_failed: "模型标题过长或断句不完整，缩写后仍不合格，未修改原标题；可以重试。",
   empty_conversation: "所选会话没有可概括的用户或助手文本，未修改原标题。",
