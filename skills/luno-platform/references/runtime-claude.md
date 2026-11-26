@@ -4,7 +4,7 @@
 
 ## 常驻提示词与技能
 
-本端常驻提示词位于实际 `$CLAUDE_CONFIG_DIR/CLAUDE.md`（未设置时默认 `~/.claude/CLAUDE.md`）。它由安装器以 `--ends claude --claude-home <CLAUDE_CONFIG_DIR>` 登记渲染：renderer `claude-main` 把角色启动段与 `prompt/LUNO.md` 生成到安装根的受管生成目录，再在该处建公开软链。首条任务的角色选择在 LUNO 职责段之前生效。GLOBAL 不进入生成文件，由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供，只覆盖该 daemon 启动的会话；原生 Claude Code 不经该 daemon，不直接获得它。项目级 `CLAUDE.md` 与企业级指令另按 Claude Code 官方发现规则加载；文件一致不证明未被遮蔽或实际加载。
+本端常驻提示词位于实际 `$CLAUDE_CONFIG_DIR/CLAUDE.md`（未设置时默认 `~/.claude/CLAUDE.md`）。它由安装器以 `--ends claude --claude-home <CLAUDE_CONFIG_DIR>` 登记渲染：renderer `claude-main` 把角色启动段与 `prompt/LUNO.md` 生成到安装根的受管生成目录，再在该处建公开软链。首条任务的角色选择在 LUNO 职责段之前生效。GLOBAL 不进入生成文件，由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供，只覆盖该 daemon 启动的会话；该字段的来源、切换、回读、验收与恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。原生 Claude Code 不经该 daemon，不直接获得它。项目级 `CLAUDE.md` 与企业级指令另按 Claude Code 官方发现规则加载；文件一致不证明未被遮蔽或实际加载。
 
 用户技能根是 `$CLAUDE_CONFIG_DIR/skills/<技能名>`，安装器把它们软链到受管检出 `skills/<技能名>/`。Claude Code 2.1.332 在设置 `CLAUDE_CONFIG_DIR` 后只从该目录加载个人技能，不再读取 HOME 下的 `.claude/skills`；版本变化须重核。`claude` 端是可选端，默认安装不处理，只有显式选择并给出安装根内的配置目录才启用；`--ends` 须只含 `claude`，不与 Codex 端同次执行。
 
