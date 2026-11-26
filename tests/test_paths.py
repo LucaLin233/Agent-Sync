@@ -13,6 +13,7 @@ PATHS_RULES = (
       'prompt/*', 'subagents/*', 'paseo.json', 'platforms/paseo/*',
       'skills/luno-platform/references/runtime-host.md',
       'skills/luno-platform/references/runtime-codex.md',
+      'skills/luno-platform/references/runtime-claude.md',
       'skills/luno-platform/references/runtime-paseo.md',
       'tests/run-tests.sh', 'tests/test_paths.py', '.github/workflows/tests.yml'),
      ('case', 'test-link-install.py'), '宿主安装器、目标登记与入口配置 → host'),
