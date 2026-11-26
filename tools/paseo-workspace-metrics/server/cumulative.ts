@@ -10,6 +10,7 @@ import {
   emptyTurnTotals,
   latestCompletedTurn,
   mergeTurnTotals,
+  sessionKindOf,
   summarizeLatestSamples,
   type TurnTotals,
 } from "../shared/metrics.ts";
@@ -17,7 +18,7 @@ import { effectiveWorkspaceScope, type WorkspaceSettingsValues } from "../shared
 
 export interface CodexHomeSettings {
   read(): Promise<
-    | { status: "ready"; revision?: string; values: WorkspaceSettingsValues & { codexHome?: string } }
+    | { status: "ready"; revision?: string; values: WorkspaceSettingsValues & { codexHome?: string; claudeHome?: string } }
     | { status: "invalid"; revision?: string; error: string }
   >;
 }
@@ -106,6 +107,8 @@ export function clearCumulativeCaches() {
   pathCache.clear();
   fileCache.clear();
   inflight.clear();
+  claudeFileCache.clear();
+  claudeInflight.clear();
   clearCumulativeRequestCache();
 }
 
@@ -690,8 +693,604 @@ async function findSessionFile(
   return best;
 }
 
+// ---------------------------------------------------------------------------
+// Claude Code transcripts
+//
+// Claude Code keeps one JSONL transcript per session at
+// <claude home>/projects/<encoded cwd>/<sessionId>.jsonl, where the claude home
+// is CLAUDE_CONFIG_DIR or ~/.claude. Each API response is an `assistant` record
+// whose message carries that request's usage. A response split into several
+// content blocks is written as several records with the same message id and the
+// same usage, so a message counts once. The session's totals are the sum over
+// its requests; the input total includes cache writes and cache reads, which
+// matches Codex's input_tokens (cache reads included) as the rate denominator.
+//
+// Turns: a main-chain user record carrying a text block (not a tool result,
+// not meta) starts a turn; the last record of the main-chain assistant message
+// whose stop_reason is end_turn closes it. The turn's output is the sum of its
+// messages' output_tokens. A new prompt before end_turn abandons the open turn;
+// a synthetic API-error message fails it. Claude does not record a provider
+// first-token time, so that stays null.
+// ---------------------------------------------------------------------------
+
+interface ClaudeOpenTurn {
+  id: string;
+  startedAt: number;
+  output: number;
+  broken: boolean;
+  /** end_turn message seen; later records of the same message move the end. */
+  endMessageId: string | null;
+  endAt: number | null;
+}
+
+interface ClaudeFileState {
+  dev: number;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  offset: number;
+  input: number;
+  cached: number;
+  requests: number;
+  /** The newest main-chain request, the Claude counterpart of Codex's latest sample. */
+  latest: CacheCounts | null;
+  /** Bounded recent message ids; repeated content-block records stay out. */
+  seen: Set<string>;
+  openTurn: ClaudeOpenTurn | null;
+  lastTurn: CompletedTurn | null;
+  lastSuccessful: CompletedTurn | null;
+  turns: TurnTotals;
+  countedTurnIds: Set<string>;
+}
+
+export interface ClaudeRead {
+  sample: CacheCounts | null;
+  latest: CacheCounts | null;
+  lastTurn: CompletedTurn | null;
+  lastSuccessful: CompletedTurn | null;
+  turns: TurnTotals;
+}
+
+interface ClaudeProjection {
+  eventType: string | null;
+  timestamp: string | null;
+  uuid: string | null;
+  sidechain: boolean;
+  meta: boolean;
+  apiError: boolean;
+  messageId: string | null;
+  stopReason: string | null;
+  /** The content's block types; a plain string content counts as "text". */
+  contentTypes: string[];
+  input: number | null;
+  cacheCreation: number | null;
+  cacheRead: number | null;
+  output: number | null;
+  closed: boolean;
+}
+
+const CLAUDE_SEEN_LIMIT = 512;
+const claudeFileCache = new Map<string, ClaudeFileState>();
+const claudeInflight = new Map<string, Promise<ClaudeRead | null>>();
+
+function projectClaudeUsage(raw: string, index: number, out: ClaudeProjection): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "input_tokens") { const value = readSafeNumber(raw, index); out.input = value.value; index = value.end; }
+    else if (key.value === "cache_creation_input_tokens") { const value = readSafeNumber(raw, index); out.cacheCreation = value.value; index = value.end; }
+    else if (key.value === "cache_read_input_tokens") { const value = readSafeNumber(raw, index); out.cacheRead = value.value; index = value.end; }
+    else if (key.value === "output_tokens") { const value = readSafeNumber(raw, index); out.output = value.value; index = value.end; }
+    else index = skipValue(raw, index);
+  }
+  return raw.length;
+}
+
+/** Reads only each content block's `type`; text and inputs are skipped. */
+function projectClaudeContent(raw: string, index: number, out: ClaudeProjection): number {
+  index = skipSpace(raw, index);
+  if (raw[index] === '"') {
+    out.contentTypes.push("text");
+    return skipString(raw, index);
+  }
+  if (raw[index] !== "[") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "]") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== "{") { index = skipValue(raw, index); continue; }
+    index += 1;
+    while (index < raw.length) {
+      index = skipSpace(raw, index);
+      if (raw[index] === "}") { index += 1; break; }
+      if (raw[index] === ",") { index += 1; continue; }
+      if (raw[index] !== '"') return raw.length;
+      const key = readSmallString(raw, index, 64);
+      index = skipSpace(raw, key.end);
+      if (raw[index] !== ":") return raw.length;
+      index = skipSpace(raw, index + 1);
+      if (key.value === "type") {
+        const value = readSmallString(raw, index, 64);
+        if (value.value) out.contentTypes.push(value.value);
+        index = value.end;
+      } else {
+        index = skipValue(raw, index);
+      }
+    }
+  }
+  return raw.length;
+}
+
+function projectClaudeMessage(raw: string, index: number, out: ClaudeProjection): number {
+  index = skipSpace(raw, index);
+  if (raw[index] !== "{") return skipValue(raw, index);
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") return index + 1;
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return skipValue(raw, index);
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return raw.length;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "id") {
+      const value = readSmallString(raw, index, 128);
+      out.messageId = value.value;
+      index = value.end;
+    } else if (key.value === "stop_reason") {
+      if (raw[index] === '"') {
+        const value = readSmallString(raw, index, 64);
+        out.stopReason = value.value;
+        index = value.end;
+      } else {
+        index = skipValue(raw, index);
+      }
+    } else if (key.value === "content") {
+      index = projectClaudeContent(raw, index, out);
+    } else if (key.value === "usage") {
+      index = projectClaudeUsage(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return raw.length;
+}
+
+function readLiteralTrue(raw: string, index: number): { value: boolean; end: number } {
+  const end = skipValue(raw, index);
+  return { value: raw.slice(index, end).trim() === "true", end };
+}
+
+/**
+ * Structural projection of a Claude transcript record: the envelope fields,
+ * the message id and stop reason, content block types, and the usage counters.
+ * Message text, tool inputs and results are skipped, never parsed.
+ */
+export function projectClaudeLine(raw: string): ClaudeProjection {
+  const out: ClaudeProjection = {
+    eventType: null, timestamp: null, uuid: null, sidechain: false, meta: false, apiError: false,
+    messageId: null, stopReason: null, contentTypes: [],
+    input: null, cacheCreation: null, cacheRead: null, output: null, closed: false,
+  };
+  let index = skipSpace(raw, 0);
+  if (raw[index] !== "{") return out;
+  index += 1;
+  while (index < raw.length) {
+    index = skipSpace(raw, index);
+    if (raw[index] === "}") { out.closed = true; break; }
+    if (raw[index] === ",") { index += 1; continue; }
+    if (raw[index] !== '"') return out;
+    const key = readSmallString(raw, index, 64);
+    index = skipSpace(raw, key.end);
+    if (raw[index] !== ":") return out;
+    index = skipSpace(raw, index + 1);
+    if (key.value === "type") {
+      const value = readSmallString(raw, index, 32);
+      out.eventType = value.value ?? "";
+      index = value.end;
+    } else if (key.value === "timestamp") {
+      const value = readSmallString(raw, index, 64);
+      out.timestamp = value.value;
+      index = value.end;
+    } else if (key.value === "uuid") {
+      const value = readSmallString(raw, index, 128);
+      out.uuid = value.value;
+      index = value.end;
+    } else if (key.value === "isSidechain") {
+      const value = readLiteralTrue(raw, index); out.sidechain = value.value; index = value.end;
+    } else if (key.value === "isMeta") {
+      const value = readLiteralTrue(raw, index); out.meta = value.value; index = value.end;
+    } else if (key.value === "isApiErrorMessage") {
+      const value = readLiteralTrue(raw, index); out.apiError = value.value; index = value.end;
+    } else if (key.value === "message") {
+      index = projectClaudeMessage(raw, index, out);
+    } else {
+      index = skipValue(raw, index);
+    }
+  }
+  return out;
+}
+
+function claudeTurnFrom(open: ClaudeOpenTurn): CompletedTurn | null {
+  if (open.endAt === null) return null;
+  return {
+    completedAt: open.endAt,
+    outputTokens: open.broken ? null : open.output,
+    elapsedMs: open.endAt >= open.startedAt ? open.endAt - open.startedAt : null,
+    firstTokenMs: null,
+  };
+}
+
+/** Folds a finished turn into the session's observations, once per prompt id. */
+function commitClaudeTurn(state: ClaudeFileState, open: ClaudeOpenTurn) {
+  const turn = claudeTurnFrom(open);
+  if (!turn) return;
+  state.lastTurn = turn;
+  if (state.countedTurnIds.has(open.id)) return;
+  state.countedTurnIds.add(open.id);
+  if (state.countedTurnIds.size > 64) {
+    const oldest = state.countedTurnIds.values().next().value;
+    if (oldest !== undefined) state.countedTurnIds.delete(oldest);
+  }
+  if (state.lastSuccessful === null || turn.completedAt > state.lastSuccessful.completedAt) {
+    state.lastSuccessful = turn;
+  }
+  state.turns = addTurn(state.turns, turn);
+}
+
+function parseClaudeLine(line: string, state: ClaudeFileState) {
+  if (!line.includes('"assistant"') && !line.includes('"user"')) return;
+  const event = projectClaudeLine(line);
+  if (!event.closed) return;
+  const at = event.timestamp === null ? NaN : Date.parse(event.timestamp);
+
+  if (event.eventType === "user") {
+    if (event.sidechain || event.meta) return;
+    if (event.contentTypes.includes("tool_result") || !event.contentTypes.includes("text")) return;
+    if (!event.uuid || !Number.isFinite(at)) return;
+    // A new prompt closes a turn that already reached end_turn and abandons one that did not.
+    if (state.openTurn?.endMessageId) commitClaudeTurn(state, state.openTurn);
+    state.openTurn = { id: event.uuid, startedAt: at, output: 0, broken: false, endMessageId: null, endAt: null };
+    return;
+  }
+
+  if (event.eventType !== "assistant") return;
+  const open = event.sidechain ? null : state.openTurn;
+
+  if (event.apiError && !event.sidechain) {
+    // The turn ended on an API error: it is not a completed observation.
+    state.openTurn = null;
+    state.lastTurn = null;
+    return;
+  }
+
+  // Later records of the end_turn message move the turn's end, nothing else.
+  if (open && open.endMessageId !== null && event.messageId === open.endMessageId) {
+    if (Number.isFinite(at) && open.endAt !== null && at > open.endAt) open.endAt = at;
+    return;
+  }
+
+  if (event.input === null) return;
+  if (event.messageId) {
+    if (state.seen.has(event.messageId)) return;
+    state.seen.add(event.messageId);
+    if (state.seen.size > CLAUDE_SEEN_LIMIT) {
+      const oldest = state.seen.values().next().value;
+      if (oldest !== undefined) state.seen.delete(oldest);
+    }
+  }
+  const creation = event.cacheCreation ?? 0;
+  const read = event.cacheRead ?? 0;
+  const request = event.input + creation + read;
+  const input = state.input + request;
+  const cached = state.cached + read;
+  if (!Number.isSafeInteger(input) || !Number.isSafeInteger(cached)) return;
+  state.input = input;
+  state.cached = cached;
+  state.requests += 1;
+  if (event.sidechain) return;
+  if (request > 0) state.latest = { input: request, cached: read };
+
+  if (!open) return;
+  // Another request after end_turn means the turn continued (for example, a stop hook).
+  if (open.endMessageId !== null) {
+    open.endMessageId = null;
+    open.endAt = null;
+  }
+  if (event.output === null) open.broken = true;
+  else open.output += event.output;
+  if (!Number.isFinite(at) || at < open.startedAt) open.broken = true;
+  if (event.stopReason === "end_turn" && event.messageId && Number.isFinite(at) && at >= open.startedAt) {
+    open.endMessageId = event.messageId;
+    open.endAt = at;
+  }
+}
+
+function resetClaudeState(file: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): ClaudeFileState {
+  return {
+    dev: file.dev, ino: file.ino, size: file.size, mtimeMs: file.mtimeMs, ctimeMs: file.ctimeMs,
+    offset: 0, input: 0, cached: 0, requests: 0, latest: null, seen: new Set(),
+    openTurn: null, lastTurn: null, lastSuccessful: null, turns: emptyTurnTotals(), countedTurnIds: new Set(),
+  };
+}
+
+/**
+ * A turn that reached end_turn is reported as completed at read time without
+ * being folded into the state, so a later record that continues it, or a later
+ * read, never counts it twice.
+ */
+function claudeCounts(state: ClaudeFileState): ClaudeRead {
+  const sample = state.requests > 0 && state.input > 0 ? { input: state.input, cached: state.cached } : null;
+  const open = state.openTurn;
+  const pending = open && open.endMessageId !== null ? claudeTurnFrom(open) : null;
+  if (!pending || !open) {
+    return { sample, latest: state.latest, lastTurn: state.lastTurn, lastSuccessful: state.lastSuccessful, turns: state.turns };
+  }
+  const counted = state.countedTurnIds.has(open.id);
+  return {
+    sample,
+    latest: state.latest,
+    lastTurn: pending,
+    lastSuccessful: counted || (state.lastSuccessful && state.lastSuccessful.completedAt >= pending.completedAt)
+      ? state.lastSuccessful
+      : pending,
+    turns: counted ? state.turns : addTurn(state.turns, pending),
+  };
+}
+
+async function appendClaudeFromHandle(handle: FileHandle, state: ClaudeFileState, end: number) {
+  let pending: Buffer = Buffer.alloc(0);
+  let position = state.offset;
+  while (position < end) {
+    const length = Math.min(READ_CHUNK_BYTES, end - position);
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
+    if (bytesRead <= 0) break;
+    position += bytesRead;
+    pending = pending.length === 0 ? buffer.subarray(0, bytesRead) : Buffer.concat([pending, buffer.subarray(0, bytesRead)]);
+    let newline = pending.indexOf(0x0a);
+    while (newline !== -1) {
+      parseClaudeLine(pending.subarray(0, newline).toString("utf8"), state);
+      pending = pending.subarray(newline + 1);
+      newline = pending.indexOf(0x0a);
+    }
+  }
+  state.offset = position - pending.length;
+}
+
+function forgetClaude(path: string) {
+  claudeFileCache.delete(path);
+  for (const [key, entry] of pathCache) {
+    if (entry.file?.path === path) pathCache.delete(key);
+  }
+}
+
+async function readClaudeCountsUncached(file: SessionFile): Promise<ClaudeRead | null> {
+  let before;
+  try {
+    before = await fs.lstat(file.path);
+  } catch {
+    forgetClaude(file.path);
+    return null;
+  }
+  if (!before.isFile() || before.isSymbolicLink() || !sameFile(file, before)) {
+    forgetClaude(file.path);
+    return null;
+  }
+  let handle: FileHandle | null = null;
+  try {
+    handle = await fs.open(file.path, constants.O_RDONLY | O_NOFOLLOW);
+    const stat = await handle.stat();
+    if (!stat.isFile() || !sameFile(file, stat)) {
+      forgetClaude(file.path);
+      return null;
+    }
+    if (stat.size > MAX_SESSION_BYTES) return null;
+    let state = claudeFileCache.get(file.path);
+    if (state && state.dev === stat.dev && state.ino === stat.ino && state.size === stat.size &&
+      state.mtimeMs === stat.mtimeMs && state.ctimeMs === stat.ctimeMs) {
+      return claudeCounts(state);
+    }
+    if (!state || !sameFile(state, stat) || stat.size < state.offset ||
+      (stat.size === state.size && (state.mtimeMs !== stat.mtimeMs || state.ctimeMs !== stat.ctimeMs))) {
+      state = resetClaudeState(stat);
+    }
+    await appendClaudeFromHandle(handle, state, stat.size);
+    state.size = stat.size;
+    state.mtimeMs = stat.mtimeMs;
+    state.ctimeMs = stat.ctimeMs;
+    claudeFileCache.set(file.path, state);
+    return claudeCounts(state);
+  } catch {
+    forgetClaude(file.path);
+    return null;
+  } finally {
+    if (handle) await handle.close().catch(() => undefined);
+  }
+}
+
+function readClaudeCounts(file: SessionFile): Promise<ClaudeRead | null> {
+  const key = `${file.path}|${file.dev}|${file.ino}|${file.size}|${file.mtimeMs}|${file.ctimeMs}`;
+  const running = claudeInflight.get(key);
+  if (running) return running;
+  const task = readClaudeCountsUncached(file).finally(() => claudeInflight.delete(key));
+  claudeInflight.set(key, task);
+  return task;
+}
+
+/** Same project-directory encoding as the Claude Agent SDK (and Paseo's port of it). */
+export function claudeProjectDirName(cwd: string): string {
+  let canonical = cwd;
+  try {
+    canonical = realpathSync.native(cwd);
+  } catch {
+    // A missing cwd is encoded as given.
+  }
+  if (process.platform === "darwin") canonical = canonical.normalize("NFC");
+  const replaced = canonical.replace(/[^a-zA-Z0-9]/g, "-");
+  if (replaced.length <= 200) return replaced;
+  let hash = 0;
+  for (let i = 0; i < canonical.length; i += 1) hash = ((hash << 5) - hash + canonical.charCodeAt(i)) | 0;
+  return `${replaced.slice(0, 200)}-${Math.abs(hash).toString(36)}`;
+}
+
+async function plainDir(path: string): Promise<boolean> {
+  try {
+    const stat = await fs.lstat(path);
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+async function plainFile(path: string): Promise<SessionFile | null> {
+  try {
+    const stat = await fs.lstat(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    return { path, dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The transcript for one Claude session. The cwd's encoded project directory is
+ * tried first; a session resumed elsewhere, or a cwd Claude saw under another
+ * name, is found by a bounded scan of the project directories, as Paseo does.
+ */
+async function findClaudeTranscript(
+  root: string,
+  uuid: string,
+  cwd: string | null,
+  refresh = false,
+): Promise<SessionFile | null> {
+  const key = `claude|${root}|${uuid}|${cwd ?? ""}`;
+  const cached = pathCache.get(key);
+  if (cached && Date.now() - cached.at < PATH_TTL_MS && (cached.file !== null || !refresh)) {
+    return cached.file;
+  }
+  const projects = join(root, "projects");
+  const name = `${uuid}.jsonl`;
+  let found: SessionFile | null = null;
+  if (await plainDir(projects)) {
+    if (cwd) {
+      const dir = join(projects, claudeProjectDirName(cwd));
+      if (await plainDir(dir)) found = await plainFile(join(dir, name));
+    }
+    if (!found) {
+      let entries: import("node:fs").Dirent[] = [];
+      try {
+        entries = await fs.readdir(projects, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+      let visited = 0;
+      for (const entry of entries) {
+        if (++visited > MAX_DIR_ENTRIES) break;
+        if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
+        found = await plainFile(join(projects, entry.name, name));
+        if (found) break;
+      }
+    }
+  }
+  if (found) {
+    try {
+      const real = await fs.realpath(found.path);
+      if (!real.startsWith(root + sep)) found = null;
+    } catch {
+      found = null;
+    }
+  }
+  if (found || !refresh) pathCache.set(key, { at: Date.now(), file: found });
+  return found;
+}
+
+async function usableClaudeRoot(root: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(root);
+    return stat.isDirectory() && await plainDir(join(root, "projects"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Claude home: an explicit plugin setting (inside the daemon user's home, no
+ * fallback when invalid), then the daemon's CLAUDE_CONFIG_DIR, then ~/.claude.
+ */
+export async function resolveClaudeHomeFromValues(
+  values: { claudeHome?: string },
+  options: { home?: string; env?: string | null } = {},
+): Promise<{ root: string | null; error: string | null }> {
+  const home = resolve(options.home ?? homedir());
+  let homeReal = home;
+  try {
+    homeReal = realpathSync(home);
+  } catch {
+    // A missing home can still be compared lexically.
+  }
+  const inside = (root: string) => {
+    const rel = relative(homeReal, root);
+    return !(rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel));
+  };
+
+  if (values.claudeHome) {
+    if (!isAbsolute(values.claudeHome)) {
+      return { root: null, error: "手动配置的 Claude home 必须是绝对路径" };
+    }
+    let root: string;
+    try {
+      root = realpathSync(resolve(values.claudeHome));
+    } catch {
+      return { root: null, error: "手动配置的 Claude home 不存在或不可读" };
+    }
+    if (!inside(root)) {
+      return { root: null, error: "手动配置的 Claude home 必须位于 daemon 用户家目录内" };
+    }
+    if (!await usableClaudeRoot(root)) {
+      return { root: null, error: "手动配置的 Claude home 下没有可用的 projects/ 目录" };
+    }
+    return { root, error: null };
+  }
+
+  const rawEnv = options.env === undefined ? process.env.CLAUDE_CONFIG_DIR : options.env;
+  const env = rawEnv?.trim();
+  if (env && isAbsolute(env)) {
+    try {
+      const root = realpathSync(resolve(env));
+      if (await usableClaudeRoot(root)) return { root, error: null };
+    } catch {
+      // Fall back to the default Claude home.
+    }
+  }
+
+  let root: string;
+  try {
+    root = realpathSync(join(home, ".claude"));
+  } catch {
+    return { root: null, error: "未找到 Claude 会话目录；请设置 CLAUDE_CONFIG_DIR 或插件 claudeHome" };
+  }
+  if (!inside(root)) return { root: null, error: "默认 Claude home 不在 daemon 用户家目录内" };
+  if (await usableClaudeRoot(root)) return { root, error: null };
+  return { root: null, error: "未找到 Claude 会话目录；请设置 CLAUDE_CONFIG_DIR 或插件 claudeHome" };
+}
+
+type HomeValues = WorkspaceSettingsValues & { codexHome?: string; claudeHome?: string };
+
 interface SettingsSnapshot {
-  values: WorkspaceSettingsValues & { codexHome?: string };
+  values: HomeValues;
   revision: string | null;
 }
 
@@ -849,6 +1448,7 @@ function empty(
     unavailable,
     rate: null,
     error,
+    latestSamples: [],
     recentTurn: null,
     turns: {
       sessions: 0,
@@ -865,6 +1465,8 @@ function empty(
 interface RequestOptions {
   settings?: CodexHomeSettings;
   codexHome?: string;
+  /** Tests only: a fixed Claude home, like codexHome. */
+  claudeHome?: string;
   cumulativeEnabled?: boolean;
   workspaceIds?: string[];
   allWorkspaces?: boolean;
@@ -873,7 +1475,7 @@ interface RequestOptions {
 interface RequestContext {
   scope: ReturnType<typeof effectiveWorkspaceScope>;
   revision: string | null;
-  values: WorkspaceSettingsValues & { codexHome?: string };
+  values: HomeValues;
 }
 
 /**
@@ -890,7 +1492,7 @@ async function requestContext(options: RequestOptions): Promise<RequestContext> 
         cumulativeEnabled: options.cumulativeEnabled,
         workspaceIds: options.workspaceIds,
         allWorkspaces: options.allWorkspaces,
-      } as WorkspaceSettingsValues & { codexHome?: string },
+      } as HomeValues,
       revision: null,
     }
     : await readSettingsSnapshot(options.settings);
@@ -909,6 +1511,20 @@ async function resolveRoot(
   return options.codexHome
     ? { root: options.codexHome, error: null }
     : resolveCodexHomeFromValues(context.values);
+}
+
+async function resolveClaudeRoot(
+  options: RequestOptions,
+  context: RequestContext,
+): Promise<{ root: string | null; error: string | null }> {
+  return options.claudeHome
+    ? { root: options.claudeHome, error: null }
+    : resolveClaudeHomeFromValues(context.values);
+}
+
+/** The session kind behind an agent; custom providers keep the adapter marker. */
+function sessionKind(agent: { provider?: unknown; persistence?: { metadata?: { provider?: unknown } | null } | null }): "codex" | "claude" | null {
+  return sessionKindOf(agent.provider, agent.persistence?.metadata?.provider);
 }
 
 const STALE = "设置已变化，已丢弃本次读取";
@@ -934,6 +1550,9 @@ async function collectCumulativeUsageUncached(
 
   const agentIds = [...new Set(input.agentIds)];
   const eligible = new Map<string, number | null>();
+  const claudeEligible = new Map<string, string | null>();
+  /** The requesting agent that first named each Claude session; one sample per conversation. */
+  const claudeAgent = new Map<string, string>();
   let unavailable = 0;
 
   for (const agentId of agentIds) {
@@ -949,14 +1568,23 @@ async function collectCumulativeUsageUncached(
       unavailable += 1;
       continue;
     }
-    const marker = agent.persistence?.metadata?.provider;
-    if (agent.provider !== "codex" && marker !== "codex") {
+    const kind = sessionKind(agent);
+    if (kind === null) {
       unavailable += 1;
       continue;
     }
     const nativeHandle = agent.persistence?.nativeHandle;
     if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) {
       unavailable += 1;
+      continue;
+    }
+    if (kind === "claude") {
+      const cwd = (agent as { cwd?: unknown }).cwd;
+      const uuid = nativeHandle.toLowerCase();
+      if (!claudeEligible.has(uuid) || claudeEligible.get(uuid) === null) {
+        claudeEligible.set(uuid, typeof cwd === "string" && isAbsolute(cwd) ? cwd : null);
+      }
+      if (!claudeAgent.has(uuid)) claudeAgent.set(uuid, agentId);
       continue;
     }
     const created = typeof agent.createdAt === "string" ? Date.parse(agent.createdAt) : NaN;
@@ -967,25 +1595,30 @@ async function collectCumulativeUsageUncached(
     else if (createdMs !== null && (previous === null || createdMs < previous)) eligible.set(uuid, createdMs);
   }
 
-  if (eligible.size === 0) {
-    return empty(workspaceId, 0, unavailable, "当前工作区没有可确认的 Codex 会话");
+  const total = eligible.size + claudeEligible.size;
+  if (total === 0) {
+    return empty(workspaceId, 0, unavailable, "当前工作区没有可确认的 Codex 或 Claude 会话");
   }
 
   // Settings may have changed while agent.refresh() was in flight. Stop before
   // resolving any root; the request keeps its original grant only.
   if (await settingsChangedSince(options.settings, context.revision)) {
-    return empty(workspaceId, eligible.size, unavailable, STALE);
+    return empty(workspaceId, total, unavailable, STALE);
   }
 
-  const root = await resolveRoot(options, context);
-  if (!root.root) {
-    return empty(workspaceId, eligible.size, unavailable, root.error ?? "未找到 Codex 会话目录");
+  // Each data root is probed only when this request has sessions of that kind.
+  // One kind's missing root leaves its sessions missing without hiding the other.
+  const codexRoot = eligible.size > 0 ? await resolveRoot(options, context) : { root: null, error: null };
+  const claudeRoot = claudeEligible.size > 0 ? await resolveClaudeRoot(options, context) : { root: null, error: null };
+  if (!codexRoot.root && !claudeRoot.root) {
+    const errors = [codexRoot.error, claudeRoot.error].filter((error): error is string => Boolean(error));
+    return empty(workspaceId, total, unavailable, errors.join("；") || "未找到会话目录");
   }
   if (await settingsChangedSince(options.settings, context.revision)) {
-    return empty(workspaceId, eligible.size, unavailable, STALE);
+    return empty(workspaceId, total, unavailable, STALE);
   }
 
-  const key = `${workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${[...eligible.keys()].sort().join(",")}|${unavailable}|${root.root}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
+  const key = `${workspaceId}|${[...new Set(input.agentIds)].sort().join(",")}|${[...eligible.keys()].sort().join(",")}|${[...claudeEligible.keys()].sort().join(",")}|${unavailable}|${codexRoot.root ?? ""}|${claudeRoot.root ?? ""}|${context.revision ?? ""}|${scope.allWorkspaces ? "*" : scope.workspaceIds.join(",")}`;
   if (!refresh) {
     const cached = workspaceCache.get(key);
     if (cached && Date.now() - cached.at < WORKSPACE_TTL_MS) return cached.value;
@@ -993,34 +1626,50 @@ async function collectCumulativeUsageUncached(
     if (running) return running;
   }
 
-  let realRoot: string;
+  let realRoot: string | null = null;
+  let realClaudeRoot: string | null = null;
   try {
-    realRoot = await fs.realpath(root.root);
+    if (codexRoot.root) realRoot = await fs.realpath(codexRoot.root);
   } catch {
-    return empty(workspaceId, eligible.size, unavailable, "Codex 会话目录不可读");
+    realRoot = null;
+  }
+  try {
+    if (claudeRoot.root) realClaudeRoot = await fs.realpath(claudeRoot.root);
+  } catch {
+    realClaudeRoot = null;
+  }
+  if (realRoot === null && realClaudeRoot === null) {
+    return empty(workspaceId, total, unavailable, "会话目录不可读");
   }
 
   const generation = cacheGeneration;
   let task!: Promise<RpcOutput<typeof cumulativeUsageRpc>>;
   task = (async () => {
-    const reads = await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
-      const file = await findSessionFile(realRoot, uuid, createdMs, refresh);
+    const reads = realRoot === null ? [] : await Promise.all([...eligible].map(async ([uuid, createdMs]) => {
+      const file = await findSessionFile(realRoot!, uuid, createdMs, refresh);
       if (!file) return null;
       return readSessionCounts(file);
     }));
+    const claudeReads = realClaudeRoot === null ? [] : await Promise.all([...claudeEligible].map(async ([uuid, cwd]) => {
+      const file = await findClaudeTranscript(realClaudeRoot!, uuid, cwd, refresh);
+      if (!file) return null;
+      const read = await readClaudeCounts(file);
+      return read ? { agentId: claudeAgent.get(uuid)!, read } : null;
+    }));
     if (await settingsChangedSince(options.settings, context.revision)) {
-      return empty(workspaceId, eligible.size, unavailable, STALE);
+      return empty(workspaceId, total, unavailable, STALE);
     }
-    const samples = reads
-      .map((read) => read?.sample ?? null)
+    const samples = [...reads.map((read) => read?.sample ?? null), ...claudeReads.map((entry) => entry?.read.sample ?? null)]
       .filter((sample): sample is CacheCounts => sample !== null);
+    const latestSamples = claudeReads.flatMap((entry) =>
+      entry?.read.latest ? [{ agentId: entry.agentId, input: entry.read.latest.input, cached: entry.read.latest.cached }] : []);
     const totals = summarizeLatestSamples(samples);
     // One successful turn per rollout is already folded into constant-space
     // sums while reading; newest wins by completion time, never by speed.
     let turns = emptyTurnTotals();
     let recentTurn: CompletedTurn | null = null;
     let turnSessions = 0;
-    for (const read of reads) {
+    for (const read of [...reads, ...claudeReads.map((entry) => entry?.read ?? null)]) {
       if (!read) continue;
       turns = mergeTurnTotals(turns, read.turns);
       if (read.turns.completed > 0) turnSessions += 1;
@@ -1031,11 +1680,12 @@ async function collectCumulativeUsageUncached(
       inputTokens: totals.input,
       cachedInputTokens: totals.cached,
       covered: totals.covered,
-      eligible: eligible.size,
-      missing: eligible.size - totals.covered,
+      eligible: total,
+      missing: total - totals.covered,
       unavailable,
       rate: totals.rate,
       error: null,
+      latestSamples,
       recentTurn: recentTurn === null ? null : {
         completedAt: recentTurn.completedAt,
         outputTokens: recentTurn.outputTokens,
@@ -1064,8 +1714,11 @@ async function collectCumulativeUsageUncached(
   return task;
 }
 
-function emptyTurn(reason: "not-codex" | "scope" | "missing-samples" | "read-failed"): RpcOutput<typeof turnOutputRpc> {
-  return { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason };
+function emptyTurn(
+  reason: "not-codex" | "scope" | "missing-samples" | "read-failed",
+  source: "codex" | "claude" | null = null,
+): RpcOutput<typeof turnOutputRpc> {
+  return { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason, source };
 }
 
 /**
@@ -1093,41 +1746,77 @@ export async function collectTurnOutput(
   if (!agent || agent.workspaceId !== input.workspaceId || agent.archivedAt || agent.background) {
     return emptyTurn("read-failed");
   }
-  const marker = agent.persistence?.metadata?.provider;
-  if (agent.provider !== "codex" && marker !== "codex") return emptyTurn("not-codex");
+  const kind = sessionKind(agent);
+  if (kind === null) return emptyTurn("not-codex");
   const nativeHandle = agent.persistence?.nativeHandle;
-  if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) return emptyTurn("not-codex");
+  if (typeof nativeHandle !== "string" || !UUID_RE.test(nativeHandle)) return emptyTurn("not-codex", kind);
+  if (kind === "claude") return collectClaudeTurn(agent, nativeHandle.toLowerCase(), options, context);
 
-  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "codex");
   const root = await resolveRoot(options, context);
-  if (!root.root) return emptyTurn("read-failed");
-  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+  if (!root.root) return emptyTurn("read-failed", "codex");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "codex");
 
   let realRoot: string;
   try {
     realRoot = await fs.realpath(root.root);
   } catch {
-    return emptyTurn("read-failed");
+    return emptyTurn("read-failed", "codex");
   }
 
   const created = typeof agent.createdAt === "string" ? Date.parse(agent.createdAt) : NaN;
   const createdMs = Number.isFinite(created) ? created : null;
   // A newly written rollout must not sit behind a 30 second negative path cache.
   const file = await findSessionFile(realRoot, nativeHandle.toLowerCase(), createdMs, true);
-  if (!file) return emptyTurn("missing-samples");
+  if (!file) return emptyTurn("missing-samples", "codex");
   const read = await readSessionCounts(file);
-  if (!read?.lastTurn) return emptyTurn("missing-samples");
+  if (!read?.lastTurn) return emptyTurn("missing-samples", "codex");
 
-  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "codex");
 
   const { outputTokens, elapsedMs, firstTokenMs } = read.lastTurn;
   // Independent first-token timing survives a zero or absent elapsed duration.
-  if (elapsedMs === null && firstTokenMs === null && outputTokens === null) return emptyTurn("missing-samples");
+  if (elapsedMs === null && firstTokenMs === null && outputTokens === null) return emptyTurn("missing-samples", "codex");
   return {
     outputTokens,
     elapsedMs,
     firstTokenMs,
     reason: outputTokens === null ? "missing-samples" : null,
+    source: "codex",
+  };
+}
+
+/** The latest completed Claude turn, from the session's own transcript. */
+async function collectClaudeTurn(
+  agent: { cwd?: unknown },
+  uuid: string,
+  options: RequestOptions,
+  context: RequestContext,
+): Promise<RpcOutput<typeof turnOutputRpc>> {
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "claude");
+  const root = await resolveClaudeRoot(options, context);
+  if (!root.root) return emptyTurn("read-failed", "claude");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "claude");
+  let realRoot: string;
+  try {
+    realRoot = await fs.realpath(root.root);
+  } catch {
+    return emptyTurn("read-failed", "claude");
+  }
+  const cwd = typeof agent.cwd === "string" && isAbsolute(agent.cwd) ? agent.cwd : null;
+  const file = await findClaudeTranscript(realRoot, uuid, cwd, true);
+  if (!file) return emptyTurn("missing-samples", "claude");
+  const read = await readClaudeCounts(file);
+  if (!read?.lastTurn) return emptyTurn("missing-samples", "claude");
+  if (await settingsChangedSince(options.settings, context.revision)) return emptyTurn("scope", "claude");
+  const { outputTokens, elapsedMs, firstTokenMs } = read.lastTurn;
+  if (elapsedMs === null && outputTokens === null) return emptyTurn("missing-samples", "claude");
+  return {
+    outputTokens,
+    elapsedMs,
+    firstTokenMs,
+    reason: outputTokens === null ? "missing-samples" : null,
+    source: "claude",
   };
 }
 

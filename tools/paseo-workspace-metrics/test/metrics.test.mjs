@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { latestCacheSample, observeTurn, summarizeLatestSamples } from "../shared/metrics.ts";
+import { latestCacheSample, metricFirstTokenMs, observeTurn, parseMetricDuration, sessionKindOf, summarizeLatestSamples } from "../shared/metrics.ts";
 
 test("recent samples sum token counts, including cache reads in total input", () => {
   const smaller = latestCacheSample("codex", { inputTokens: 100, cachedInputTokens: 80 });
@@ -67,6 +67,7 @@ test("timing uses the first visible assistant text and matching whole turn only"
     elapsedMs: 2_000,
     outcome: "completed",
     outputPerSecond: 120,
+    providerFirstTokenMs: null,
   });
 });
 
@@ -80,6 +81,7 @@ test("observation gaps and missing output do not become measurements", () => {
     elapsedMs: 2_000,
     outcome: "completed",
     outputPerSecond: null,
+    providerFirstTokenMs: null,
   });
 });
 
@@ -98,4 +100,30 @@ test("a completed turn keeps its rollout-independent timing only", () => {
   const result = [start, assistant, complete].reduce(observeTurn, empty);
   assert.equal("startedAt" in result.last, false);
   assert.equal("endedAt" in result.last, false);
+});
+
+test("the SDK TTFT metric is read back from Paseo's formatted duration", () => {
+  assert.equal(parseMetricDuration("<0.1s"), 0);
+  assert.equal(parseMetricDuration("1.2s"), 1_200);
+  assert.equal(parseMetricDuration("1m 5s"), 65_000);
+  assert.equal(parseMetricDuration("fast"), null);
+  assert.equal(metricFirstTokenMs([{ label: "Elapsed", value: "9.0s" }, { label: "TTFT", value: "0.8s" }]), 800);
+  assert.equal(metricFirstTokenMs(undefined), null);
+});
+
+test("a completed Claude turn carries the provider first token into the measurement", () => {
+  const empty = { active: null, last: null };
+  const result = [
+    { kind: "start", turnId: "a", timestamp: 1_000 },
+    { kind: "completed", turnId: "a", timestamp: 3_000, outputTokens: 100, providerFirstTokenMs: 700 },
+  ].reduce(observeTurn, empty);
+  assert.equal(result.last.providerFirstTokenMs, 700);
+  assert.equal(result.last.outputPerSecond, 50);
+});
+
+test("custom providers are classified by the adapter marker", () => {
+  assert.equal(sessionKindOf("claude-cchp", "claude"), "claude");
+  assert.equal(sessionKindOf("cchp", "codex"), "codex");
+  assert.equal(sessionKindOf("claude"), "claude");
+  assert.equal(sessionKindOf("opencode", "opencode"), null);
 });

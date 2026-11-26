@@ -21,6 +21,10 @@ function splitIds(text: string): string[] {
   return [...new Set(text.split(/[\s,]+/).map((id) => id.trim()).filter(Boolean))];
 }
 
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
 function initialRestricted(settings: ReadySettings["values"]): boolean {
   return settings.allWorkspaces === false ||
     (settings.allWorkspaces !== true && (settings.workspaceIds?.length ?? 0) > 0);
@@ -40,6 +44,7 @@ function AdvancedSettings({
   const [restricted, setRestricted] = useState(() => initialRestricted(settings.values));
   const [idsText, setIdsText] = useState(() => (settings.values.workspaceIds ?? []).join("\n"));
   const [codexHome, setCodexHome] = useState(() => settings.values.codexHome ?? "");
+  const [claudeHome, setClaudeHome] = useState(() => settings.values.claudeHome ?? "");
   const [error, setError] = useState<string | null>(null);
   // Keep the revision this draft was opened with so another client's save conflicts.
   const [revision] = useState(settings.revision);
@@ -51,8 +56,13 @@ function AdvancedSettings({
       return;
     }
     const home = codexHome.trim();
-    if (home && !home.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(home)) {
+    if (home && !isAbsolutePath(home)) {
       setError("Codex home 必须是绝对路径");
+      return;
+    }
+    const claude = claudeHome.trim();
+    if (claude && !isAbsolutePath(claude)) {
+      setError("Claude home 必须是绝对路径");
       return;
     }
     setError(null);
@@ -62,9 +72,10 @@ function AdvancedSettings({
       allWorkspaces: !restricted,
       workspaceIds: restricted ? ids : [],
       codexHome: home || undefined,
+      claudeHome: claude || undefined,
     }, revision);
     if (saved) onClose();
-  }, [codexHome, idsText, onClose, restricted, revision, scope.enabled, settings]);
+  }, [claudeHome, codexHome, idsText, onClose, restricted, revision, scope.enabled, settings]);
 
   return (
     <SettingsCard>
@@ -91,6 +102,14 @@ function AdvancedSettings({
         hint="留空时自动发现 CODEX_HOME 或 ~/.codex；填写时作为显式覆盖。"
         initialValue={codexHome}
         onChangeText={setCodexHome}
+        placeholder="留空自动发现"
+        disabled={settings.saving}
+      />
+      <SettingsInput
+        label="Claude home"
+        hint="留空时自动发现 CLAUDE_CONFIG_DIR 或 ~/.claude；填写时作为显式覆盖。"
+        initialValue={claudeHome}
+        onChangeText={setClaudeHome}
         placeholder="留空自动发现"
         disabled={settings.saving}
       />
@@ -130,7 +149,7 @@ function SettingsControls({ settings, theme }: { settings: ReadySettings; theme:
       <SettingsCard>
         <SettingsSwitch
           label="累计统计"
-          hint="开启后按 workspace 汇总 Codex 累计缓存率；默认只显示最近样本。"
+          hint="开启后按 workspace 汇总 Codex 与 Claude 累计缓存率；默认只显示最近样本。"
           value={enabled}
           disabled={settings.saving}
           onValueChange={changeCumulative}

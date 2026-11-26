@@ -24,7 +24,17 @@ export const cumulativeUsageRpc = defineRpc({
     rate: z.number().min(0).max(1).nullable(),
     error: z.string().nullable(),
     /**
-     * Latest successful Codex turn across the matched sessions, ordered by its
+     * Claude sessions' newest main-chain request (input includes cache writes
+     * and reads), keyed by the requesting agent ID. Paseo's reported Claude
+     * usage has no cache-write count, so the recent card takes these instead.
+     */
+    latestSamples: z.array(z.object({
+      agentId: z.string(),
+      input: z.number().int().nonnegative(),
+      cached: z.number().int().nonnegative(),
+    })),
+    /**
+     * Latest successful Codex or Claude turn across the matched sessions, ordered by its
      * own completion time. Numbers are passed through as read; the client
      * derives the speed with the same formula as the panel.
      */
@@ -69,6 +79,8 @@ export const turnOutputRpc = defineRpc({
     /** Codex's reported time_to_first_token_ms; not the Paseo first-text time. */
     firstTokenMs: z.number().int().nonnegative().nullable(),
     reason: z.enum(["not-codex", "scope", "missing-samples", "read-failed"]).nullable(),
+    /** Which native record produced the turn; null when the agent is neither. */
+    source: z.enum(["codex", "claude"]).nullable(),
   }),
 });
 

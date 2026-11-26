@@ -1,10 +1,12 @@
 import { usePaseo, type AgentRef } from "@getpaseo/plugin/client";
 import { useQuery } from "@tanstack/react-query";
-import { latestCacheSample, type ReportedUsage } from "../shared/metrics";
+import { latestCacheSample, sessionKindOf, type ReportedUsage } from "../shared/metrics";
 
 export interface UsageSnapshot {
   cacheSample: ReturnType<typeof latestCacheSample>;
   usage: ReportedUsage | null;
+  /** Codex or Claude by the adapter marker, so custom provider IDs still match. */
+  kind: "codex" | "claude" | null;
 }
 
 export function useWorkspaceUsage(
@@ -45,7 +47,8 @@ export function useWorkspaceUsage(
             usage,
             result.agent.persistence?.metadata?.provider,
           );
-          snapshots.set(agentRef.id, { usage, cacheSample });
+          const kind = sessionKindOf(result.agent.provider, result.agent.persistence?.metadata?.provider);
+          snapshots.set(agentRef.id, { usage, cacheSample, kind });
         }));
       }
       return snapshots;

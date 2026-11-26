@@ -1,8 +1,14 @@
 import { usePaseo, type AgentRef } from "@getpaseo/plugin/client";
-import { useEffect, useState } from "react";
-import { observeTurn, tokenCount, type TurnObservation, type TurnSignal } from "../shared/metrics";
+import { useEffect, useRef, useState } from "react";
+import { metricFirstTokenMs, observeTurn, tokenCount, type TurnObservation, type TurnSignal } from "../shared/metrics";
 
-export function useLiveTurn(agentRef: AgentRef) {
+/**
+ * `claude` says whether the agent runs on Claude Code by its adapter marker;
+ * custom providers such as claude-cchp report their own ID on the event.
+ */
+export function useLiveTurn(agentRef: AgentRef, claude = false) {
+  const claudeRef = useRef(claude);
+  claudeRef.current = claude;
   const paseo = usePaseo();
   const [status, setStatus] = useState<"connecting" | "live" | "unavailable">("connecting");
   const [observation, setObservation] = useState<TurnObservation>({ active: null, last: null });
@@ -50,7 +56,12 @@ export function useLiveTurn(agentRef: AgentRef) {
             kind: "completed",
             ...stamp,
             // Claude's streaming result reports the main agent loop's output for this turn.
-            outputTokens: event.provider === "claude" ? tokenCount(event.usage?.outputTokens) : null,
+            outputTokens: event.provider === "claude" || claudeRef.current
+              ? tokenCount(event.usage?.outputTokens)
+              : null,
+            providerFirstTokenMs: event.provider === "claude" || claudeRef.current
+              ? metricFirstTokenMs((event as { metrics?: unknown }).metrics)
+              : null,
           });
           break;
         case "turn_failed":

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, projectEventLine, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
+import { claudeProjectDirName, projectClaudeLine, resolveClaudeHomeFromValues, clearCumulativeCaches, clearCumulativeRequestCache, collectCumulativeUsage, collectTurnOutput, createScopeSubscriptionHandler, projectEventLine, resolveCodexHome, workspaceScope } from "../server/cumulative.ts";
 
 const WS = "wks_test";
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -148,6 +148,7 @@ test("uses each session's latest cumulative snapshot and weights the total", asy
     unavailable: 0,
     rate: 1_150 / 1_500,
     error: null,
+    latestSamples: [],
     recentTurn: null,
     turns: zeroTurns,
   });
@@ -248,13 +249,13 @@ test("an unavailable data root reports an explicit error", async (t) => {
   assert.notEqual(result.error, null);
 });
 
-test("non-Codex sessions are not eligible", async (t) => {
+test("sessions of an unsupported provider are not eligible", async (t) => {
   clearCumulativeCaches();
   const root = await makeRoot(t);
   const result = await run(root, [
-    snapshot("agent-claude", uuid(1), {
-      provider: "claude",
-      persistence: { nativeHandle: uuid(1), metadata: {} },
+    snapshot("agent-other", uuid(1), {
+      provider: "opencode",
+      persistence: { nativeHandle: uuid(1), metadata: { provider: "opencode" } },
     }),
   ]);
   assert.equal(result.eligible, 0);
@@ -428,6 +429,7 @@ test("allWorkspaces totals two workspaces separately and never mixes them", asyn
     unavailable: 0,
     rate: 0.9,
     error: null,
+    latestSamples: [],
     recentTurn: null,
     turns: zeroTurns,
   });
@@ -441,6 +443,7 @@ test("allWorkspaces totals two workspaces separately and never mixes them", asyn
     unavailable: 0,
     rate: 0.25,
     error: null,
+    latestSamples: [],
     recentTurn: null,
     turns: zeroTurns,
   });
@@ -605,7 +608,7 @@ test("the latest completed Codex turn uses its own native boundaries", async (t)
     turnComplete("turn-2", 7),
   ]);
   const result = await runTurn(root, [snapshot("agent-a", a)]);
-  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null });
+  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null, source: "codex" });
 });
 
 test("a first turn has no baseline without an earlier completed boundary", async (t) => {
@@ -624,6 +627,7 @@ test("a first turn has no baseline without an earlier completed boundary", async
     elapsedMs: 2_000,
     firstTokenMs: 850,
     reason: "missing-samples",
+    source: "codex",
   });
 });
 
@@ -645,6 +649,7 @@ test("a turn with invalid output in the previous turn does not reuse its baselin
     elapsedMs: 2_000,
     firstTokenMs: null,
     reason: "missing-samples",
+    source: "codex",
   });
 });
 
@@ -677,7 +682,7 @@ test("a second completed turn uses the counter observed at its own start", async
     turnComplete("turn-2", 6),
   ]);
   const result = await runTurn(root, [snapshot("agent-a", a)]);
-  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null });
+  assert.deepEqual(result, { outputTokens: 250, elapsedMs: 2_000, firstTokenMs: null, reason: null, source: "codex" });
 });
 
 test("a turn without a completion boundary is not reported", async (t) => {
@@ -689,7 +694,7 @@ test("a turn without a completion boundary is not reported", async (t) => {
     tokenAt(2, 100, 50, 40),
   ]);
   const result = await runTurn(root, [snapshot("agent-a", a)]);
-  assert.deepEqual(result, { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason: "missing-samples" });
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: null, firstTokenMs: null, reason: "missing-samples", source: "codex" });
 });
 
 test("a completion without a matching start is ignored", async (t) => {
@@ -724,6 +729,7 @@ test("an in-turn regression is discarded even when the final value recovers", as
     elapsedMs: 3_000,
     firstTokenMs: null,
     reason: "missing-samples",
+    source: "codex",
   });
 });
 
@@ -740,7 +746,7 @@ test("Codex's own time_to_first_token_ms is projected when present", async (t) =
   const result = await runTurn(root, [snapshot("agent-a", a)]);
   // turn-1 is the first boundary, so it only establishes the trusted final
   // count; turn-2 then measures the delta from it.
-  assert.deepEqual(result, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples" });
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples", source: "codex" });
 });
 
 test("a task_complete carrying an error is not a completed turn", async (t) => {
@@ -812,11 +818,12 @@ test("turn output stays gated by the cumulative switch and Codex marker", async 
     { codexHome: root },
   );
   assert.equal(disabled.reason, "scope");
-  const claude = await runTurn(root, [snapshot("agent-claude", a, {
-    provider: "claude",
-    persistence: { nativeHandle: a, metadata: {} },
+  const unsupported = await runTurn(root, [snapshot("agent-other", a, {
+    provider: "opencode",
+    persistence: { nativeHandle: a, metadata: { provider: "opencode" } },
   })]);
-  assert.equal(claude.reason, "not-codex");
+  assert.equal(unsupported.reason, "not-codex");
+  assert.equal(unsupported.source, null);
   const other = await runTurn(root, [snapshot("agent-a", a, { workspaceId: "wks_other" })]);
   assert.equal(other.reason, "read-failed");
 });
@@ -963,7 +970,7 @@ test("first-token timing survives a zero elapsed duration", async (t) => {
     turnComplete("turn-1", 2, { time_to_first_token_ms: 850 }),
   ]);
   const result = await runTurn(root, [snapshot("agent-a", a)]);
-  assert.deepEqual(result, { outputTokens: null, elapsedMs: 0, firstTokenMs: 850, reason: "missing-samples" });
+  assert.deepEqual(result, { outputTokens: null, elapsedMs: 0, firstTokenMs: 850, reason: "missing-samples", source: "codex" });
 });
 
 test("structural projection ignores content and nested fields while keeping the envelope type", () => {
@@ -1039,7 +1046,7 @@ test("boundaries alone return timing on first read and on the cache hit", async 
     turnComplete("turn-1", 3, { time_to_first_token_ms: 850 }),
   ]);
   const first = await runTurn(root, [snapshot("agent-a", a)]);
-  assert.deepEqual(first, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples" });
+  assert.deepEqual(first, { outputTokens: null, elapsedMs: 2_000, firstTokenMs: 850, reason: "missing-samples", source: "codex" });
   const cached = await runTurn(root, [snapshot("agent-a", a)]);
   assert.deepEqual(cached, first);
 });
@@ -1263,6 +1270,7 @@ test("a completed turn replayed after a rollback is not counted twice", async (t
     elapsedMs: 2_000,
     firstTokenMs: null,
     reason: "missing-samples",
+    source: "codex",
   });
 });
 
@@ -1318,6 +1326,7 @@ test("a replayed turn refreshes the detail with its own duration, still counted 
     elapsedMs: 1_000,
     firstTokenMs: null,
     reason: "missing-samples",
+    source: "codex",
   });
   const result = await run(root, [snapshot("agent-a", a)]);
   assert.equal(result.turns.completed, 1);
@@ -1395,4 +1404,317 @@ test("a successful turn survives a later failed or canceled turn for the top car
   const failed = await run(root, [snapshot("agent-a", a)]);
   assert.equal(failed.recentTurn.completedAt, Date.parse(at(6)));
   assert.equal(failed.recentTurn.outputTokens, 500);
+});
+
+// --- Claude Code transcripts -------------------------------------------------
+
+const claudeAssistant = (id, input, creation, read, output = 1, content = "secret text") => JSON.stringify({
+  type: "assistant",
+  sessionId: "ignored",
+  timestamp: "2026-11-22T00:00:00Z",
+  message: {
+    id,
+    type: "message",
+    role: "assistant",
+    content: [{ type: "text", text: content, usage: { input_tokens: 999999 } }],
+    usage: {
+      input_tokens: input,
+      cache_creation_input_tokens: creation,
+      cache_read_input_tokens: read,
+      output_tokens: output,
+      iterations: [{ input_tokens: 777777, cache_read_input_tokens: 777777 }],
+    },
+  },
+});
+
+async function makeClaudeRoot(t) {
+  const root = await fs.mkdtemp(join(tmpdir(), "workspace-metrics-claude-"));
+  t.after(async () => { await fs.rm(root, { recursive: true, force: true }); });
+  await fs.mkdir(join(root, "projects"), { recursive: true });
+  return root;
+}
+
+async function writeClaude(root, project, id, lines) {
+  await fs.mkdir(join(root, "projects", project), { recursive: true });
+  const file = join(root, "projects", project, `${id}.jsonl`);
+  await fs.writeFile(file, lines.join("\n") + "\n");
+  return file;
+}
+
+function claudeSnapshot(id, nativeHandle, overrides = {}) {
+  return snapshot(id, nativeHandle, {
+    provider: "claude-cchp",
+    cwd: "/nonexistent/project",
+    persistence: { nativeHandle, metadata: { provider: "claude" } },
+    ...overrides,
+  });
+}
+
+async function runClaude(claudeRoot, snapshots, codexRoot) {
+  return collectCumulativeUsage(
+    { workspaceId: WS, agentIds: snapshots.map(({ agent }) => agent.id) },
+    paseoFor(snapshots),
+    { codexHome: codexRoot, claudeHome: claudeRoot, workspaceIds: [WS] },
+  );
+}
+
+test("Claude sessions sum each request once; cache writes and reads join the input", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(41);
+  await writeClaude(root, claudeProjectDirName("/nonexistent/project"), id, [
+    JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
+    claudeAssistant("msg_1", 2, 1000, 0),
+    // The same message split into another content block repeats its usage.
+    claudeAssistant("msg_1", 2, 1000, 0),
+    claudeAssistant("msg_2", 3, 100, 1000),
+    JSON.stringify({ type: "system", subtype: "x" }),
+  ]);
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.equal(result.error, null);
+  assert.equal(result.eligible, 1);
+  assert.equal(result.covered, 1);
+  assert.equal(result.inputTokens, 2 + 1000 + 3 + 100 + 1000);
+  assert.equal(result.cachedInputTokens, 1000);
+  assert.equal(result.rate, 1000 / 2105);
+});
+
+test("a Claude session resumed under another project directory is still found", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(42);
+  await writeClaude(root, "-some-other-path", id, [claudeAssistant("msg_1", 10, 0, 90)]);
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.equal(result.covered, 1);
+  assert.equal(result.rate, 0.9);
+});
+
+test("Codex and Claude sessions in one workspace are weighted together", async (t) => {
+  clearCumulativeCaches();
+  const codexRoot = await makeRoot(t);
+  const claudeRoot = await makeClaudeRoot(t);
+  const codexId = uuid(43);
+  const claudeId = uuid(44);
+  await writeSession(codexRoot, codexId, [token(100, 50)]);
+  await writeClaude(claudeRoot, "-p", claudeId, [claudeAssistant("msg_1", 0, 0, 100)]);
+  const result = await runClaude(claudeRoot, [
+    snapshot("agent-x", codexId),
+    claudeSnapshot("agent-c", claudeId),
+  ], codexRoot);
+  assert.equal(result.eligible, 2);
+  assert.equal(result.covered, 2);
+  assert.equal(result.inputTokens, 200);
+  assert.equal(result.cachedInputTokens, 150);
+});
+
+test("a missing Claude root leaves Claude sessions missing without hiding Codex", async (t) => {
+  clearCumulativeCaches();
+  const codexRoot = await makeRoot(t);
+  const codexId = uuid(45);
+  await writeSession(codexRoot, codexId, [token(100, 50)]);
+  const result = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-x", "agent-c"] },
+    paseoFor([snapshot("agent-x", codexId), claudeSnapshot("agent-c", uuid(46))]),
+    { codexHome: codexRoot, claudeHome: join(tmpdir(), `missing-claude-${Date.now()}`), workspaceIds: [WS] },
+  );
+  assert.equal(result.error, null);
+  assert.equal(result.eligible, 2);
+  assert.equal(result.covered, 1);
+  assert.equal(result.missing, 1);
+  assert.equal(result.rate, 0.5);
+});
+
+test("a Claude transcript without usage stays missing, and appends are read incrementally", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(47);
+  const file = await writeClaude(root, "-p", id, [JSON.stringify({ type: "user", message: { content: "x" } })]);
+  const snaps = [claudeSnapshot("agent-c", id)];
+  let result = await runClaude(root, snaps);
+  assert.equal(result.covered, 0);
+  assert.equal(result.missing, 1);
+  assert.equal(result.rate, null);
+  await fs.appendFile(file, claudeAssistant("msg_1", 0, 50, 50) + "\n");
+  clearCumulativeRequestCache();
+  result = await runClaude(root, snaps);
+  assert.equal(result.covered, 1);
+  assert.equal(result.inputTokens, 100);
+  await fs.appendFile(file, claudeAssistant("msg_1", 0, 50, 50) + "\n" + claudeAssistant("msg_2", 0, 0, 100) + "\n");
+  clearCumulativeRequestCache();
+  result = await runClaude(root, snaps);
+  assert.equal(result.inputTokens, 200);
+  assert.equal(result.cachedInputTokens, 150);
+});
+
+test("symlinked Claude transcripts are skipped", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(48);
+  const real = await writeClaude(root, "-real", "elsewhere", [claudeAssistant("msg_1", 0, 0, 10)]);
+  await fs.mkdir(join(root, "projects", "-p"), { recursive: true });
+  await fs.symlink(real, join(root, "projects", "-p", `${id}.jsonl`));
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.equal(result.covered, 0);
+});
+
+test("Claude projection keeps only envelope fields, block types and top-level usage", () => {
+  const projected = projectClaudeLine(claudeAssistant("msg_9", 1, 2, 3));
+  assert.deepEqual(projected, {
+    eventType: "assistant", timestamp: "2026-11-22T00:00:00Z", uuid: null,
+    sidechain: false, meta: false, apiError: false,
+    messageId: "msg_9", stopReason: null, contentTypes: ["text"],
+    input: 1, cacheCreation: 2, cacheRead: 3, output: 1, closed: true,
+  });
+  assert.equal(projectClaudeLine(claudeAssistant("msg_9", 1, 2, 3).slice(0, -2)).closed, false);
+});
+
+test("Claude home: manual setting inside home, CLAUDE_CONFIG_DIR, then ~/.claude", async (t) => {
+  const { base, home } = await makeHome(t);
+  assert.notEqual((await resolveClaudeHomeFromValues({}, { home, env: null })).error, null);
+  await fs.mkdir(join(home, ".claude", "projects"), { recursive: true });
+  assert.equal((await resolveClaudeHomeFromValues({}, { home, env: null })).root, join(home, ".claude"));
+  const external = join(base, "claude-config");
+  await fs.mkdir(join(external, "projects"), { recursive: true });
+  assert.equal((await resolveClaudeHomeFromValues({}, { home, env: external })).root, external);
+  const manual = join(home, "alt-claude");
+  await fs.mkdir(join(manual, "projects"), { recursive: true });
+  assert.equal((await resolveClaudeHomeFromValues({ claudeHome: manual }, { home, env: external })).root, manual);
+  // A manual value outside home or relative fails without falling back.
+  const outside = await resolveClaudeHomeFromValues({ claudeHome: external }, { home, env: null });
+  assert.equal(outside.root, null);
+  assert.notEqual(outside.error, null);
+  assert.equal((await resolveClaudeHomeFromValues({ claudeHome: "rel" }, { home, env: null })).root, null);
+});
+
+// --- Claude turns and latest samples -----------------------------------------
+
+const cAt = (second) => `2026-11-22T00:01:${String(second).padStart(2, "0")}Z`;
+const cPrompt = (uuid, second, extra = {}) => JSON.stringify({
+  type: "user", uuid, timestamp: cAt(second), isSidechain: false,
+  message: { role: "user", content: "do something" }, ...extra,
+});
+const cToolResult = (second) => JSON.stringify({
+  type: "user", uuid: `tr-${second}`, timestamp: cAt(second),
+  message: { role: "user", content: [{ type: "tool_result", tool_use_id: "x", content: "out" }] },
+});
+const cReply = (id, second, { stop = "tool_use", input = 2, creation = 0, read = 100, output = 50, block = "text", extra = {} } = {}) => JSON.stringify({
+  type: "assistant", uuid: `a-${id}-${second}`, timestamp: cAt(second), isSidechain: false,
+  message: {
+    id, role: "assistant", stop_reason: stop,
+    content: [{ type: block, text: "hidden" }],
+    usage: { input_tokens: input, cache_creation_input_tokens: creation, cache_read_input_tokens: read, output_tokens: output },
+  },
+  ...extra,
+});
+
+async function claudeTurnFor(root, id) {
+  return collectTurnOutput(
+    { workspaceId: WS, agentId: "agent-c" },
+    paseoFor([claudeSnapshot("agent-c", id)]),
+    { claudeHome: root, workspaceIds: [WS] },
+  );
+}
+
+test("a Claude turn runs from the prompt to the last record of its end_turn message", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(51);
+  await writeClaude(root, "-p", id, [
+    cPrompt("p1", 0),
+    cReply("m1", 2, { block: "thinking", output: 30 }),
+    cReply("m1", 3, { output: 30 }),
+    cToolResult(4),
+    cReply("m2", 6, { stop: "end_turn", block: "thinking", output: 70 }),
+    cReply("m2", 9, { stop: "end_turn", output: 70 }),
+  ]);
+  const turn = await claudeTurnFor(root, id);
+  assert.deepEqual(turn, { outputTokens: 100, elapsedMs: 9_000, firstTokenMs: null, reason: null, source: "claude" });
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.deepEqual(result.recentTurn, { completedAt: Date.parse(cAt(9)), outputTokens: 100, elapsedMs: 9_000, firstTokenMs: null });
+  assert.equal(result.turns.completed, 1);
+  assert.equal(result.turns.speedSamples, 1);
+  assert.equal(result.turns.outputTokens, 100);
+  assert.equal(result.turns.elapsedMs, 9_000);
+  assert.equal(result.turns.sessions, 1);
+  assert.deepEqual(result.latestSamples, [{ agentId: "agent-c", input: 102, cached: 100 }]);
+});
+
+test("a pending Claude turn is counted once across reads and when the next prompt closes it", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(52);
+  const file = await writeClaude(root, "-p", id, [cPrompt("p1", 0), cReply("m1", 4, { stop: "end_turn", output: 40 })]);
+  const snaps = [claudeSnapshot("agent-c", id)];
+  let result = await runClaude(root, snaps);
+  assert.equal(result.turns.completed, 1);
+  clearCumulativeRequestCache();
+  result = await runClaude(root, snaps);
+  assert.equal(result.turns.completed, 1);
+  await fs.appendFile(file, [cPrompt("p2", 10), cReply("m2", 12, { stop: "end_turn", output: 20 })].join("\n") + "\n");
+  clearCumulativeRequestCache();
+  result = await runClaude(root, snaps);
+  assert.equal(result.turns.completed, 2);
+  assert.equal(result.turns.outputTokens, 60);
+  assert.equal(result.turns.elapsedMs, 6_000);
+  assert.equal(result.recentTurn.completedAt, Date.parse(cAt(12)));
+});
+
+test("a request after end_turn continues the Claude turn instead of closing it", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(53);
+  await writeClaude(root, "-p", id, [
+    cPrompt("p1", 0),
+    cReply("m1", 2, { stop: "end_turn", output: 10 }),
+    cReply("m2", 5, { stop: "end_turn", output: 15 }),
+  ]);
+  const turn = await claudeTurnFor(root, id);
+  assert.equal(turn.outputTokens, 25);
+  assert.equal(turn.elapsedMs, 5_000);
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.equal(result.turns.completed, 1);
+});
+
+test("abandoned, failed and sidechain Claude work is never a completed turn", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(54);
+  await writeClaude(root, "-p", id, [
+    cPrompt("p1", 0),
+    cReply("m1", 2, { output: 10 }),
+    // A new prompt before end_turn abandons p1.
+    cPrompt("p2", 3),
+    cReply("m2", 4, { output: 10 }),
+    JSON.stringify({ type: "assistant", timestamp: cAt(5), isApiErrorMessage: true, message: { id: "e1", stop_reason: "stop_sequence", content: [], usage: { input_tokens: 0, output_tokens: 0 } } }),
+    cPrompt("s1", 6, { isSidechain: true }),
+    cReply("s2", 7, { stop: "end_turn", extra: { isSidechain: true } }),
+    cPrompt("meta", 8, { isMeta: true }),
+  ]);
+  const result = await runClaude(root, [claudeSnapshot("agent-c", id)]);
+  assert.equal(result.turns.completed, 0);
+  assert.equal(result.recentTurn, null);
+  // Sidechain requests still count for cache, but not as the latest main-chain sample.
+  assert.equal(result.inputTokens, 102 * 3);
+  assert.deepEqual(result.latestSamples, [{ agentId: "agent-c", input: 102, cached: 100 }]);
+  const turn = await claudeTurnFor(root, id);
+  assert.equal(turn.reason, "missing-samples");
+  assert.equal(turn.source, "claude");
+});
+
+test("the latest Claude sample is the newest main-chain request, deduplicated per session", async (t) => {
+  clearCumulativeCaches();
+  const root = await makeClaudeRoot(t);
+  const id = uuid(55);
+  await writeClaude(root, "-p", id, [
+    cPrompt("p1", 0),
+    cReply("m1", 1, { input: 5, creation: 500, read: 0 }),
+    cReply("m2", 2, { input: 1, creation: 9, read: 90, stop: "end_turn" }),
+  ]);
+  const result = await collectCumulativeUsage(
+    { workspaceId: WS, agentIds: ["agent-c", "agent-d"] },
+    paseoFor([claudeSnapshot("agent-c", id), claudeSnapshot("agent-d", id)]),
+    { claudeHome: root, workspaceIds: [WS] },
+  );
+  assert.equal(result.eligible, 1);
+  assert.deepEqual(result.latestSamples, [{ agentId: "agent-c", input: 100, cached: 90 }]);
 });

@@ -12,6 +12,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   averageFirstTokenMs,
+  type CacheSample,
   formatCacheRate,
   formatDurationMs,
   formatTokenCount,
@@ -213,8 +214,9 @@ function SectionBar({ title, right, colors }: { title: string; right?: ReactNode
   );
 }
 
-function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, compact, colors }: {
+function TurnDetails({ agentRef, kind, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, compact, colors }: {
   agentRef: AgentRef;
+  kind: "codex" | "claude" | null;
   workspaceId: string;
   cumulativeEnabled: boolean;
   scopeKey: string;
@@ -223,7 +225,7 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
   compact: boolean;
   colors: Colors;
 }) {
-  const { status, measurement, observingTurn } = useLiveTurn(agentRef);
+  const { status, measurement, observingTurn } = useLiveTurn(agentRef, kind === "claude");
   const codexTurn = useTurnOutput(
     agentRef,
     workspaceId,
@@ -245,6 +247,8 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
   const hasCodexTurn = cumulativeEnabled && (codexElapsed !== null || codexFirstToken !== null);
   const codexRate = tokensPerSecond(codexOutput, codexElapsed);
   const reason = data?.reason;
+  const source = data?.source ?? kind;
+  const native = source === "claude" ? "Claude" : "Codex";
   const basis = compact ? 132 : 120;
   const helper = { color: colors.foregroundMuted, fontSize: 13, lineHeight: 18 };
 
@@ -262,42 +266,59 @@ function TurnDetails({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scope
           colors={colors}
           basis={basis}
         />
+        {kind === "claude" && (
+          <Metric
+            label="Claude 上报首 Token"
+            value={duration(measurement?.providerFirstTokenMs)}
+            colors={colors}
+            basis={basis}
+          />
+        )}
       </View>
       <Text style={helper}>
-        首个可见文本取轮开始到首条非空白助手文本，不算工具或推理事件，也不是服务商 TTFT。整轮耗时含工具与等待；本轮输出速率仅在内置 Claude Code 提供计数时显示。
+        首个可见文本取轮开始到首条非空白助手文本，不算工具或推理事件，也不是服务商 TTFT。整轮耗时含工具与等待；本轮输出速率仅在 Claude Code（含以 Claude 为底的自定义 provider）提供计数时显示；Claude 上报首 Token 取自 SDK 结果的 TTFT（0.1 秒精度），只在实时观测中可得，会话记录不保存。
       </Text>
-      {codexTurn.isLoading && <Text style={helper}>正在读取最近 Codex 完成轮…</Text>}
+      {codexTurn.isLoading && <Text style={helper}>正在读取最近 {native} 完成轮…</Text>}
       {hasCodexTurn && (
         <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 9 }}>
-          <Text style={{ color: colors.foreground, fontSize: 15, lineHeight: 21, fontWeight: "600" }}>最近 Codex 完成轮</Text>
+          <Text style={{ color: colors.foreground, fontSize: 15, lineHeight: 21, fontWeight: "600" }}>最近 {native} 完成轮</Text>
           <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 12, rowGap: 8 }}>
             <Metric label="整轮输出速率" value={formatTokenSpeed(codexRate, "full")} colors={colors} basis={basis} />
+            {source !== "claude" && (
+              <Metric
+                label="Codex 首个模型 Token"
+                value={duration(codexFirstToken)}
+                colors={colors}
+                basis={basis}
+              />
+            )}
+            <Metric label="轮次边界耗时" value={duration(codexElapsed)} colors={colors} basis={basis} />
             <Metric
-              label="Codex 首个模型 Token"
-              value={duration(codexFirstToken)}
+              label={source === "claude" ? "本轮输出 Token" : "累计输出差"}
+              value={codexOutput === null ? "—" : count(codexOutput)}
               colors={colors}
               basis={basis}
             />
-            <Metric label="轮次边界耗时" value={duration(codexElapsed)} colors={colors} basis={basis} />
-            <Metric label="累计输出差" value={codexOutput === null ? "—" : count(codexOutput)} colors={colors} basis={basis} />
           </View>
           <Text style={helper}>
-            首 Token 由 Codex 上报。耗时使用同一轮的原生边界，含工具与等待，不与实时观测混合。
+            {source === "claude"
+              ? "取自 Claude 会话记录：从用户提问到 end_turn 回复的最后一条记录，输出为本轮各请求 output_tokens 之和，含工具与等待，不与实时观测混合。Claude 不记录首 Token。"
+              : "首 Token 由 Codex 上报。耗时使用同一轮的原生边界，含工具与等待，不与实时观测混合。"}
           </Text>
           {codexOutput === null && <Text style={helper}>该轮缺少有效输出计数，速率留空。</Text>}
         </View>
       )}
       {!hasCodexTurn && !codexTurn.isLoading && reason === "missing-samples" && cumulativeEnabled && (
-        <Text style={helper}>最近 Codex 完成轮缺少完整边界，输出与耗时留空。</Text>
+        <Text style={helper}>最近 {native} 完成轮缺少完整边界，输出与耗时留空。</Text>
       )}
       {cumulativeEnabled && !codexTurn.isLoading && (codexTurn.isError || reason === "read-failed") && (
-        <Text style={helper}>最近 Codex 完成轮读取失败，留空。</Text>
+        <Text style={helper}>最近 {native} 完成轮读取失败，留空。</Text>
       )}
     </View>
   );
 }
 
-function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, open, toggle, snapshot, compact, colors }: {
+function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRevision, refreshRevision, open, toggle, snapshot, cacheSample, compact, colors }: {
   agentRef: AgentRef;
   workspaceId: string;
   cumulativeEnabled: boolean;
@@ -307,6 +328,8 @@ function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRev
   open: boolean;
   toggle: () => void;
   snapshot: UsageSnapshot | undefined;
+  /** The row's latest cache sample: Codex from reported usage, Claude from its transcript. */
+  cacheSample: CacheSample | null;
   compact: boolean;
   colors: Colors;
 }) {
@@ -315,7 +338,7 @@ function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRev
     title, provider, model, status, updatedAt,
   }));
   if (!agent) return null;
-  const sample = snapshot?.cacheSample;
+  const sample = cacheSample;
   const usage = snapshot?.usage;
   const updated = Date.parse(agent.updatedAt);
   const basis = compact ? 130 : 118;
@@ -375,6 +398,7 @@ function AgentRow({ agentRef, workspaceId, cumulativeEnabled, scopeKey, scopeRev
           <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 9, gap: 8 }}>
             <TurnDetails
               agentRef={agentRef}
+              kind={snapshot?.kind ?? null}
               workspaceId={workspaceId}
               cumulativeEnabled={cumulativeEnabled}
               scopeKey={scopeKey}
@@ -429,7 +453,20 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
     scopeRevision,
     refreshRevision,
   );
-  const samples = refs.map(({ id }) => query.data?.get(id)?.cacheSample ?? null);
+  // Paseo's reported Claude usage has no cache-write count, so Claude
+  // sessions take their newest request from the transcript instead.
+  const claudeLatest = useMemo(() => {
+    const map = new Map<string, CacheSample>();
+    if (!cumulativeEnabled || cumulative.isPending || !cumulative.data || cumulative.data.error) return map;
+    for (const entry of cumulative.data.latestSamples ?? []) {
+      if (entry.input > 0 && entry.cached <= entry.input) map.set(entry.agentId, { input: entry.input, cached: entry.cached });
+    }
+    return map;
+  }, [cumulativeEnabled, cumulative.isPending, cumulative.data]);
+  const sampleFor = (id: string): CacheSample | null =>
+    query.data?.get(id)?.cacheSample ?? claudeLatest.get(id) ?? null;
+  const samples = refs.map(({ id }) => sampleFor(id));
+  const claudeAgents = refs.filter(({ id }) => query.data?.get(id)?.kind === "claude").length;
   const totals = summarizeLatestSamples(samples);
   const colors = theme.colors;
   const recentPending = refs.length > 0 && query.isPending;
@@ -516,7 +553,7 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
     ?? (refs.length === 0
       ? "当前工作区暂无可见会话"
       : cumulativePending
-        ? "正在读取 Codex 累计用量…"
+        ? "正在读取累计用量…"
         : "按整轮耗时加权，包含工具与等待。");
 
   const refresh = () => {
@@ -600,13 +637,13 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
             )}
             {(cumulative.data?.unavailable ?? 0) > 0 && (
               <Text style={styles.small}>
-                {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 会话，已排除。
+                {cumulative.data?.unavailable} 个请求会话无法确认为当前工作区的 Codex 或 Claude 会话，已排除。
               </Text>
             )}
           </>
         )}
         {!cumulativeReady ? null : (
-          <Text style={styles.helper}>按 Codex 累计快照汇总。</Text>
+          <Text style={styles.helper}>按 Codex 累计快照与 Claude 会话记录汇总。</Text>
         )}
       </View>
     </Card>
@@ -642,6 +679,9 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
       <View style={{ marginTop: "auto", gap: 4 }}>
         {!recentPending && recentUnavailable > 0 && (
           <Text style={styles.small}>{recentUnavailable} 个会话当前无法读取最近用量快照。</Text>
+        )}
+        {!recentPending && claudeAgents > 0 && !cumulativeEnabled && (
+          <Text style={styles.small}>Claude 会话的最近样本取自会话记录，需开启累计统计后读取。</Text>
         )}
         <Text style={styles.helper}>{recentStatusNote}</Text>
       </View>
@@ -770,6 +810,7 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
               open={selectedId === agentRef.id}
               toggle={() => setSelectedId((current) => current === agentRef.id ? null : agentRef.id)}
               snapshot={query.data?.get(agentRef.id)}
+              cacheSample={sampleFor(agentRef.id)}
               compact={compact}
               colors={colors}
             />
