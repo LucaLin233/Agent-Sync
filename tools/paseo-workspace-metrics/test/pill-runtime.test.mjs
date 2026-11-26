@@ -10,7 +10,9 @@ function fakeClient() {
   let agentHandlers = null;
   let settingsHandlers = null;
   const pending = [];
+  const settings = { opened: 0, released: 0 };
   return {
+    settings,
     pills,
     calls,
     pending,
@@ -42,7 +44,8 @@ function fakeClient() {
       },
       subscribeSettings(handlers) {
         settingsHandlers = handlers;
-        return () => { settingsHandlers = null; };
+        settings.opened += 1;
+        return () => { settingsHandlers = null; settings.released += 1; };
       },
     },
     emitSnapshot(entries) {
@@ -53,6 +56,9 @@ function fakeClient() {
     },
     emitRemove(agentId) {
       agentHandlers.update({ type: "agent_update", payload: { kind: "remove", agentId } });
+    },
+    closeSettings() {
+      settingsHandlers.closed();
     },
     enable(patch = {}) {
       settingsHandlers.next({
@@ -383,6 +389,52 @@ test("a closed cumulative setting keeps the pill missing and reads nothing", asy
   assert.match(pill.title, /累计缓存 —（累计统计已关闭）/);
   await advance(t, 10_000);
   assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("a closed settings subscription is reopened and the pill recovers", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+
+  // The host rejects a replay while the plugin is still loading and never retries it.
+  fake.closeSettings();
+  assert.match(fake.pills.get("a").title, /累计设置错误：设置订阅已关闭/);
+  await advance(t, 1_000);
+  assert.deepEqual(fake.settings, { opened: 2, released: 1 });
+
+  fake.enable();
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.5, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "累计 50.0%");
+});
+
+test("settings retries back off to a capped delay, reset on success, and stop on dispose", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+
+  const expectReopenAfter = async (delay) => {
+    const before = fake.settings.opened;
+    fake.closeSettings();
+    await advance(t, delay - 1);
+    assert.equal(fake.settings.opened, before);
+    await advance(t, 1);
+    assert.equal(fake.settings.opened, before + 1);
+  };
+  for (const delay of [1_000, 2_000, 5_000, 10_000, 30_000, 30_000]) await expectReopenAfter(delay);
+  fake.enable();
+  await expectReopenAfter(1_000);
+
+  const opened = fake.settings.opened;
+  fake.closeSettings();
+  runtime.dispose();
+  await advance(t, 60_000);
+  assert.equal(fake.settings.opened, opened);
 });
 
 test("a workspace outside the cumulative allowlist shows its own reason", async (t) => {
