@@ -202,7 +202,11 @@ test("the plugin registers the official turn hooks and RPCs", async () => {
       ]) {
         assert.equal(typeof hooks.get(name), "function", `${name} must be registered`);
       }
-      assert.ok(rpcs.some((entry) => entry.name === "chinese-titles.regenerate-workspace"));
+      // The synchronous regenerate RPC was replaced by a start call plus a
+      // status read, so a long model run never holds the 30 s transport.
+      assert.ok(rpcs.some((entry) => entry.name === "chinese-titles.regenerate-start"));
+      assert.ok(rpcs.some((entry) => entry.name === "chinese-titles.regeneration-status"));
+      assert.equal(rpcs.some((entry) => entry.name === "chinese-titles.regenerate-workspace"), false);
     } finally {
       cleanup();
     }
