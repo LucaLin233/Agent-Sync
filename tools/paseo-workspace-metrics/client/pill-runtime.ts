@@ -6,6 +6,7 @@ import {
   type PillCacheBasis,
 } from "../shared/metrics.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
+import { settingsRetryDelayMs } from "./subscription-retry.ts";
 
 export interface PillHandle {
   update(patch: { title?: string; label?: string }): void;
@@ -58,8 +59,6 @@ const CUMULATIVE_MIN_INTERVAL_MS = 10_000;
 const FOLLOW_UP_DELAY_MS = 1_200;
 const FOLLOW_UP_LIMIT = 3;
 const TERMINAL_STATUSES = new Set(["idle", "error", "closed"]);
-/** Waits before reopening a closed settings subscription; the last one repeats. */
-const SETTINGS_RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 
 const EMPTY_SCOPE: WorkspaceScope = {
   enabled: false,
@@ -412,7 +411,7 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
         clearFollowUps();
         reconcile();
         scheduleRoutine();
-        const delay = SETTINGS_RETRY_DELAYS_MS[Math.min(settingsCloses, SETTINGS_RETRY_DELAYS_MS.length - 1)];
+        const delay = settingsRetryDelayMs(settingsCloses);
         settingsCloses += 1;
         settingsRetry = setTimeout(() => {
           releaseSettings();

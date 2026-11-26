@@ -8,7 +8,7 @@ import {
   useWorkspace,
 } from "@getpaseo/plugin/client";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   averageFirstTokenMs,
@@ -27,6 +27,7 @@ import { useCumulativeUsage } from "./use-cumulative";
 import { useLiveTurn } from "./use-turn";
 import { useTurnOutput } from "./use-turn-output";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
+import { createSubscriptionRetry } from "./subscription-retry";
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 const dates = new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" });
@@ -430,7 +431,19 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   const [scope, setScope] = useState<WorkspaceScope | null>(null);
   const [scopeRevision, setScopeRevision] = useState(0);
   const [refreshRevision, setRefreshRevision] = useState(0);
-  const scopeSubscription = useSubscription(workspaceSettingsSubscription, {}, (event) => {
+  // A rejected or closed subscription is never replayed by the host, so each
+  // close opens a new one on the same backoff schedule as the composer pill.
+  const [scopeAttempt, setScopeAttempt] = useState(0);
+  const [scopeRetry] = useState(() => createSubscriptionRetry({
+    schedule(callback, delayMs) {
+      const timer = setTimeout(callback, delayMs);
+      return { cancel: () => clearTimeout(timer) };
+    },
+    // A new attempt changes the subscription input, which makes the hook re-subscribe.
+    retry: () => setScopeAttempt((attempt) => attempt + 1),
+  }));
+  const scopeSubscription = useSubscription(workspaceSettingsSubscription, { attempt: scopeAttempt }, (event) => {
+    scopeRetry.opened();
     setScope(event);
     // Every settings event starts a fresh read: the scope projection can be
     // identical (for example, a changed Codex home), so the revision is part of
@@ -439,6 +452,10 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
     queryClient.removeQueries({ queryKey: ["workspace-metrics-cumulative"] });
     queryClient.removeQueries({ queryKey: ["workspace-metrics-turn"] });
   });
+  useEffect(() => {
+    if (scopeSubscription.status === "error" || scopeSubscription.status === "closed") scopeRetry.closed();
+  }, [scopeRetry, scopeSubscription.status]);
+  useEffect(() => () => scopeRetry.dispose(), [scopeRetry]);
   // Derived from the effective values, so a remount and a settings change that
   // leaves the same values map to the same query.
   const scopeKey = scope
