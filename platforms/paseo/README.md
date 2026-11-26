@@ -25,6 +25,23 @@
 
 每组各有 LUNO、LENS 和 FORGE 三条 Profile，示例均用该组的 Codex provider。LUNO、LENS 用 `gpt-6.2-sol`，FORGE 用 `deepseek-flash`。六条均配置 `full-access`、`high` 与 `service_tier: "default"`。部署时按父权限和目标模型能力核对这些值。显式传递 `service_tier` 可覆盖同 provider 派发时继承的父会话值。Profile 的 `options` 只放所选 provider 支持的选项。
 
+## Codex 子进程的环境继承（可选）
+
+如果部署主机上的 Codex shell 子进程需要继承启动环境，在 `codex-cchp` 和 `codex-cch` 共用的 `$CODEX_HOME/config.toml` 中合并以下设置。
+
+```toml
+[shell_environment_policy]
+inherit = "all"
+```
+
+如果该表已存在，只修改 `inherit`，保留 `set` 等现有设置。变量须已存在于启动 Codex 的进程环境中，现有过滤规则仍会影响子进程最终收到的变量。完整继承可能让使用同一 `CODEX_HOME` 的子进程访问已注入的凭据，凭据的访问和使用仍按部署的既有授权执行。由部署环境注入真实凭据，示例和 `config.toml` 仅填写非秘密配置。 [Codex 官方配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)
+
+验收时，在隔离 daemon 的启动环境中注入非空的、非敏感的 `PASEO_ENV_PROBE`。分别通过两个 Codex provider 新建会话，让会话直接执行以下普通 shell 命令，避开 `env -i`。两次退出状态均为 `0` 即通过，命令不会显示变量值。已有会话是否生效须另行验证。
+
+```sh
+test -n "${PASEO_ENV_PROBE:-}"
+```
+
 ## 家目录布局
 
 agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/agent`：`paseo-home` 作 `PASEO_HOME`，`codex-home` 作 `CODEX_HOME`，`claude-home` 作 `CLAUDE_CONFIG_DIR`。Codex 与 Claude Code 只用官方环境变量指定家目录，不改 HOME。以下行为按 Paseo v0.17.4 源码核对，升级后按实际版本复核。
