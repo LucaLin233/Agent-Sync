@@ -1059,6 +1059,10 @@ module.main(sys.argv[2:])
                  (["--ends", "claude", "--claude-home", str(self.home)], "invalid_claude_layout"),
                  (["--ends", "claude", "--claude-home", str(self.root / "outside")],
                   "claude_home_outside_install_root"),
+                 (["--ends", "claude", "--claude-home", str(self.home / ".luno")],
+                  "claude_home_overlaps_managed_area"),
+                 (["--ends", "claude", "--claude-home", str(self.home / ".luno/generated/claude")],
+                  "claude_home_overlaps_managed_area"),
                  (["--ends", "claude", "--claude-home", inside, "--codex-global-source",
                    "paseo-append-system-prompt"], "codex_global_source_requires_codex_only"))
         before = self.snapshot()

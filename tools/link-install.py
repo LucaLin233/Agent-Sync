@@ -959,6 +959,8 @@ def main(argv=None):
                 raise InstallError("claude_home_outside_install_root", claude_home) from None
             if not relative.parts:
                 raise InstallError("invalid_claude_layout", claude_home)
+            if relative.parts[0] == ".luno":
+                raise InstallError("claude_home_overlaps_managed_area", claude_home)
         tree = HomeTree(home)
         report.update(home=str(home), ends=list(ends), codexHome=str(codex_home) if codex_home else None)
         if claude_home is not None:
