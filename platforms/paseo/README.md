@@ -25,12 +25,13 @@
 
 agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/agent`：`paseo-home` 作 `PASEO_HOME`，`codex-home` 作 `CODEX_HOME`，`claude-home` 作 `CLAUDE_CONFIG_DIR`。Codex 与 Claude Code 只用官方环境变量指定家目录，不改 HOME。以下行为按 Paseo v0.17.4 源码核对，升级后按实际版本复核。
 
-- daemon 进程环境同时设置这三个变量，值与 provider `env` 一致。Paseo 按 daemon 环境的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 写入终端 agent 钩子（[agent-hook-installer.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/terminal/agent-hooks/agent-hook-installer.ts)），缺省落到 HOME 下的 `.codex`、`.claude`。
-- Claude provider 读取会话记录（时间线、回退、续聊）时按 provider `env` 的 `CLAUDE_CONFIG_DIR` 定位 `projects/`（[project-dir.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/agent/providers/claude/project-dir.ts)）。只在启动脚本里设置该变量时，Claude Code 与 Paseo 会读写不同目录。
-- Paseo 自带 skills 固定装到 HOME 下的 `.agents/skills`、`.claude/skills`、`.gemini/config/skills`，并只从 `.codex/skills` 清理旧副本（[paths.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/orchestration-skills/internal/paths.ts)）。Codex 按官方用户 skills 位置读取 `.agents/skills`。Claude Code 改用 `CLAUDE_CONFIG_DIR` 后不再读 HOME 下的 `.claude/skills`，因此 HOME 下的 `.claude` 链接到 `claude-home`，使 Paseo 写入与 Claude Code 读取同一目录。
-- 交互 shell 同样导出这三个变量，直接运行的 CLI 与 daemon 使用相同目录；未设置 `PASEO_HOME` 时，Paseo CLI 会在 HOME 下的 `.paseo` 写客户端标识。
+- daemon 进程环境须同时设置这三个变量，值与 provider `env` 一致。启用终端 agent 钩子（`daemon.enableTerminalAgentHooks`）时，Paseo 按 daemon 环境的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 写入钩子（[agent-hook-installer.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/terminal/agent-hooks/agent-hook-installer.ts)），未设置时落到 HOME 下的 `.codex`、`.claude`。
+- Claude provider 读取会话记录（时间线、回退、续聊）时，按 daemon 环境叠加 provider `env` 后的 `CLAUDE_CONFIG_DIR` 定位 `projects/`，未设置时用 HOME 下的 `.claude`（[project-dir.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/agent/providers/claude/project-dir.ts)）。只在启动脚本里设置该变量时，Claude Code 写入会话记录的位置与 Paseo 读取的位置不一致，时间线、回退和续聊找不到记录。
+- Paseo 自带 skills 固定装到 HOME 下的 `.agents/skills`、`.claude/skills`、`.gemini/config/skills`；旧 Codex 副本的清理固定查 HOME 下的 `.codex/skills`，不跟随 `CODEX_HOME`（[paths.ts](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/orchestration-skills/internal/paths.ts)）。Codex 按官方用户 skills 位置读取 `.agents/skills`。Claude Code 的个人 skills 位于其配置目录下的 `skills/`（Claude Code 2.1.332 实测：设置 `CLAUDE_CONFIG_DIR` 后只从该目录加载个人 skills，升级后复核），改用 `CLAUDE_CONFIG_DIR` 后 Paseo 写入的 HOME 下 `.claude/skills` 不在其读取范围内，因此 HOME 下的 `.claude` 链接到 `claude-home`。
+- 交互 shell 也须导出这三个变量，直接运行的 CLI 与 daemon 使用相同目录。未设置 `PASEO_HOME` 时，Paseo CLI 按 HOME 下的 `.paseo` 查找 daemon 并在其中写客户端标识，连不到 agent 根下的 daemon。
+- 两组共用一个 `CLAUDE_CONFIG_DIR` 后，其中 `settings.json` 的 `env` 不写 `ANTHROPIC_BASE_URL` 或鉴权变量，网关和鉴权只由各 provider 的启动环境提供，避免两组打到同一网关。
 
-迁移既有目录时先停用相关会话，按原样复制到新位置并核对，旧目录改名保留作回退，再切换环境并重启 daemon。
+迁移既有目录时先停用相关会话，按原样复制到新位置并核对。由两个 Claude 配置目录合为一个时，逐项核对 `settings.json`、`.claude.json` 与登录态，有冲突交负责人取舍，`projects/` 按会话目录合并。HOME 下原有的 `.claude` 等目录先改名保留作回退，再建立指向 `claude-home` 的链接，然后切换环境并重启 daemon。
 
 ## 内置项与显示范围
 
@@ -56,6 +57,6 @@ LENS/FORGE 开始前必须完整读取部署的 `subagents/LENS.md` 或 `subagen
 
 ## 隔离与前态
 
-仓库不提供现成隔离前缀。隔离验收需另建同版本 npm 前缀，并配独立 `PASEO_HOME`、回环端口和临时 HOME，不能原地改写现役前缀。旧会话可能保存运行时注入的提示词，回退设置不会清除历史。
+仓库不提供现成隔离前缀。隔离验收需另建同版本 npm 前缀，并配独立 `PASEO_HOME`、回环端口和临时 HOME，不能原地改写现役前缀。隔离 daemon 及其 provider `env` 的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 指向临时目录，不继承交互 shell 的取值。旧会话可能保存运行时注入的提示词，回退设置不会清除历史。
 
 从热修版切换失败时，在同一维护窗口恢复原配置、插件与原程序入口，按原托管方式重启并回读健康状态及 Profile。只改过配置时，恢复原配置后按 `paseo reload` 的结果处理。
