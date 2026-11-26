@@ -156,8 +156,8 @@ S1–S5 的许可都是 MIT，版权行分别为：S1 与 S2 `Copyright (c) 2026
 
 ## cchp
 
-- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，采用正式发布 [`v0.2.1`](https://github.com/CCH-HQ/cchp-cli/releases/tag/v0.2.1)，标签对象 `d02dc9bf83459db30839d36ef78dbed000e5cb02` 解引用到提交 `28dcf3c3ae445aeb6240a211359360c475c9e15c`。2026-11-23 公开核对：默认分支 HEAD 同为该提交；6 个技能文件与根 `LICENSE` 均按该提交原字节对照。
-- **已核参考发行**：CLI 版本不可核时，以本节记录的 v0.2.1 作为官方资料参考。已知 CLI 版本时，以匹配的官方发行提交取原文。实际取阅按 `luno-platform/references/cchp.md`〈现查资料〉。
+- **官方来源**：https://github.com/CCH-HQ/cchp-cli ，采用正式发布 [`v0.2.2`](https://github.com/CCH-HQ/cchp-cli/releases/tag/v0.2.2)，标签对象 `b57c5c8279fe13818e4647c2d2e5f5b7a6e562fd` 解引用到提交 `8c7c96776bdc52547a4cfd7a07fb1e831815d097`。2026-11-27 核对：默认分支 HEAD 同为该提交，`skills/cchp/` 末次变更为 `17654e7b944d7df8d75667bc29453dfa02afb5cd`。6 个技能原件与本机内置逐字节一致。相较 v0.2.1，根 `LICENSE` 和其余技能文件字节不变，只有 `references/workflows.md` 变化，SHA-256 为 `7b25c59be461c0a2e3e28fdb5a9d3dee0e02eb80d2ad64d2f7c8cef005beb1b3`。
+- **已核参考发行**：CLI 版本不可核时，以本节记录的 v0.2.2 作为官方资料参考。已知 CLI 版本时，以匹配的官方发行提交取原文。实际取阅按 `luno-platform/references/cchp.md`〈现查资料〉。
 - **历史随包范围**：在 Agent-Sync 提交 `5b3ea165bb583ad610a7cca6e00ed589101e38db`，上游 `skills/cchp/` 的 6 个原件仍随 `luno-platform` 分发，仅将 `SKILL.md` 改名为 `ENTRY.md`，另附上游 MIT 全文；本文件原先登记为 `9aaf6cf1855f381860ef5e9b90fc69f2baf17a95`，两者在这些路径上字节一致。该副本退役后，原文件和精确恢复路径由该提交及下列哈希保留。
 - **许可**：MIT，`Copyright (c) 2026 the cchp contributors`。本端历史精选改写仍随 `luno-platform/LICENSE.upstream.txt` 分发完整 MIT 通知。
 - **追新**：在官方 GitHub 查对应发行及标签提交，核对该提交的 `skills/cchp/` 原文与许可。参考发行变化时更新本节的取证记录。
