@@ -281,8 +281,9 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
   };
 
   /**
-   * Any change to who belongs to a workspace invalidates the displayed value
-   * and everything still in flight for it, then starts one fresh read.
+   * Any change to who belongs to a workspace invalidates everything still in
+   * flight for it and schedules one fresh read. While that read is pending a
+   * still-visible workspace keeps showing its last valid reading.
    */
   const syncMembers = (): Set<string> => {
     const changed = new Set<string>();
@@ -299,7 +300,14 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       if (before === after) continue;
       changed.add(workspaceId);
       memberVersions.set(workspaceId, (memberVersions.get(workspaceId) ?? 0) + 1);
-      cumulative.delete(workspaceId);
+      // A still-visible workspace keeps its last valid rate (a real zero
+      // included) while the member-triggered re-read is pending; in-flight
+      // replies are already voided by the member version and the next reply
+      // replaces it. Loading, empty, and failed readings have no valid rate to
+      // keep, and a workspace that lost every visible member drops its state.
+      const state = cumulative.get(workspaceId);
+      const keep = after !== undefined && state?.rate != null && state.error === null;
+      if (!keep) cumulative.delete(workspaceId);
       // A changed but still visible member set keeps its chain: in-flight
       // responses are already voided by the member version, and each tick
       // reads the members that exist then. Only an empty workspace stops it.

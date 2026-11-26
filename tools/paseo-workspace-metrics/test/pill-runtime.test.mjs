@@ -208,8 +208,9 @@ test("a member change keeps an active chain and reads the current members", asyn
   assert.equal(fake.pills.has("b"), false);
   first.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
-  // The stale [A,B] success is voided, and the chain is still alive.
-  assert.equal(fake.pills.get("a").label, "…");
+  // The stale [A,B] success is voided; the last valid reading stays on the
+  // still-visible workspace while the chain reads the current members.
+  assert.equal(fake.pills.get("a").label, "25.0%");
 
   await advance(t, 1_200);
   assert.equal(fake.pending.length, 1);
@@ -217,6 +218,151 @@ test("a member change keeps an active chain and reads the current members", asyn
   fake.pending.shift().resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
   assert.equal(fake.pills.get("a").label, "20.0%");
+});
+
+test("a member change keeps the last reading until its matching reply lands", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a"), agent("b")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4, 400, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+
+  // A third conversation appears: every pill for the same workspace keeps
+  // showing 40.0% while the member-triggered re-read is still pending.
+  fake.emitUpsert(agent("c"));
+  for (const id of ["a", "b", "c"]) assert.equal(fake.pills.get(id).label, "40.0%");
+  assert.equal(fake.pending.length, 0, "the routine window defers the read");
+
+  await advance(t, 10_000);
+  const superseded = fake.pending.shift();
+  assert.deepEqual(superseded.input.agentIds, ["a", "b", "c"]);
+  assert.equal(fake.pills.get("c").label, "40.0%");
+
+  // A newer member change voids that read; its late reply must not land.
+  fake.emitUpsert(agent("d"));
+  superseded.resolve(reply(0.8, 800, 10_000));
+  await advance(t, 0);
+  for (const id of ["a", "b", "c", "d"]) assert.equal(fake.pills.get(id).label, "40.0%");
+
+  await advance(t, 10_000);
+  const fresh = fake.pending.shift();
+  assert.deepEqual(fresh.input.agentIds, ["a", "b", "c", "d"]);
+  fresh.resolve(reply(0.7, 700, 10_000));
+  await advance(t, 0);
+  for (const id of ["a", "b", "c", "d"]) assert.equal(fake.pills.get(id).label, "70.0%");
+});
+
+test("a member change retains a real zero until the new reading replaces it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0, 0, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "0.0%");
+
+  fake.emitUpsert(agent("b"));
+  assert.equal(fake.pills.get("a").label, "0.0%");
+  assert.equal(fake.pills.get("b").label, "0.0%");
+
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.6, 600, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "60.0%");
+  assert.equal(fake.pills.get("b").label, "60.0%");
+});
+
+test("a member-driven re-read replaces the retained reading even without a valid snapshot", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4, 400, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+
+  fake.emitUpsert(agent("b"));
+  assert.equal(fake.pills.get("a").label, "40.0%");
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(null, null, 10_000));
+  await advance(t, 0);
+  // A finished read without a valid snapshot keeps its own missing meaning
+  // instead of letting the retained 40.0% linger.
+  assert.equal(fake.pills.get("a").label, "—");
+  assert.equal(fake.pills.get("a").title,
+    "打开工作区用量 · 累计缓存 —（尚无有效累计快照）");
+
+  // Only a valid rate is kept: an empty or failed reading is cleared by the
+  // member change and the pill goes back to its loading label.
+  fake.emitUpsert(agent("c"));
+  assert.equal(fake.pills.get("a").label, "…");
+  await advance(t, 10_000);
+  fake.pending.shift().reject(new Error("rpc down"));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "—");
+  assert.match(fake.pills.get("a").title, /累计读取失败/);
+
+  fake.emitUpsert(agent("d"));
+  assert.equal(fake.pills.get("a").label, "…");
+});
+
+test("a settings update still clears the reading kept across a member change", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4, 400, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+
+  // Only a member change keeps the reading; a settings generation change is
+  // a different scope and must not carry it over.
+  fake.enable();
+  assert.equal(fake.pills.get("a").label, "…");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 累计缓存 …");
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.6, 600, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "60.0%");
+});
+
+test("a workspace that loses every visible member drops the retained reading", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps);
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4, 400, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+
+  fake.emitRemove("a");
+  assert.equal(fake.pills.size, 0);
+
+  // Back in the same workspace the first read is a fresh load, not the old
+  // reading of a workspace nobody could see.
+  fake.emitSnapshot([agent("a")]);
+  assert.equal(fake.pills.get("a").label, "…");
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.6, 600, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "60.0%");
 });
 
 test("follow-up reads are bounded and stop", async (t) => {
