@@ -16,7 +16,7 @@ Claude Code 的自动记忆（`autoMemoryDirectory` 所指目录）只保存用�
 
 ## 派发通道
 
-本端的委派按 `references/runtime-paseo.md`〔分支 paseo-dispatch〕使用已核验的 Paseo 通道；独立 Claude Code 使用 Paseo CLI 前须有明确获准的目标，无已核验通道时只停依赖派发的步骤并报告。Claude 角色须先核实其启动入口能识别首条任务的角色行并加载对应受管原文，取得等效运行证据前不正式采纳，不从 Codex 的启动规则推定。
+本端的委派按 `references/runtime-paseo.md`〔分支 paseo-dispatch〕使用已核验的 Paseo 通道；独立 Claude Code 使用 Paseo CLI 前须有明确获准的目标（同 `references/runtime-codex.md`〈派发通道〉），无已核验通道时只停依赖派发的步骤并报告。Claude 角色须先核实其启动入口能识别首条任务的角色行并加载对应受管原文，取得等效运行证据前不正式采纳，不从 Codex 的启动规则推定。
 
 ## 截断与压缩
 

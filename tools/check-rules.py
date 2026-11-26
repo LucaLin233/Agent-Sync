@@ -36,7 +36,7 @@ REQUIRED_READS = (
     ('skills/luno-platform/SKILL.md', 'Minis 端（App 内置 iSH，存在 `/var/minis`）读 `references/runtime-minis.md`'),
     ('skills/luno-platform/SKILL.md', 'Codex 端（宿主为 Codex CLI）读 `references/runtime-codex.md` 和 `references/runtime-host.md`'),
     ('skills/luno-platform/SKILL.md', 'Claude Code 端（宿主为 Claude Code）读 `references/runtime-claude.md` 和 `references/runtime-host.md`'),
-    ('skills/luno-platform/SKILL.md', 'Codex 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，'
+    ('skills/luno-platform/SKILL.md', 'Codex 或 Claude Code 端通过 Paseo 派发、追问、处理子代理审批或核验角色前，'
                                       '完整读取 `references/runtime-paseo.md`〔分支 paseo-dispatch〕'),
     ('skills/luno-platform/SKILL.md', 'Paseo 的查询、管理、配置或恢复前，完整读取 '
                                       '`references/runtime-paseo.md`〔分支 paseo-operations〕'),
@@ -49,7 +49,7 @@ REQUIRED_READS = (
     ('skills/luno-platform/references/runtime-claude.md',
      '与 `references/runtime-host.md` 合用'),
     ('skills/luno-platform/references/runtime-paseo.md',
-     '其余槽位仍按 `references/runtime-codex.md` 与 `references/runtime-host.md`'))
+     '其余槽位 Codex 端按 `references/runtime-codex.md`，Claude Code 端按 `references/runtime-claude.md`，均与 `references/runtime-host.md` 合用'))
 # 合并资源的分支指针：`references/x.md`〔分支 y〕或 [文字](x.md#branch-y)；目标须有锚点及 BEGIN/END 定界。
 BRANCH_PTR_RE = re.compile(r'`?((?:luno-[a-z0-9-]+/)?references/[A-Za-z0-9_./-]+\.md)`?〔分支 ([A-Za-z0-9_-]+)〕')
 BRANCH_LINK_RE = re.compile(r'\]\(([A-Za-z0-9_.-]+\.md)#branch-([A-Za-z0-9_-]+)\)')
