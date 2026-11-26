@@ -222,6 +222,27 @@ case('原生角色 model',1,'宿主端原生角色登记冲突',
      lambda p:registry(p,lambda d:[o for o in d['objects'] if o['id']=='subagents/LENS.md'][0]['ends']['codex'].__setitem__('model','other-model')))
 case('原生角色 model_reasoning_effort',1,'宿主端原生角色登记冲突',
      lambda p:registry(p,lambda d:[o for o in d['objects'] if o['id']=='subagents/LENS.md'][0]['ends']['codex'].__setitem__('model_reasoning_effort','low')))
+def claude_end(fn):
+    """给第一个 skill 与 prompt 补合法 claude 登记，再交给 fn 改坏。"""
+    def setup(p):
+        def edit(d):
+            for o in d['objects']:
+                if o['type']=='prompt':
+                    o['ends']['claude']={'present':True,'kind':'generated','paths':['~/.claude/CLAUDE.md'],'renderer':'claude-main'}
+            sk=next(o for o in d['objects'] if o['type']=='skill')
+            sk['ends']['claude']={'present':True,'kind':'link','paths':['~/.claude/skills/'+sk['id']]}
+            fn(d)
+        registry(p,edit)
+    return setup
+case('claude 端登记合法时通过',0,'无问题',claude_end(lambda d:None))
+case('claude 端路径须为精确落点',1,'宿主端身份种类冲突',
+     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='skill')['ends']['claude'].__setitem__('paths',['~/.claude/skills/other'])))
+case('claude 端生成文件须使用 claude-main',1,'宿主端身份种类冲突',
+     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='prompt')['ends']['claude'].__setitem__('renderer','codex-main')))
+case('claude 端 present 须为布尔',1,'身份端结构',
+     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='skill')['ends']['claude'].__setitem__('present','yes')))
+case('claude 端不支持子代理',1,'宿主端对象不支持',
+     claude_end(lambda d:[o for o in d['objects'] if o['type']=='subagent'][0]['ends'].__setitem__('claude',{'present':True,'kind':'link','paths':['~/.claude/x']})))
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']

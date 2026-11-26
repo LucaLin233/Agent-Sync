@@ -255,6 +255,26 @@ class Guard:
                         key=(end,endpoint)
                         if key in owners and owners[key]!=name: self.problem('Minis 身份多占')
                         owners[key]=name
+            if 'claude' in ends: self.claude_identity(kind,name,ends['claude'],owners)
+    def claude_identity(self, kind, name, value, owners):
+        """claude 是可选宿主端：缺键即缺位；出现时只接受 skill 软链与 prompt 的 claude-main 生成文件。"""
+        if not isinstance(value,dict) or not isinstance(value.get('present'),bool):
+            self.problem('身份端结构');return
+        if not value['present']:
+            if value.get('id') is not None: self.problem('缺位身份冲突')
+            return
+        if kind=='skill':
+            want=('link',None,['~/.claude/skills/'+name])
+        elif kind=='prompt':
+            want=('generated','claude-main',['~/.claude/CLAUDE.md'])
+        else:
+            self.problem('宿主端对象不支持');return
+        if (value.get('kind')!=want[0] or value.get('renderer')!=want[1]
+                or value.get('paths')!=want[2] or set(value)-{'present','kind','paths','renderer'}):
+            self.problem('宿主端身份种类冲突');return
+        key=('claude',want[2][0])
+        if key in owners and owners[key]!=name:self.problem('宿主端身份多占')
+        owners[key]=name
     def host_identity(self, end, kind, name, value, owners):
         """宿主端使用完整文件的软链或生成文件；不复用平台字段型身份。"""
         renderer = None
