@@ -216,13 +216,13 @@ function pillTitleText(slot: PillCacheBasis, label: string, missing: string): st
 }
 
 /**
- * Visible composer-pill label: "累计 98.9%". The host keeps it on one line and
+ * Visible composer-pill label: "98.9%". The host keeps it on one line and
  * the label shows only the cumulative rate from the cumulative RPC, using the
  * same one-decimal percent format as the panel. The recent sample stays in the
  * panel, so it never appears here or stands in for a missing cumulative rate.
  */
 export function formatPillLabel(cumulative: PillCacheBasis): string {
-  return "累计 " + pillRateText(cumulative);
+  return pillRateText(cumulative);
 }
 
 /** Full tooltip: open action, the cumulative cache base, and why it is missing. */
