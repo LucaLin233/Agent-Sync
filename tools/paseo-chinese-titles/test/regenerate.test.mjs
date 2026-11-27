@@ -985,6 +985,40 @@ test("the helper's own timeout source and cap reach the line unchanged", async (
   assert.equal("budgetMs" in failed, false);
 });
 
+test("a helper timeout keeps its own source when cleanup crosses the task deadline", async () => {
+  // The helper names its clock, then finishing the run pushes past the task
+  // deadline. That later measurement must not relabel a failure already known.
+  let armed = 1_000;
+  const line = await captureFailure(() => runManualJob("rg_helper_then_deadline", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => armed,
+    generateConversation: async () => {
+      armed = 45_000; // the deadline passes before the post-model check
+      return { title: null, errorCode: "timeout", timeout: { source: "helper_turn_cap", capMs: 8_000 } };
+    },
+  }));
+  assert.equal(line.reason, "timeout", "the reason itself is unchanged");
+  assert.equal(line.stage, "model_generation");
+  assert.equal(line.timeoutSource, "helper_turn_cap", "the helper's known clock, not the task deadline");
+  assert.equal(line.budgetMs, 8_000, "its measured cap, not the negative task remainder");
+
+  // Without helper metadata this branch keeps the previous task-deadline report.
+  let secondArmed = 1_000;
+  const plain = await captureFailure(() => runManualJob("rg_plain_then_deadline", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => secondArmed,
+    generateConversation: async () => {
+      secondArmed = 43_000;
+      return { title: null, errorCode: "timeout" };
+    },
+  }));
+  assert.equal(plain.reason, "timeout");
+  assert.equal(plain.timeoutSource, "task_deadline");
+  assert.equal(plain.budgetMs, 40_000 - 6_000 - 43_000, "the measured task remainder");
+});
+
 test("an unexpected throw after a workspace write failure keeps the stage actually reached", async () => {
   // The first write decides `reason`, but an exception later is a different
   // event: the run reports its real stopping point, not the write snapshot.

@@ -336,7 +336,13 @@ async function runRegeneration(
     if (remainingAfterModel <= 0) {
       // Not the model slice that ran out, but the whole task deadline: report
       // it as the remaining budget that was actually measured, not the slice.
-      atTimeout("model_generation", "task_deadline", remainingAfterModel);
+      // The helper may already have named the clock that stopped it; cleanup
+      // crossing the deadline afterwards must not relabel that known failure.
+      if (generated.errorCode === "timeout" && generated.timeout) {
+        atTimeout("model_generation", generated.timeout.source, generated.timeout.capMs);
+      } else {
+        atTimeout("model_generation", "task_deadline", remainingAfterModel);
+      }
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
