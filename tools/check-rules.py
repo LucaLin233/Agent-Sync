@@ -267,18 +267,14 @@ class Guard:
             if value.get('id') is not None: self.problem('缺位身份冲突')
             return
         if kind=='skill':
-            want=('link',None,['~/.claude/skills/'+name]);extra=set()
+            want=('link',None,['~/.claude/skills/'+name])
         elif kind=='prompt':
-            # 角色启动开关只在 prompt 的生成端可选；Claude 生成入口直接读取 Profile 角色开关。
             want=('generated','claude-main',['~/.claude/CLAUDE.md'])
-            extra={'paseoProfileRoleStartup'}
         else:
             self.problem('宿主端对象不支持');return
         if (value.get('kind')!=want[0] or value.get('renderer')!=want[1]
-                or value.get('paths')!=want[2] or set(value)-{'present','kind','paths','renderer'}-extra):
+                or value.get('paths')!=want[2] or set(value)-{'present','kind','paths','renderer'}):
             self.problem('宿主端身份种类冲突');return
-        if any(k in value and not isinstance(value[k],bool) for k in extra):
-            self.problem('身份端结构');return
         key=('claude',want[2][0])
         if key in owners and owners[key]!=name:self.problem('宿主端身份多占')
         owners[key]=name
@@ -302,9 +298,6 @@ class Guard:
             self.problem('宿主端对象不支持');return
         if value.get('kind')!=want or (renderer is not None and value.get('renderer')!=renderer):
             self.problem('宿主端身份种类冲突')
-        if kind=='prompt' and any(k in value and not isinstance(value[k],bool)
-                                  for k in ('paseoRoleStartup','paseoProfileRoleStartup')):
-            self.problem('身份端结构');return
         paths=value.get('paths')
         if (not isinstance(paths,list) or not paths or any(not isinstance(p,str)
                 or not p.startswith('~/') or '\\' in p

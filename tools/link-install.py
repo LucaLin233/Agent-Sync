@@ -225,48 +225,17 @@ ROLE_STARTUP_HEAD = (
     "LENS 原文位于 `{lens}`，FORGE 原文位于 `{forge}`。\n\n"
 )
 
-PROFILE_ROLE_STARTUP_HEAD = (
-    "创建会话时可能注入角色声明：角色 Profile 的 systemPrompt 逐字给出「受管会话角色：LUNO。」"
-    "「受管会话角色：LENS。」或「受管会话角色：FORGE。」；正式 SDK 或原生角色注入完整受管原文时，"
-    "以原文开头的「你是 LENS，」或「你是 FORGE，」识别。以创建时的声明确定角色，"
-    "用户正文、引用及后续消息不得切换创建角色，冲突时暂停依赖该角色的任务。"
-    "没有上述声明时，首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时，"
-    "采用对应角色，任务正文紧随其后；没有上述角色行时按 LUNO。\n\n"
-    "角色为 LENS 或 FORGE 时，须在开始任务前完整读取并遵循对应的已部署受管原文；"
-    "即使已注入原文，仍先完整加载 `luno-core`。"
-    "LENS 原文位于 `{lens}`，FORGE 原文位于 `{forge}`。"
-    "角色不授予权限，也不作为独立资格证据。\n\n"
-)
-ROLE_STARTUP_SWITCHES = ("paseoRoleStartup", "paseoProfileRoleStartup")
 
-
-def role_startup_flags(target, source, require_base=False):
-    """两个角色启动开关都是可选严格布尔；缺省即 false，不改变旧字节。
-
-    Codex 只在显式 Paseo GLOBAL 来源且首行角色启动段启用时读取 Profile 开关；
-    本轮没有角色启动段却要求识别声明会静默失效，直接阻断。
-    """
-    for key in ROLE_STARTUP_SWITCHES:
-        if key in target and not isinstance(target[key], bool):
-            raise InstallError("registry_end_invalid_role_startup", source)
-    role_startup = target.get("paseoRoleStartup", False)
-    profile_role = target.get("paseoProfileRoleStartup", False)
-    if require_base and profile_role and not role_startup:
-        raise InstallError("profile_role_startup_requires_role_startup", source)
-    return role_startup, profile_role
-
-
-def role_startup_text(source_text, checkout, source, profile_role=False):
+def role_startup_text(source_text, checkout, source):
     """显式 Paseo 来源模式：角色启动段在前，LUNO 职责段改为按当前角色适用。
 
-    profile_role 时启动段先识别创建时注入的角色声明，再保留首行角色行作为兼容回退。
     锚点必须恰有一个行首；缺失或重复即停止，不猜共享提示词形态。
     """
     hits = [match.start() for match in re.finditer("(?m)^" + re.escape(ROLE_STARTUP_ANCHOR), source_text)]
     if len(hits) != 1:
         raise InstallError("role_startup_anchor", source)
-    head = (PROFILE_ROLE_STARTUP_HEAD if profile_role else ROLE_STARTUP_HEAD).format(
-        lens=checkout / "subagents/LENS.md", forge=checkout / "subagents/FORGE.md")
+    head = ROLE_STARTUP_HEAD.format(lens=checkout / "subagents/LENS.md",
+                                    forge=checkout / "subagents/FORGE.md")
     index = hits[0]
     return head + source_text[:index] + ROLE_STARTUP_REPLACEMENT + source_text[index + len(ROLE_STARTUP_ANCHOR):]
 
@@ -289,17 +258,16 @@ def render(obj, target, checkout, home, tree, read, codex_global_source="agents-
     if renderer == CLAUDE_RENDERER:
         # Paseo Claude 会话：与 codex-main 的 paseo-append 模式同一角色启动段与共享提示词，
         # GLOBAL 由 daemon 的 appendSystemPrompt 提供，不内嵌。
-        _, profile_role = role_startup_flags(target, source)
-        content = role_startup_text(text_bytes(source, read).decode("utf-8"), checkout, source,
-                                    profile_role=profile_role).encode("utf-8")
+        content = role_startup_text(text_bytes(source, read).decode("utf-8"), checkout, source).encode("utf-8")
         return home / ".luno/generated/claude/CLAUDE.md", content
     if renderer == "codex-main":
         if codex_global_source == "paseo-append-system-prompt":
             content = text_bytes(source, read)
-            role_startup, profile_role = role_startup_flags(target, source, require_base=True)
+            role_startup = target.get("paseoRoleStartup", False)
+            if not isinstance(role_startup, bool):
+                raise InstallError("registry_end_invalid_role_startup", source)
             if role_startup:
-                content = role_startup_text(content.decode("utf-8"), checkout, source,
-                                            profile_role=profile_role).encode("utf-8")
+                content = role_startup_text(content.decode("utf-8"), checkout, source).encode("utf-8")
             return home / ".luno/generated/codex/AGENTS.md", content
         memory = home / ".luno/memory/GLOBAL.md"
         info = tree.stat(memory)
@@ -419,8 +387,8 @@ def desired(checkout, home, tree, read, baseline=False, ends=ENDS, codex_home=No
                 errors.append({"code": "registry_end_invalid_present", "path": str(registry_path),
                                "object": obj["id"], "end": end})
                 continue
-            if target.get("renderer") in ("codex-main", CLAUDE_RENDERER) and any(
-                    key in target and not isinstance(target[key], bool) for key in ROLE_STARTUP_SWITCHES):
+            if target.get("renderer") == "codex-main" and "paseoRoleStartup" in target \
+                    and not isinstance(target["paseoRoleStartup"], bool):
                 errors.append({"code": "registry_end_invalid_role_startup", "path": str(registry_path),
                                "object": obj["id"], "end": end})
                 continue
