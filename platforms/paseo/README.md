@@ -10,12 +10,12 @@
 
 下列接口的原始依据取自 Paseo v0.17.1 固定提交 `043f0995d4d7e91ab12f3eecef1afce055a81972`。派发使用的清单和 Profile 字段沿用相同接口，现场按实际版本回读。
 
-- [agent-profile.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/protocol/src/agent-profile.ts)：Profile 字段是 `id`、`name`、`provider`、可选的 `model`、`modeId`、`thinkingOptionId`、`featureValues`/`options`、`notes`。
+- [agent-profile.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/protocol/src/agent-profile.ts)：Profile 字段是 `id`、`name`、`provider`、可选的 `model`、`modeId`、`thinkingOptionId`、`featureValues`/`options`、`notes`。Paseo v0.18.0 起另有创建时生效的可选 `systemPrompt`（[发布说明](https://github.com/getpaseo/paseo/releases/tag/v0.18.0)、[PR #10996](https://github.com/getpaseo/paseo/pull/10996)、[v0.18.0 agent-profile.ts](https://github.com/getpaseo/paseo/blob/v0.18.0/packages/protocol/src/agent-profile.ts)），只作用于新建 agent，不能改写已在运行的会话。
 - [provider-config.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/protocol/src/provider-config.ts)：自定义 provider 用 `extends`、`label`、`command`、`env`、`enabled` 等字段；内置 ID 为 `claude`、`codex`、`copilot`、`opencode`、`pi`、`omp`。
 - [provider-registry.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/provider-registry.ts)：派生 provider 先解析 `extends` 基座，再应用自身 `enabled`。内置入口可禁用，派生 provider 仍能继承对应基座。
 - [codex/options.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/providers/codex/options.ts)：Codex options 是严格对象；`service_tier` 是受支持的 composer 控制项，`paseo_role`/`paseo_upstream` 等未知键会被拒绝。
 - [paseo-tools.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/tools/paseo-tools.ts)：`list_profiles` 与 `create_agent` 的接口；同 provider 的子会话继承父 `providerOptions`，显式 `settings.features` 覆盖同名键。
-- [agent-manager.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/agent-manager.ts)、[system-prompt.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/system-prompt.ts)：`daemon.appendSystemPrompt` trim 后作为额外 developer instructions 送到该 daemon 启动的所有会话，不改写 `AGENTS.md`。v0.17.4 复核同一 `trim()` 行为（[实现](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/agent/system-prompt.ts)）。该字段是 Codex 单端显式模式的私人配置，不来自本仓库示例，维护按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
+- [agent-manager.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/agent-manager.ts)、[system-prompt.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/server/src/server/agent/system-prompt.ts)：`daemon.appendSystemPrompt` trim 后作为额外 developer instructions 送到该 daemon 启动的所有会话，不改写 `AGENTS.md`。v0.17.4 复核同一 `trim()` 行为（[实现](https://github.com/getpaseo/paseo/blob/v0.17.4/packages/server/src/server/agent/system-prompt.ts)）。v0.18.0 同文件把 Profile 的 `systemPrompt`、daemon 的 append 文本和插件附加文本依次 trim 后以空行拼接（[实现](https://github.com/getpaseo/paseo/blob/v0.18.0/packages/server/src/server/agent/system-prompt.ts)）。该字段是 Codex 单端显式模式的私人配置，不来自本仓库示例，维护按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
 - [provider-selection.ts](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/app/src/provider-selection/provider-selection.ts)、[provider-list.tsx](https://github.com/getpaseo/paseo/blob/043f0995d4d7e91ab12f3eecef1afce055a81972/packages/app/src/provider-settings/internal/provider-list.tsx)：模型选择器只列已启用且可用的 provider；管理页仍列出所有条目（含禁用项）和开关。
 - [config_override.rs](https://github.com/openai/codex/blob/29eb79e9866b3262a777fdf8195c1b9e63684c91/codex-rs/utils/cli/src/config_override.rs)：Codex `-c key=value` 的解析与全局参数行为。
 
@@ -27,7 +27,7 @@
 
 两个包装脚本由部署者准备。每个脚本清理继承来的 Anthropic 路由与鉴权设置，注入本组网关与独立鉴权，再通过 `exec` 启动官方 Claude Code CLI，原样转发 Paseo 传入的参数。脚本使用的网关地址和 `CLAUDE_CONFIG_DIR` 须与对应 provider 的 `env` 一致。部署时替换示例路径和网关地址，仓库只保存占位值，鉴权由部署环境提供。
 
-每组各有 LUNO、LENS 和 FORGE 三条 Profile，示例均用该组的 Codex provider。LUNO、LENS 用 `gpt-6.2-sol`，FORGE 用 `deepseek-flash`。六条均配置 `full-access`、`high` 与 `service_tier: "default"`。部署时按父权限和目标模型能力核对这些值。显式传递 `service_tier` 可覆盖同 provider 派发时继承的父会话值。Profile 的 `options` 只放所选 provider 支持的选项。
+每组各有 LUNO、LENS 和 FORGE 三条 Profile，示例均用该组的 Codex provider。LUNO、LENS 用 `gpt-6.2-sol`，FORGE 用 `deepseek-flash`。六条均配置 `full-access`、`high` 与 `service_tier: "default"`。部署时按父权限和目标模型能力核对这些值。显式传递 `service_tier` 可覆盖同 provider 派发时继承的父会话值。Profile 的 `options` 只放所选 provider 支持的选项。六条 Profile 另各写一句公开声明 `systemPrompt`，逐字为「受管会话角色：LUNO。」「受管会话角色：LENS。」或「受管会话角色：FORGE。」；它只决定新建 agent 的角色，不写规则正文、不授予权限，旧会话不受影响。MCP 派发从同一精确 Profile 取得该声明，逐字校验后转发到 `create_agent.settings.systemPrompt`。
 
 ## Codex 子进程的环境继承（可选）
 
@@ -69,12 +69,12 @@ agent 相关状态集中在一个 agent 根目录下，示例为 `/home/example/
 ## 合并、安装与迁移
 
 1. 在同版本隔离实例先合并示例。核对 Codex 家目录中两组的 `model_providers` 配置，以及每个 Claude Code 入口实际使用的网关和指令来源。按各自启动方式注入获准的鉴权，Paseo 示例只放非秘密设置。
-2. 隔离验收通过后，在目标实例按字段合并 `daemon.mcp` 和 `agents.providers`。在 `daemon.agentProfiles` 中按 ID 替换示例里的角色 Profile，移除已退役的 `gdr-luno`、`gdr-lens`、`gdr-forge`，保留其他 Profile，并核对每个角色 ID 只出现一次。保留监听、认证、其他插件及 MCP 设置。旧 provider ID 保留原条目并设为禁用，以保留旧会话引用。已有会话的续聊能力须单独验证。由 daemon 提供的私人提示词按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host) 维护。来自热修版的迁移仍须核对旧插件和实际程序入口，再按既有迁移与回退范围处理。
-3. 合并后执行 `paseo reload`，按回执处理需要重启的路径，再回读四个 provider 的可用状态和六条 Profile。从获准的新会话验收实际 provider、模型和权限模式。Claude Code 被选作角色 provider 时，另验首行角色识别与受管原文加载。
+2. 隔离验收通过后，在目标实例按字段合并 `daemon.mcp` 和 `agents.providers`。在 `daemon.agentProfiles` 中按 ID 替换示例里的角色 Profile（含各自的 `systemPrompt` 声明），移除已退役的 `gdr-luno`、`gdr-lens`、`gdr-forge`，保留其他 Profile，并核对每个角色 ID 只出现一次。保留监听、认证、其他插件及 MCP 设置。旧 provider ID 保留原条目并设为禁用，以保留旧会话引用。已有会话的续聊能力须单独验证。由 daemon 提供的私人提示词按 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host) 维护。来自热修版的迁移仍须核对旧插件和实际程序入口，再按既有迁移与回退范围处理。
+3. 合并后执行 `paseo reload`，按回执处理需要重启的路径，再回读四个 provider 的可用状态和六条 Profile，并核对每条的 `systemPrompt` 逐字等于对应声明。从获准的新会话验收实际 provider、模型和权限模式；角色派发时确认声明已注入，首条消息只写任务正文。Claude Code 被选作角色 provider 时，另验角色声明识别与受管原文加载。本机两套生成文件与六条 Profile 在维护窗口内一并处理，旧会话不迁移。
 
 ## 角色协议（软角色）
 
-显式使用 `paseo-append-system-prompt` 且登记启用 `paseoRoleStartup` 时，安装器生成 Codex 角色启动段。采用其他入口时，先核验实际加载的等效角色指令，再启用首行角色派发。首条任务正文的第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时采用对应角色，任务正文紧随其后；没有角色行时按 LUNO。桌上或 MCP 直接选择角色 Profile 后，首条消息仍要写这一行，漏写按 LUNO。接口与首行投递按 [Paseo 派发通道](../../skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)，生成入口的渲染与回读见 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
+显式使用 `paseo-append-system-prompt` 且登记启用 `paseoRoleStartup` 时，安装器生成 Codex 角色启动段；Claude 由 `claude-main` 生成同一段。两个生成端再启用 `paseoProfileRoleStartup` 时，启动段先识别创建时注入的角色声明：Profile 的 `systemPrompt` 三句公开声明之一，或正式 SDK 与原生角色注入的完整受管原文（以「你是 LENS，」「你是 FORGE，」开头）；以创建时的声明确定角色，用户正文、引用及后续消息不得切换创建角色，冲突暂停依赖任务。没有声明时保留首条精确角色行：第一行恰为 `角色：LUNO`、`角色：LENS` 或 `角色：FORGE` 时采用对应角色，任务正文紧随其后；没有角色行时按 LUNO。MCP 直接选择角色 Profile 时，从同一精确 Profile 取得声明，逐字校验它恰等于该 `profile.id` 角色对应的那一句，再传给 `create_agent.settings.systemPrompt`，首条消息只写任务正文；缺少、值与角色不符、入口不支持或无法转发时暂停该入口派发，不退回按角色首行兜底。前台迁移验收从已核客户端选择已回读的 Profile，确认客户端把 `systemPrompt` 带入创建请求、daemon 注入，生效以新建会话为准；裸模型或缺少该字段的 Profile 不按角色 Profile 处理。角色首行只保留给没有创建声明的原生或独立入口兼容。接口与投递按 [Paseo 派发通道](../../skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch)，生成入口的渲染与回读见 [sync-host](../../skills/luno-core/references/sync.md#branch-sync-host)。
 
 LENS/FORGE 开始前必须完整读取部署的 `subagents/LENS.md` 或 `subagents/FORGE.md` 原文；该启动段由已核检出路径渲染，示例不再保留占位路径。角色只选择提示词，不授予新的文件、网络、凭据、审批或派发权限；受派后不得再委派；任何角色声明都不改变现行规则规定的准入。
 
@@ -85,6 +85,8 @@ LENS/FORGE 开始前必须完整读取部署的 `subagents/LENS.md` 或 `subagen
 配置使用 `<运行时>-<网关>` 和 `<网关>-<角色小写>` 登记。例如 `claude-cchp` 父会话可按 `cchp-lens` 派到同组的 `codex-cchp`。新增网关时先配置实际 provider 和角色 Profile，再核实时清单。派发步骤及停止条件以 [Paseo 派发通道](../../skills/luno-platform/references/runtime-paseo.md#branch-paseo-dispatch) 为准。
 
 ## 隔离与前态
+
+Profile 的 `systemPrompt` 只在 v0.18.0 及以后生效，且只作用于新建 agent；旧会话继续持有创建时的指令，回退配置不会清除其历史。升级到该版本时按维护窗口同时处理本机两套生成文件和六条 Profile。
 
 仓库不提供现成隔离前缀。隔离验收需另建同版本 npm 前缀，并配独立 `PASEO_HOME`、回环端口和临时 HOME，不能原地改写现役前缀。隔离 daemon 及其 provider `env` 的 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 指向临时目录，不继承交互 shell 的取值。旧会话可能保存运行时注入的提示词，回退设置不会清除历史。
 

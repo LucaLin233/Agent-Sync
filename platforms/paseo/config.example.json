@@ -11,7 +11,8 @@
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：LUNO。"
       },
       {
         "id": "cchp-lens",
@@ -20,7 +21,8 @@
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：LENS。"
       },
       {
         "id": "cchp-forge",
@@ -29,7 +31,8 @@
         "model": "deepseek-flash",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：FORGE。"
       },
       {
         "id": "cch-luno",
@@ -38,7 +41,8 @@
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：LUNO。"
       },
       {
         "id": "cch-lens",
@@ -47,7 +51,8 @@
         "model": "gpt-6.2-sol",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：LENS。"
       },
       {
         "id": "cch-forge",
@@ -56,7 +61,8 @@
         "model": "deepseek-flash",
         "modeId": "full-access",
         "thinkingOptionId": "high",
-        "options": {"service_tier": "default"}
+        "options": {"service_tier": "default"},
+        "systemPrompt": "受管会话角色：FORGE。"
       }
     ]
   },

@@ -40,7 +40,8 @@
             "~/.codex/AGENTS.md"
           ],
           "renderer": "codex-main",
-          "paseoRoleStartup": true
+          "paseoRoleStartup": true,
+          "paseoProfileRoleStartup": true
         },
         "paseo": {
           "present": false
@@ -51,7 +52,8 @@
           "paths": [
             "~/.claude/CLAUDE.md"
           ],
-          "renderer": "claude-main"
+          "renderer": "claude-main",
+          "paseoProfileRoleStartup": true
         }
       }
     },
