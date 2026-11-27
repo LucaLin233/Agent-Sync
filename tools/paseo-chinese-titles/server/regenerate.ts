@@ -366,6 +366,10 @@ async function runRegeneration(
     // failure is never downgraded to a skip.
     let skipped = false;
     let writeFailed = false;
+    // The first write failure is the one the final `reason` reports, and the
+    // session block below always runs its own `atStage`. Keep the deciding
+    // stage with its budget so the line cannot name a later step.
+    let decidingWrite: { stage?: RegenerationStage; budgetMs?: number } | null = null;
 
     if (wantsWorkspace) {
       atStage("workspace_write");
@@ -393,6 +397,11 @@ async function runRegeneration(
           reason = "workspace_verification_failed";
           writeFailed = true;
         }
+      }
+      // Snapshot once, right here: a timeout keeps its measured shortfall and a
+      // write failure keeps no budget, both from the workspace stage.
+      if (reason !== undefined && diagnostics) {
+        decidingWrite = { stage: diagnostics.stage, budgetMs: diagnostics.budgetMs };
       }
     }
 
@@ -442,6 +451,13 @@ async function runRegeneration(
           writeFailed = true;
         }
       }
+    }
+
+    // Restore the deciding write's stage on the normal path only: an unexpected
+    // throw keeps the stage the run actually reached in the catch below.
+    if (decidingWrite && diagnostics) {
+      diagnostics.stage = decidingWrite.stage;
+      diagnostics.budgetMs = decidingWrite.budgetMs;
     }
 
     const written = statusFor(wantsWorkspace, wantsSession, workspaceUpdated, sessionUpdated);

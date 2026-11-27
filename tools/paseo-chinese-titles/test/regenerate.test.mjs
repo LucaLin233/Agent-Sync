@@ -946,6 +946,48 @@ test("a write failure after a successful generation carries no model budget", as
   assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
 });
 
+test("both writes failing reports the workspace failure, not the later session stage", async () => {
+  const line = await captureFailure(() => runManualJob("rg_both", {
+    scope: "both",
+    generationTimeoutMs: 24_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic workspace failure"); },
+      });
+      return paseo;
+    },
+    renameSession: async () => ({ ok: false, failure: "failed" }),
+  }));
+  // `reason` reports the first write that failed; the stage must agree with it.
+  assert.equal(line.reason, "workspace_write_failed");
+  assert.equal(line.stage, "workspace_write", `stage must match the deciding write: ${JSON.stringify(line)}`);
+  assert.equal("budgetMs" in line, false, "no model budget on a write failure");
+  assert.equal(line.status, "error");
+});
+
+test("both writes failing on time reports the workspace timeout with its own budget", async () => {
+  // The joint preflight reserves more than one write does, so the clock is
+  // scripted: the run reaches and passes the preflight in time, then the
+  // deadline is past the workspace write's own reserve. `reason` keeps that
+  // first write, so the line must name the workspace stage and its measured
+  // shortfall, not a model slice and not the later session stage.
+  let reads = 0;
+  const line = await captureFailure(() => runManualJob("rg_both_timeout", {
+    scope: "both",
+    deadlineAt: 30_000,
+    now: () => (reads += 1) <= 5 ? 1_000 : 25_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    renameSession: async () => ({ ok: false, failure: "failed" }),
+  }));
+  assert.equal(line.reason, "timeout");
+  assert.equal(line.stage, "workspace_write", `stage must match the deciding write: ${JSON.stringify(line)}`);
+  assert.equal(line.budgetMs, 30_000 - 6_000 - 25_000, "the write's own shortfall, not a model slice");
+});
+
 test("a failure after selection keeps the selected agentId in the line", async () => {
   const line = await captureFailure(() => runManualJob("rg_selected", {
     // No time left once the conversation is in hand: this exit's result carries
