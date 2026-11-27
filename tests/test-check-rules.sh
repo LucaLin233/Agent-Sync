@@ -243,20 +243,6 @@ case('claude 端 present 须为布尔',1,'身份端结构',
      claude_end(lambda d:next(o for o in d['objects'] if o['type']=='skill')['ends']['claude'].__setitem__('present','yes')))
 case('claude 端不支持子代理',1,'宿主端对象不支持',
      claude_end(lambda d:[o for o in d['objects'] if o['type']=='subagent'][0]['ends'].__setitem__('claude',{'present':True,'kind':'link','paths':['~/.claude/x']})))
-case('claude prompt 的 Profile 角色开关须为布尔',1,'身份端结构',
-     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='prompt')['ends']['claude'].__setitem__('paseoProfileRoleStartup','true')))
-case('claude skill 不接受角色启动开关',1,'宿主端身份种类冲突',
-     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='skill')['ends']['claude'].__setitem__('paseoProfileRoleStartup',True)))
-case('claude prompt 不接受 Codex 专用的 paseoRoleStartup',1,'宿主端身份种类冲突',
-     claude_end(lambda d:next(o for o in d['objects'] if o['type']=='prompt')['ends']['claude'].__setitem__('paseoRoleStartup',True)))
-def codex_prompt(p, fn):
-    def edit(d):
-        fn(next(o for o in d['objects'] if o['type']=='prompt')['ends']['codex'])
-    registry(p,edit)
-case('codex prompt 的角色启动开关须为布尔',1,'身份端结构',
-     lambda p:codex_prompt(p,lambda v:v.__setitem__('paseoProfileRoleStartup',1)))
-case('codex prompt 兼容既有布尔开关',0,'无问题',
-     lambda p:codex_prompt(p,lambda v:(v.__setitem__('paseoRoleStartup',True),v.__setitem__('paseoProfileRoleStartup',False))))
 def minis_paths(p):
     def fn(d):
         sk=[o for o in d['objects'] if o['type']=='skill']
