@@ -39,14 +39,24 @@ export type RegenerationStage =
   | "model_generation"
   | "write_preflight"
   | "workspace_write"
-  | "session_write";
+  | "session_write"
+  | "state_save";
+
+/**
+ * Which clock stopped a timeout: the task deadline this run measured, the
+ * helper's own turn cap, or the session CLI's own budget. A controlled value
+ * only; no provider, CLI or exception text is ever stored.
+ */
+export type TimeoutSource = "task_deadline" | "helper" | "cli";
 
 export interface RegenerationDiagnostics {
   stage?: RegenerationStage;
   /** The selected Paseo session, recorded as soon as selection resolves. */
   agentId?: string;
-  /** The slice of budget the failing timeout compared against, in ms. */
+  /** Measured ms a failing timeout compared against; only ever set by a timeout. */
   budgetMs?: number;
+  /** Which clock timed out; only ever set by a timeout. */
+  timeoutSource?: TimeoutSource;
 }
 
 export interface RegenerateResult {
@@ -177,12 +187,20 @@ async function runRegeneration(
   let claimedAgentId: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const diagnostics = options.diagnostics;
-  const atStage = (stage: RegenerationStage, budgetMs?: number) => {
+  // A stage on its own never carries a budget or a source: those belong to the
+  // timeout branch that actually measured them, so an earlier model slice can
+  // never be read against a later stage or a non-timeout failure.
+  const atStage = (stage: RegenerationStage) => {
     if (!diagnostics) return;
     diagnostics.stage = stage;
-    // Assigned unconditionally: a budget belongs to the stage that recorded it,
-    // so an earlier model slice can never be reported against a later write.
+    diagnostics.budgetMs = undefined;
+    diagnostics.timeoutSource = undefined;
+  };
+  const atTimeout = (stage: RegenerationStage, source: TimeoutSource, budgetMs?: number) => {
+    if (!diagnostics) return;
+    diagnostics.stage = stage;
     diagnostics.budgetMs = budgetMs;
+    diagnostics.timeoutSource = source;
   };
   atStage("workspace_read");
   try {
@@ -240,7 +258,7 @@ async function runRegeneration(
     }
     const remainingBeforeRead = deadlineAt - reserve - now();
     if (remainingBeforeRead <= 0) {
-      atStage("conversation_read", remainingBeforeRead);
+      atTimeout("conversation_read", "task_deadline", remainingBeforeRead);
       return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
     }
     atStage("conversation_read");
@@ -270,14 +288,14 @@ async function runRegeneration(
     const maxChars = options.settings.titleMaxChars;
     const remaining = deadlineAt - now() - reserve;
     if (remaining <= 0) {
-      atStage("model_generation", remaining);
+      atTimeout("model_generation", "task_deadline", remaining);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     const generationBudget = Math.min(
       options.generationTimeoutMs ?? GENERATION_DEADLINE_MS,
       remaining,
     );
-    atStage("model_generation", generationBudget);
+    atStage("model_generation");
     const generation: Promise<ConversationGenerationResult | null> = options.generateConversation({
       transcript,
       ...(conversation.segments && conversation.segments.length > 1 ? { segments: conversation.segments } : {}),
@@ -286,12 +304,20 @@ async function runRegeneration(
       projectId: workspace.projectId,
       maxChars,
     }, generationBudget, deadlineAt - reserve).catch(() => null);
-    const timeout = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), Math.max(0, deadlineAt - now()));
+    // The timer's own measured value, so the line can say how much of the task
+    // deadline was actually left when that clock fired.
+    const timerMs = Math.max(0, deadlineAt - now());
+    const expired = Symbol("expired");
+    const timeout = new Promise<typeof expired>((resolve) => {
+      timer = setTimeout(() => resolve(expired), timerMs);
     });
     const generated = await Promise.race([generation, timeout]);
-    if (!generated) {
-      atStage("model_generation", generationBudget);
+    if (!generated || generated === expired) {
+      // Only the task timer is a deadline this run measured. A generator that
+      // returned no title keeps its previous timeout reason without claiming a
+      // clock it never observed.
+      if (generated === expired) atTimeout("model_generation", "task_deadline", timerMs);
+      else atStage("model_generation");
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (cancelled()) {
@@ -301,10 +327,15 @@ async function runRegeneration(
     if (remainingAfterModel <= 0) {
       // Not the model slice that ran out, but the whole task deadline: report
       // it as the remaining budget that was actually measured, not the slice.
-      atStage("model_generation", remainingAfterModel);
+      atTimeout("model_generation", "task_deadline", remainingAfterModel);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
+      // The helper's own turn cap timed out: the chain is known but the exact
+      // cap it compared against is not measured here, so no budget is reported.
+      // Any other code (provider, helper terminal, invalid title) is no timeout.
+      if (generated.errorCode === "timeout") atTimeout("model_generation", "helper");
+      else atStage("model_generation");
       return {
         status: "error",
         reason: generated.errorCode ?? "model_failed",
@@ -352,7 +383,7 @@ async function runRegeneration(
     }
     const remainingBeforeWrite = deadlineAt - reserve - now();
     if (remainingBeforeWrite <= 0) {
-      atStage("write_preflight", remainingBeforeWrite);
+      atTimeout("write_preflight", "task_deadline", remainingBeforeWrite);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
 
@@ -369,7 +400,11 @@ async function runRegeneration(
     // The first write failure is the one the final `reason` reports, and the
     // session block below always runs its own `atStage`. Keep the deciding
     // stage with its budget so the line cannot name a later step.
-    let decidingWrite: { stage?: RegenerationStage; budgetMs?: number } | null = null;
+    let decidingWrite: {
+      stage?: RegenerationStage;
+      budgetMs?: number;
+      timeoutSource?: TimeoutSource;
+    } | null = null;
 
     if (wantsWorkspace) {
       atStage("workspace_write");
@@ -381,7 +416,7 @@ async function runRegeneration(
       } else if (remainingForWrite <= 0) {
         // Its own measured shortfall, so this write timeout is not read as a
         // model timeout that merely ran out of time earlier.
-        atStage("workspace_write", remainingForWrite);
+        atTimeout("workspace_write", "task_deadline", remainingForWrite);
         reason = "timeout";
       } else {
         try {
@@ -401,7 +436,11 @@ async function runRegeneration(
       // Snapshot once, right here: a timeout keeps its measured shortfall and a
       // write failure keeps no budget, both from the workspace stage.
       if (reason !== undefined && diagnostics) {
-        decidingWrite = { stage: diagnostics.stage, budgetMs: diagnostics.budgetMs };
+        decidingWrite = {
+          stage: diagnostics.stage,
+          budgetMs: diagnostics.budgetMs,
+          timeoutSource: diagnostics.timeoutSource,
+        };
       }
     }
 
@@ -429,7 +468,7 @@ async function runRegeneration(
         skipped = true;
         reason ??= "cancelled";
       } else if (remainingForRename <= 0) {
-        atStage("session_write", remainingForRename);
+        atTimeout("session_write", "task_deadline", remainingForRename);
         reason ??= "timeout";
       } else {
         // The same measurement the branch above used, never a second clock read.
@@ -444,6 +483,12 @@ async function runRegeneration(
         if (verified?.agent && normalizedTitle(verified.agent.title) === summary) {
           sessionUpdated = true;
         } else if (!renamed.ok) {
+          // The CLI's own budget can be what failed; keep the existing reason,
+          // and record the budget actually handed to it and its source only
+          // when this is the failure the line will report.
+          if (reason === undefined && renamed.failure === "timeout") {
+            atTimeout("session_write", "cli", renameBudget);
+          }
           reason ??= "session_write_failed";
           writeFailed = true;
         } else {
@@ -458,6 +503,7 @@ async function runRegeneration(
     if (decidingWrite && diagnostics) {
       diagnostics.stage = decidingWrite.stage;
       diagnostics.budgetMs = decidingWrite.budgetMs;
+      diagnostics.timeoutSource = decidingWrite.timeoutSource;
     }
 
     const written = statusFor(wantsWorkspace, wantsSession, workspaceUpdated, sessionUpdated);

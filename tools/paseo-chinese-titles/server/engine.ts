@@ -316,7 +316,7 @@ export class ChineseTitlesEngine {
           return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };
         },
       });
-      await this.recordRegeneration(workspaceId, result);
+      await this.recordRegeneration(workspaceId, result, diagnostics);
       return result;
     });
     return started;
@@ -327,7 +327,11 @@ export class ChineseTitlesEngine {
     return this.regenerationJobs.status(input);
   }
 
-  private async recordRegeneration(workspaceId: string, result: RegenerateResult): Promise<void> {
+  private async recordRegeneration(
+    workspaceId: string,
+    result: RegenerateResult,
+    diagnostics: RegenerationDiagnostics,
+  ): Promise<void> {
     // After a reload the old process must not rewrite the state file over the
     // new process's view; the title itself was already written and verified.
     if (!this.state || this.disposed) return;
@@ -342,7 +346,15 @@ export class ChineseTitlesEngine {
         changed = true;
       }
     }
-    if (changed) await saveState(this.state);
+    if (!changed) return;
+    // The titles are already written and verified; only the bookkeeping write is
+    // left. Name that step for the one failure line and drop the model budget
+    // and timeout source, which belong to an earlier stage. If saveState throws,
+    // the job's catch keeps this stage and the already recorded agentId.
+    diagnostics.stage = "state_save";
+    diagnostics.budgetMs = undefined;
+    diagnostics.timeoutSource = undefined;
+    await saveState(this.state);
   }
 
   /**

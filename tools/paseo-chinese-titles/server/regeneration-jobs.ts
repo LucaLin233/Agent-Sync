@@ -54,8 +54,9 @@ const DEFAULT_MAX_RETAINED = 50;
  * `agentId` and `stage` come from the run's own diagnostics when the returned
  * result has no session (an early deadline check or a throw): both are recorded
  * while the run happens, never inferred from text. A failing timeout also
- * carries the budget it compared against, which is what separates "no time left
- * before reading", "no time left for the model" and "the model overran".
+ * carries the budget it compared against and which clock stopped it, which is
+ * what separates "no time left before reading", "no time left for the model",
+ * the helper's own turn cap and the session CLI's own budget.
  */
 function logFailure(job: JobRecord, result: RegenerateResult): void {
   try {
@@ -68,6 +69,7 @@ function logFailure(job: JobRecord, result: RegenerateResult): void {
       status: result.status,
       reason: result.reason ?? "unspecified",
       ...(job.diagnostics.stage ? { stage: job.diagnostics.stage } : {}),
+      ...(job.diagnostics.timeoutSource ? { timeoutSource: job.diagnostics.timeoutSource } : {}),
       ...(job.diagnostics.budgetMs !== undefined ? { budgetMs: job.diagnostics.budgetMs } : {}),
       elapsedMs: job.finishedAt !== null ? job.finishedAt - job.startedAt : null,
     };
