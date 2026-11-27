@@ -1,6 +1,12 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type {
+  PluginButtonContentProps,
+  PluginClientContext,
+  PluginWorkspacePanelProps,
+} from "@getpaseo/plugin/client";
 import { Platform } from "react-native";
 import { MetricsPanel, MetricsSheet } from "./client/panel";
+import { createCumulativeHub } from "./client/cumulative-hub";
+import { CumulativeHubContext } from "./client/cumulative-hub-context";
 import { startPillRuntime } from "./client/pill-runtime";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { cumulativeUsageRpc } from "./shared/cumulative";
@@ -8,6 +14,19 @@ import { workspaceSettingsSubscription } from "./shared/scope";
 
 export default function contribute(client: PluginClientContext) {
   const native = Platform.OS === "ios" || Platform.OS === "android";
+  // One hub per loaded client: the composer pill and every panel of this client
+  // publish and read the same cumulative reading.
+  const hub = createCumulativeHub();
+  const PanelWithHub = (props: PluginWorkspacePanelProps) => (
+    <CumulativeHubContext.Provider value={hub}>
+      <MetricsPanel {...props} />
+    </CumulativeHubContext.Provider>
+  );
+  const SheetWithHub = (props: PluginButtonContentProps) => (
+    <CumulativeHubContext.Provider value={hub}>
+      <MetricsSheet {...props} />
+    </CumulativeHubContext.Provider>
+  );
   const runtime = startPillRuntime({
     addPill({ workspaceId, agentId, title, label, onPress }) {
       return client.addComposerPill({
@@ -19,7 +38,7 @@ export default function contribute(client: PluginClientContext) {
           icon: "Activity",
           label,
           behavior: native
-            ? { kind: "popover", Content: MetricsSheet }
+            ? { kind: "popover", Content: SheetWithHub }
             : { kind: "action", onPress },
         },
       });
@@ -54,13 +73,13 @@ export default function contribute(client: PluginClientContext) {
         onClosed: closed,
       });
     },
-  });
+  }, hub);
 
   const removePanel = client.addWorkspacePanel({
     id: "metrics",
     title: "工作区用量",
     icon: "Activity",
-    Component: MetricsPanel,
+    Component: PanelWithHub,
   });
   const removeSettings = client.addSettingsScreen({
     id: "workspace-metrics",
