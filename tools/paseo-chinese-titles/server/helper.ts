@@ -114,10 +114,38 @@ export interface GenerationResult {
   errorCode?: GenerationErrorCode;
 }
 
+/**
+ * Which helper clock produced a `timeout`. A controlled value only: it names a
+ * branch this module owns, never provider text.
+ *
+ * - `helper_start_deadline`: too little of the caller's budget was left to
+ *   start the helper at all (before the provider or session was created).
+ * - `helper_turn_deadline`: the caller's deadline passed while a turn ran, or a
+ *   turn came back after the caller's remaining time was already spent.
+ * - `helper_turn_cap`: the per-turn cap this module measured sent the turn past
+ *   its slice (`cap` carries it).
+ * - `helper_sdk_timeout`: the SDK reported its own structured `timeout`
+ *   terminal, which is not this module's clock.
+ */
+export type HelperTimeoutSource =
+  | "helper_start_deadline"
+  | "helper_turn_deadline"
+  | "helper_turn_cap"
+  | "helper_sdk_timeout";
+
+/** Internal timeout metadata; it never reaches an RPC or the panel. */
+export interface HelperTimeoutInfo {
+  source: HelperTimeoutSource;
+  /** The per-turn cap actually measured for this turn, when one was. */
+  capMs?: number;
+}
+
 export interface ConversationGenerationResult {
   /** Null means no usable model title; the caller must keep the existing title. */
   title: string | null;
   errorCode?: GenerationErrorCode;
+  /** Present only with `errorCode: "timeout"`, and only from this module. */
+  timeout?: HelperTimeoutInfo;
   /** How many segments the title was built from; absent for a single-pass call. */
   segments?: { total: number; used: number };
 }
@@ -249,6 +277,8 @@ function classify(error: unknown): GenerationErrorCode {
 interface ModelRun {
   messages: string[];
   errorCode?: GenerationErrorCode;
+  /** Set only together with `errorCode: "timeout"`. */
+  timeout?: HelperTimeoutInfo;
 }
 
 /**
@@ -329,7 +359,9 @@ async function runTitleModel(
   const messages: string[] = [];
   try {
     resolved = await resolveTitleProvider(paseo, settings);
-    if (remaining() <= 2_000) return { messages, errorCode: "timeout" };
+    if (remaining() <= 2_000) {
+      return { messages, errorCode: "timeout", timeout: { source: "helper_start_deadline" } };
+    }
     const directory = assertPluginPath(helperDirectory());
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const source = { kind: "directory" as const, path: directory, ...(input.projectId ? { projectId: input.projectId } : {}) };
@@ -386,7 +418,9 @@ async function runTitleModel(
       // turn: once the deadline is this close the run reports `timeout` and
       // the caller writes nothing, instead of starting a turn that cannot be
       // verified in time.
-      if (remaining() <= STEP_GUARD_MS) return { messages, errorCode: "timeout" };
+      if (remaining() <= STEP_GUARD_MS) {
+        return { messages, errorCode: "timeout", timeout: { source: "helper_turn_deadline" } };
+      }
       // Share the time left over the steps that remain, but never below the
       // per-step floor: a fair share of a short budget used to give the first
       // digest only a few seconds, so it always lost its turn. A possible
@@ -421,17 +455,27 @@ async function runTitleModel(
       ]).finally(() => {
         if (timer) clearTimeout(timer);
       });
-      if (outcome === expired) return { messages, errorCode: "timeout" };
+      // Our own per-turn timer fired: the cap is the value this module handed
+      // to that timer, so it is worth naming.
+      if (outcome === expired) {
+        return { messages, errorCode: "timeout", timeout: { source: "helper_turn_cap", capMs: cap } };
+      }
       // The SDK call carries its own timeout, but a provider that answered
       // after its slice has already spent time the remaining steps need.
-      if (now() - stepStartedAt >= cap) return { messages, errorCode: "timeout" };
+      if (now() - stepStartedAt >= cap) {
+        return { messages, errorCode: "timeout", timeout: { source: "helper_turn_cap", capMs: cap } };
+      }
       // The SDK reports one structured status per turn, so a session that ended
       // in `error` or asked for a person is not the same event as an idle turn
       // with no text. Only the status is read; its free-text `error` and the raw
       // response never leave this function. Any other status keeps the previous
       // `model_failed` for the automatic paths.
       if (outcome.status === "timeout") {
-        return { messages, errorCode: input.reportTerminalStatus ? "timeout" : "model_failed" };
+        // The SDK's own clock stopped the turn inside its slice; the cap it was
+        // given is still the measured budget for this turn.
+        return input.reportTerminalStatus
+          ? { messages, errorCode: "timeout", timeout: { source: "helper_sdk_timeout", capMs: cap } }
+          : { messages, errorCode: "model_failed" };
       }
       if (outcome.status !== "idle") {
         return { messages, errorCode: input.reportTerminalStatus ? "helper_failed" : "model_failed" };
@@ -454,6 +498,11 @@ async function runTitleModel(
  * only ever report `model_failed` for a non-idle terminal, so passing
  * `helper_failed` through here cannot change them.
  */
+/** Timeout metadata for a result, only when the code really is a timeout. */
+function timeoutInfo(run: ModelRun, code: GenerationErrorCode): { timeout?: HelperTimeoutInfo } {
+  return code === "timeout" && run.timeout ? { timeout: run.timeout } : {};
+}
+
 function failureCode(run: ModelRun, fallback: GenerationErrorCode): GenerationErrorCode {
   if (run.errorCode === "provider_unavailable") return "provider_unavailable";
   if (run.errorCode === "timeout") return "timeout";
@@ -508,7 +557,10 @@ export async function generateSessionTitle(
     prompts: [sessionPrompt(request)],
   }, options);
   const raw = run.messages[0];
-  if (!raw) return { title: null, errorCode: failureCode(run, "model_failed") };
+  if (!raw) {
+    const code = failureCode(run, "model_failed");
+    return { title: null, errorCode: code, ...timeoutInfo(run, code) };
+  }
   const title = sanitizeConversationTitle(raw, request.maxChars);
   return title ? { title } : { title: null, errorCode: "invalid_title" };
 }
@@ -577,9 +629,11 @@ export async function generateConversationTitle(
   if (run.messages.length < segments.length + 1) {
     // Every digest that completed is reported; a title built from a subset is
     // never returned.
+    const code = failureCode(run, "model_failed");
     return {
       title: null,
-      errorCode: failureCode(run, "model_failed"),
+      errorCode: code,
+      ...timeoutInfo(run, code),
       segments: { total: segments.length, used: Math.min(run.messages.length, segments.length) },
     };
   }
@@ -618,7 +672,8 @@ function summaryResult(
 ): ConversationGenerationResult {
   const tail = segments ? { segments } : {};
   if (run.messages.length === 0) {
-    return { title: null, errorCode: failureCode(run, "model_failed"), ...tail };
+    const code = failureCode(run, "model_failed");
+    return { title: null, errorCode: code, ...timeoutInfo(run, code), ...tail };
   }
   const raw = run.messages[run.messages.length - 1];
   const verdict = checkConversationSummaryTitle(raw, maxChars);
@@ -627,15 +682,14 @@ function summaryResult(
   // The shortening turn itself can end in a timeout or a non-idle helper
   // terminal; that structured reason survives instead of becoming
   // `rewrite_failed`, which means the model answered but stayed unusable.
-  return {
-    title: null,
-    errorCode: run.errorCode === "timeout"
-      ? "timeout"
-      : run.errorCode === "helper_failed"
-        ? "helper_failed"
-        : "rewrite_failed",
-    ...tail,
-  };
+  const code: GenerationErrorCode = run.errorCode === "timeout"
+    ? "timeout"
+    : run.errorCode === "helper_failed"
+      ? "helper_failed"
+      : "rewrite_failed";
+  // A shortening turn that timed out keeps which clock did it; every other
+  // verdict carries no timeout metadata at all.
+  return { title: null, errorCode: code, ...timeoutInfo(run, code), ...tail };
 }
 
 export function isHelperAgent(agent: {

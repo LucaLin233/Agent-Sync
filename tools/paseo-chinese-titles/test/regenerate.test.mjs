@@ -934,7 +934,7 @@ test("the task timer and the helper's own turn cap are told apart by source", as
   }));
   assert.equal(helper.reason, "timeout");
   assert.equal(helper.stage, "model_generation");
-  assert.equal(helper.timeoutSource, "helper");
+  assert.equal(helper.timeoutSource, "helper", "no metadata from the generator keeps the generic bucket");
   assert.equal("budgetMs" in helper, false, "the helper's per-turn cap is not measured here");
 
   // A non-timeout model failure keeps the same stage without any clock report.
@@ -946,6 +946,75 @@ test("the task timer and the helper's own turn cap are told apart by source", as
   assert.equal(failed.stage, "model_generation");
   assert.equal("timeoutSource" in failed, false, "no timeout source on a non-timeout failure");
   assert.equal("budgetMs" in failed, false, "no budget on a non-timeout failure");
+});
+
+test("the helper's own timeout source and cap reach the line unchanged", async () => {
+  // The helper names which of its clocks stopped the run; the job must not
+  // re-derive it. A measured cap comes along, an unmeasured one does not.
+  const capped = await captureFailure(() => runManualJob("rg_helper_cap_line", {
+    scope: "session",
+    generateConversation: async () => ({
+      title: null,
+      errorCode: "timeout",
+      timeout: { source: "helper_turn_cap", capMs: 8_000 },
+    }),
+  }));
+  assert.equal(capped.reason, "timeout");
+  assert.equal(capped.stage, "model_generation");
+  assert.equal(capped.timeoutSource, "helper_turn_cap");
+  assert.equal(capped.budgetMs, 8_000, "the cap the helper actually measured");
+
+  const sdk = await captureFailure(() => runManualJob("rg_helper_sdk_line", {
+    scope: "session",
+    generateConversation: async () => ({ title: null, errorCode: "timeout", timeout: { source: "helper_sdk_timeout" } }),
+  }));
+  assert.equal(sdk.timeoutSource, "helper_sdk_timeout");
+  assert.equal("budgetMs" in sdk, false, "no cap was measured for this turn");
+
+  // A non-timeout helper failure never borrows a timeout source or a budget.
+  const failed = await captureFailure(() => runManualJob("rg_helper_failed_line", {
+    scope: "session",
+    generateConversation: async () => ({
+      title: null,
+      errorCode: "helper_failed",
+      timeout: { source: "helper_turn_cap", capMs: 8_000 },
+    }),
+  }));
+  assert.equal(failed.reason, "helper_failed");
+  assert.equal("timeoutSource" in failed, false);
+  assert.equal("budgetMs" in failed, false);
+});
+
+test("an unexpected throw after a workspace write failure keeps the stage actually reached", async () => {
+  // The first write decides `reason`, but an exception later is a different
+  // event: the run reports its real stopping point, not the write snapshot.
+  const line = await captureFailure(() => runManualJob("rg_both_throw", {
+    scope: "both",
+    generationTimeoutMs: 10_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic workspace failure"); },
+      });
+      // Only the session block's own handle lookup throws: the preflight read
+      // and the workspace write already ran normally.
+      const originalAgents = paseo.agents.ref;
+      let agentReads = 0;
+      paseo.agents.ref = (id) => {
+        agentReads += 1;
+        if (agentReads > 1) throw new Error("synthetic unexpected throw");
+        return originalAgents(id);
+      };
+      return paseo;
+    },
+  }));
+  assert.equal(line.reason, "internal_failed");
+  assert.equal(line.stage, "session_write", "where the run actually stopped");
+  assert.equal(line.agentId, "a1");
+  assert.equal("timeoutSource" in line, false);
 });
 
 test("a single session write hitting the CLI's own timeout keeps its reason and its budget", async () => {

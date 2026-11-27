@@ -44,10 +44,19 @@ export type RegenerationStage =
 
 /**
  * Which clock stopped a timeout: the task deadline this run measured, the
- * helper's own turn cap, or the session CLI's own budget. A controlled value
- * only; no provider, CLI or exception text is ever stored.
+ * session CLI's own budget, or one of the helper's own clocks (which one is
+ * decided inside helper.ts and passed through). A controlled value only; no
+ * provider, CLI or exception text is ever stored.
  */
-export type TimeoutSource = "task_deadline" | "helper" | "cli";
+export type TimeoutSource =
+  | "task_deadline"
+  | "cli"
+  /** A helper timeout with no metadata: the generic bucket kept for older runs. */
+  | "helper"
+  | "helper_start_deadline"
+  | "helper_turn_deadline"
+  | "helper_turn_cap"
+  | "helper_sdk_timeout";
 
 export interface RegenerationDiagnostics {
   stage?: RegenerationStage;
@@ -331,11 +340,17 @@ async function runRegeneration(
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
-      // The helper's own turn cap timed out: the chain is known but the exact
-      // cap it compared against is not measured here, so no budget is reported.
-      // Any other code (provider, helper terminal, invalid title) is no timeout.
-      if (generated.errorCode === "timeout") atTimeout("model_generation", "helper");
-      else atStage("model_generation");
+      // The helper decides which of its own clocks timed out and whether a turn
+      // cap was measured. Without that metadata a helper timeout keeps the
+      // previous generic source; any other code (provider, helper terminal,
+      // invalid title) is no timeout at all.
+      if (generated.errorCode === "timeout") {
+        const source = generated.timeout?.source ?? "helper";
+        const cap = generated.timeout?.capMs;
+        atTimeout("model_generation", source, cap);
+      } else {
+        atStage("model_generation");
+      }
       return {
         status: "error",
         reason: generated.errorCode ?? "model_failed",
