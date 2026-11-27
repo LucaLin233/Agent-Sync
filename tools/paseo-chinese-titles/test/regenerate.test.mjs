@@ -869,15 +869,17 @@ async function captureFailure(run) {
 async function runManualJob(jobId, overrides) {
   const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
   const { regenerateWorkspaceTitle } = await import("../server/regenerate.ts");
+  const { paseoOverride, ...rest } = overrides;
   const jobs = new RegenerationJobs({ id: () => jobId });
   const diagnostics = {};
   jobs.start({ workspaceId: "w1", claimKey: "workspace:w1", diagnostics }, async (isCancelled) => {
     const state = makeState();
+    const paseo = paseoOverride ? paseoOverride(state) : makePaseo(state);
     return regenerateWorkspaceTitle({
-      ...optionsFor(makePaseo(state), state, { agentId: "a1" }),
+      ...optionsFor(paseo, state, { agentId: "a1" }),
       isCancelled,
       diagnostics,
-      ...overrides,
+      ...rest,
     });
   });
 }
@@ -917,6 +919,31 @@ test("two different timeout stages are distinguishable and keep the selected ses
   assert.equal(model.budgetMs, 24_000, "the model slice that was actually given");
   assert.notEqual(model.stage, early.stage, "two timeout stages are not one bucket");
   assert.equal(model.reason, early.reason, "the controlled reason itself is unchanged");
+});
+
+test("a write failure after a successful generation carries no model budget", async () => {
+  // The model slice is real and finite; the later write is a different stage.
+  // The line must not reuse the model's budget for the write failure.
+  const line = await captureFailure(() => runManualJob("rg_write", {
+    scope: "workspace",
+    generationTimeoutMs: 24_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic daemon failure"); },
+      });
+      return paseo;
+    },
+  }));
+  assert.equal(line.jobId, "rg_write");
+  assert.equal(line.reason, "workspace_write_failed");
+  assert.equal(line.stage, "workspace_write");
+  assert.equal(line.agentId, "a1");
+  assert.equal("budgetMs" in line, false, `no stale model budget: ${JSON.stringify(line)}`);
+  assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
 });
 
 test("a failure after selection keeps the selected agentId in the line", async () => {

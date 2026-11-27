@@ -180,7 +180,9 @@ async function runRegeneration(
   const atStage = (stage: RegenerationStage, budgetMs?: number) => {
     if (!diagnostics) return;
     diagnostics.stage = stage;
-    if (budgetMs !== undefined) diagnostics.budgetMs = budgetMs;
+    // Assigned unconditionally: a budget belongs to the stage that recorded it,
+    // so an earlier model slice can never be reported against a later write.
+    diagnostics.budgetMs = budgetMs;
   };
   atStage("workspace_read");
   try {
@@ -236,8 +238,9 @@ async function runRegeneration(
     if (cancelled()) {
       return { status: "error", reason: "cancelled", workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
-      atStage("conversation_read", deadlineAt - reserve - now());
+    const remainingBeforeRead = deadlineAt - reserve - now();
+    if (remainingBeforeRead <= 0) {
+      atStage("conversation_read", remainingBeforeRead);
       return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
     }
     atStage("conversation_read");
@@ -294,8 +297,11 @@ async function runRegeneration(
     if (cancelled()) {
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
-      atStage("model_generation", deadlineAt - reserve - now());
+    const remainingAfterModel = deadlineAt - reserve - now();
+    if (remainingAfterModel <= 0) {
+      // Not the model slice that ran out, but the whole task deadline: report
+      // it as the remaining budget that was actually measured, not the slice.
+      atStage("model_generation", remainingAfterModel);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
@@ -344,8 +350,9 @@ async function runRegeneration(
     if (cancelled()) {
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
-      atStage("write_preflight", deadlineAt - reserve - now());
+    const remainingBeforeWrite = deadlineAt - reserve - now();
+    if (remainingBeforeWrite <= 0) {
+      atStage("write_preflight", remainingBeforeWrite);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
 
@@ -362,10 +369,15 @@ async function runRegeneration(
 
     if (wantsWorkspace) {
       atStage("workspace_write");
+      // One clock read, used by both the branch and the logged budget.
+      const remainingForWrite = deadlineAt - WRITE_RESERVE_MS - now();
       if (cancelled()) {
         reason = "cancelled";
         skipped = true;
-      } else if (now() >= deadlineAt - WRITE_RESERVE_MS) {
+      } else if (remainingForWrite <= 0) {
+        // Its own measured shortfall, so this write timeout is not read as a
+        // model timeout that merely ran out of time earlier.
+        atStage("workspace_write", remainingForWrite);
         reason = "timeout";
       } else {
         try {
@@ -392,6 +404,8 @@ async function runRegeneration(
       // happened and is reported as a verified partial result.
       const latest = await paseo.agents.ref(agentId).refresh().catch(() => null);
       const latestAgent = latest?.agent;
+      // One clock read, used by both the branch and the rename budget below.
+      const remainingForRename = deadlineAt - 1_000 - now();
       if (!latestAgent || latestAgent.archivedAt || latestAgent.workspaceId !== workspaceId ||
         normalizedTitle(latestAgent.title) !== startSessionTitle) {
         skipped = true;
@@ -405,10 +419,12 @@ async function runRegeneration(
       } else if (cancelled()) {
         skipped = true;
         reason ??= "cancelled";
-      } else if (now() >= deadlineAt - 1_000) {
+      } else if (remainingForRename <= 0) {
+        atStage("session_write", remainingForRename);
         reason ??= "timeout";
       } else {
-        const renameBudget = Math.max(1_000, deadlineAt - now() - 1_000);
+        // The same measurement the branch above used, never a second clock read.
+        const renameBudget = Math.max(1_000, remainingForRename);
         let renamed: SessionRenameResult = { ok: false, failure: "failed" };
         try {
           renamed = await options.renameSession(agentId, summary, renameBudget);
