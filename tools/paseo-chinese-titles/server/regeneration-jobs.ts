@@ -44,6 +44,28 @@ const DEFAULT_RETENTION_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_RETAINED = 50;
 
 /**
+ * One line per failed job, keyed by its jobId so it can be matched with the
+ * panel's request. It carries identifiers, the terminal reason and the elapsed
+ * time only: never conversation text, titles, prompts or raw exception text.
+ */
+function logFailure(job: JobRecord, result: RegenerateResult): void {
+  try {
+    // One argument, so the line stays a single searchable record in stderr and plugin logs.
+    const fields = {
+      jobId: job.jobId,
+      workspaceId: job.workspaceId,
+      ...(result.agentId ? { agentId: result.agentId } : {}),
+      status: result.status,
+      reason: result.reason ?? "unspecified",
+      elapsedMs: job.finishedAt !== null ? job.finishedAt - job.startedAt : null,
+    };
+    console.warn(`[paseo-chinese-titles] regeneration job failed ${JSON.stringify(fields)}`);
+  } catch {
+    // Diagnostics must never change the job's outcome.
+  }
+}
+
+/**
  * In-memory job registry. It is deliberately not a persistent queue: a daemon
  * or plugin restart drops the job, the panel shows `unknown`, and no stale work
  * writes a title after its owner is gone.
@@ -97,11 +119,13 @@ export class RegenerationJobs {
         if (job.cancelled || this.disposed) return;
         job.result = result;
         job.finishedAt = this.now();
+        if (result.status === "error") logFailure(job, result);
       })
       .catch(() => {
         if (job.cancelled || this.disposed) return;
         job.result = { status: "error", reason: "internal_failed", workspaceUpdated: false, sessionUpdated: false };
         job.finishedAt = this.now();
+        logFailure(job, job.result);
       })
       .finally(() => this.prune());
     return { status: "started", jobId: job.jobId };
