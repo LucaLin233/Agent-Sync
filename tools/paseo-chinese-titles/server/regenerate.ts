@@ -25,6 +25,30 @@ export type RegenerateStatus = "done" | "partial" | "busy" | "needs_selection" |
 /** Where the one generated summary is written. Omitted means the legacy workspace-only action. */
 export type RegenerateScope = "both" | "workspace" | "session";
 
+/**
+ * Which step the run reached when it failed. Set on a mutable object owned by
+ * the background job, so a failure keeps its stage even where the returned
+ * result carries no `agentId` (an early deadline check, a thrown error). It is
+ * internal diagnostics only: no RPC field, no text, no request id.
+ */
+export type RegenerationStage =
+  | "workspace_read"
+  | "agent_list"
+  | "session_select"
+  | "conversation_read"
+  | "model_generation"
+  | "write_preflight"
+  | "workspace_write"
+  | "session_write";
+
+export interface RegenerationDiagnostics {
+  stage?: RegenerationStage;
+  /** The selected Paseo session, recorded as soon as selection resolves. */
+  agentId?: string;
+  /** The slice of budget the failing timeout compared against, in ms. */
+  budgetMs?: number;
+}
+
 export interface RegenerateResult {
   status: RegenerateStatus;
   /** The summary title, present whenever the model returned one. */
@@ -80,6 +104,8 @@ export interface RegenerateOptions {
    * is disposed or reloaded, so work that outlived its job never writes late.
    */
   isCancelled?: () => boolean;
+  /** Internal failure context for the job's one diagnostic line; never returned. */
+  diagnostics?: RegenerationDiagnostics;
 }
 
 function normalizedTitle(value: string | null | undefined): string | null {
@@ -150,6 +176,13 @@ async function runRegeneration(
   if (wantsWorkspace) claims.add(workspaceId);
   let claimedAgentId: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const diagnostics = options.diagnostics;
+  const atStage = (stage: RegenerationStage, budgetMs?: number) => {
+    if (!diagnostics) return;
+    diagnostics.stage = stage;
+    if (budgetMs !== undefined) diagnostics.budgetMs = budgetMs;
+  };
+  atStage("workspace_read");
   try {
     const workspace = await paseo.workspaces.ref(workspaceId).refresh();
     if (!workspace || workspace.archivingAt) {
@@ -159,6 +192,7 @@ async function runRegeneration(
       return { status: "skipped", reason: "excluded", workspaceUpdated: false, sessionUpdated: false };
     }
 
+    atStage("agent_list");
     const agents = (await options.listAgents()).filter(
       (agent) => agent.workspaceId === workspace.id && !isExcludedAgent(agent),
     );
@@ -179,6 +213,9 @@ async function runRegeneration(
         sessionUpdated: false,
       };
     }
+    // Recorded here, before any early deadline return or throw can lose it.
+    if (diagnostics) diagnostics.agentId = agentId;
+    atStage("session_select");
     const targetAgent = agents.find((agent) => agent.id === agentId);
     if (!targetAgent) {
       return { status: "skipped", reason: "session_not_selectable", workspaceUpdated: false, sessionUpdated: false };
@@ -200,8 +237,10 @@ async function runRegeneration(
       return { status: "error", reason: "cancelled", workspaceUpdated: false, sessionUpdated: false };
     }
     if (now() >= deadlineAt - reserve) {
+      atStage("conversation_read", deadlineAt - reserve - now());
       return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
     }
+    atStage("conversation_read");
     const conversation = await options.readConversation(agentId);
     if (conversation === null) {
       return { status: "skipped", reason: "conversation_unavailable", agentId, workspaceUpdated: false, sessionUpdated: false };
@@ -228,12 +267,14 @@ async function runRegeneration(
     const maxChars = options.settings.titleMaxChars;
     const remaining = deadlineAt - now() - reserve;
     if (remaining <= 0) {
+      atStage("model_generation", remaining);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     const generationBudget = Math.min(
       options.generationTimeoutMs ?? GENERATION_DEADLINE_MS,
       remaining,
     );
+    atStage("model_generation", generationBudget);
     const generation: Promise<ConversationGenerationResult | null> = options.generateConversation({
       transcript,
       ...(conversation.segments && conversation.segments.length > 1 ? { segments: conversation.segments } : {}),
@@ -247,12 +288,14 @@ async function runRegeneration(
     });
     const generated = await Promise.race([generation, timeout]);
     if (!generated) {
+      atStage("model_generation", generationBudget);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (cancelled()) {
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (now() >= deadlineAt - reserve) {
+      atStage("model_generation", deadlineAt - reserve - now());
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
@@ -272,6 +315,7 @@ async function runRegeneration(
 
     // Re-read every target before the first write: a manual rename that landed
     // while the model was running must win, and no target is touched then.
+    atStage("write_preflight");
     if (wantsWorkspace) {
       const current = await paseo.workspaces.ref(workspaceId).refresh();
       if (!current || current.archivingAt) {
@@ -301,6 +345,7 @@ async function runRegeneration(
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (now() >= deadlineAt - reserve) {
+      atStage("write_preflight", deadlineAt - reserve - now());
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
 
@@ -316,6 +361,7 @@ async function runRegeneration(
     let writeFailed = false;
 
     if (wantsWorkspace) {
+      atStage("workspace_write");
       if (cancelled()) {
         reason = "cancelled";
         skipped = true;
@@ -339,6 +385,7 @@ async function runRegeneration(
     }
 
     if (wantsSession) {
+      atStage("session_write");
       // The workspace write above is a separate object. Re-read the session
       // immediately before the CLI so a manual rename, archive or move that
       // landed in between is never overwritten; the workspace write already

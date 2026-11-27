@@ -1,4 +1,4 @@
-import type { RegenerateResult } from "./regenerate";
+import type { RegenerateResult, RegenerationDiagnostics } from "./regenerate";
 
 /**
  * One manual title generation running in the plugin process. The job exists
@@ -24,6 +24,8 @@ interface JobRecord {
   /** The mutual-exclusion key: a workspace, or one selected session. */
   claimKey: string;
   workspaceId: string;
+  /** Filled in place by the run: the step reached and the selected session. */
+  diagnostics: RegenerationDiagnostics;
   startedAt: number;
   finishedAt: number | null;
   result: RegenerateResult | null;
@@ -45,18 +47,28 @@ const DEFAULT_MAX_RETAINED = 50;
 
 /**
  * One line per failed job, keyed by its jobId so it can be matched with the
- * panel's request. It carries identifiers, the terminal reason and the elapsed
- * time only: never conversation text, titles, prompts or raw exception text.
+ * panel's request. It carries identifiers, the step reached, the terminal
+ * reason and the elapsed time only: never conversation text, titles, prompts
+ * or raw exception text.
+ *
+ * `agentId` and `stage` come from the run's own diagnostics when the returned
+ * result has no session (an early deadline check or a throw): both are recorded
+ * while the run happens, never inferred from text. A failing timeout also
+ * carries the budget it compared against, which is what separates "no time left
+ * before reading", "no time left for the model" and "the model overran".
  */
 function logFailure(job: JobRecord, result: RegenerateResult): void {
   try {
     // One argument, so the line stays a single searchable record in stderr and plugin logs.
+    const agentId = result.agentId ?? job.diagnostics.agentId;
     const fields = {
       jobId: job.jobId,
       workspaceId: job.workspaceId,
-      ...(result.agentId ? { agentId: result.agentId } : {}),
+      ...(agentId ? { agentId } : {}),
       status: result.status,
       reason: result.reason ?? "unspecified",
+      ...(job.diagnostics.stage ? { stage: job.diagnostics.stage } : {}),
+      ...(job.diagnostics.budgetMs !== undefined ? { budgetMs: job.diagnostics.budgetMs } : {}),
       elapsedMs: job.finishedAt !== null ? job.finishedAt - job.startedAt : null,
     };
     console.warn(`[paseo-chinese-titles] regeneration job failed ${JSON.stringify(fields)}`);
@@ -99,7 +111,7 @@ export class RegenerationJobs {
    * disposed (plugin reload or stop).
    */
   start(
-    input: { workspaceId: string; claimKey: string },
+    input: { workspaceId: string; claimKey: string; diagnostics?: RegenerationDiagnostics },
     run: (isCancelled: () => boolean) => Promise<RegenerateResult>,
   ): StartRegenerationOutcome {
     this.prune();
@@ -108,6 +120,7 @@ export class RegenerationJobs {
       jobId: this.makeId(),
       claimKey: input.claimKey,
       workspaceId: input.workspaceId,
+      diagnostics: input.diagnostics ?? {},
       startedAt: this.now(),
       finishedAt: null,
       result: null,

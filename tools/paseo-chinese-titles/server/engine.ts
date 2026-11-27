@@ -44,6 +44,7 @@ import {
   MANUAL_GENERATION_DEADLINE_MS,
   type RegenerateResult,
   type RegenerateScope,
+  type RegenerationDiagnostics,
 } from "./regenerate.ts";
 import { RegenerationJobs, type RegenerationStatusOutcome, type StartRegenerationOutcome } from "./regeneration-jobs.ts";
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state.ts";
@@ -283,7 +284,10 @@ export class ChineseTitlesEngine {
     if (this.regenerationJobs.isRunning(claimKey)) return { status: "busy" };
     if (wantsWorkspace && this.processingWorkspaces.has(workspaceId)) return { status: "busy" };
     if (wantsSession && agentId && this.processingAgents.has(agentId)) return { status: "busy" };
-    const started = this.regenerationJobs.start({ workspaceId, claimKey }, async (isCancelled) => {
+    // The job's diagnostic line can name the step and the selected session even
+    // when the run fails before the result carries an agentId.
+    const diagnostics: RegenerationDiagnostics = {};
+    const started = this.regenerationJobs.start({ workspaceId, claimKey, diagnostics }, async (isCancelled) => {
       // The job owns its own deadline; nothing here depends on the RPC transport.
       const deadlineAt = Date.now() + MANUAL_GENERATION_DEADLINE_MS;
       await this.ready;
@@ -302,6 +306,7 @@ export class ChineseTitlesEngine {
         agentClaims: this.processingAgents,
         deadlineAt,
         isCancelled,
+        diagnostics,
         generateConversation: (request, timeoutMs, generateDeadlineAt) =>
           generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
         listAgents: () => this.listAgents(paseo),

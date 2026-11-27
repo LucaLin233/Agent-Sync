@@ -840,6 +840,100 @@ test("a job whose run throws logs internal_failed once, without the raw error", 
   assert.equal(args[0].includes("synthetic raw failure text"), false);
 });
 
+const LOG_PREFIX = "[paseo-chinese-titles] regeneration job failed ";
+
+/** Captures console.warn for one job and returns the single parsed line. */
+async function captureFailure(run) {
+  const lines = [];
+  const original = console.warn;
+  console.warn = (...args) => { lines.push(args); };
+  try {
+    await run();
+    // The job runs detached from start(); wait for its one line instead of
+    // guessing a number of ticks.
+    const until = Date.now() + 2_000;
+    while (lines.length === 0 && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(lines.length, 1, `exactly one diagnostic line, saw ${lines.length}`);
+  assert.equal(lines[0].length, 1, "one string argument");
+  assert.equal(typeof lines[0][0], "string");
+  assert.equal(lines[0][0].startsWith(LOG_PREFIX), true);
+  return JSON.parse(lines[0][0].slice(LOG_PREFIX.length));
+}
+
+async function runManualJob(jobId, overrides) {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  const { regenerateWorkspaceTitle } = await import("../server/regenerate.ts");
+  const jobs = new RegenerationJobs({ id: () => jobId });
+  const diagnostics = {};
+  jobs.start({ workspaceId: "w1", claimKey: "workspace:w1", diagnostics }, async (isCancelled) => {
+    const state = makeState();
+    return regenerateWorkspaceTitle({
+      ...optionsFor(makePaseo(state), state, { agentId: "a1" }),
+      isCancelled,
+      diagnostics,
+      ...overrides,
+    });
+  });
+}
+
+test("two different timeout stages are distinguishable and keep the selected session", async () => {
+  // Stage A: no budget left before the conversation is read.
+  const base = 1_000;
+  const early = await captureFailure(() => runManualJob("rg_early", {
+    scope: "session",
+    deadlineAt: base + 5_000,
+    now: () => base + 5_000,
+    readConversation: async () => {
+      throw new Error("must not read: the budget is already spent");
+    },
+  }));
+  assert.equal(early.reason, "timeout");
+  assert.equal(early.stage, "conversation_read");
+  assert.equal(early.agentId, "a1", "the selection survives an early return without agentId");
+  assert.equal(early.jobId, "rg_early");
+  assert.equal(early.workspaceId, "w1");
+  assert.equal(typeof early.budgetMs, "number");
+
+  // Stage B: the model step is what ran out of time.
+  let clock = 10_000;
+  const model = await captureFailure(() => runManualJob("rg_model", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => clock,
+    generateConversation: () => {
+      clock = 40_000; // the deadline passes while the model is working
+      return new Promise(() => {}); // never settles: the budget check ends the run
+    },
+  }));
+  assert.equal(model.reason, "timeout");
+  assert.equal(model.stage, "model_generation");
+  assert.equal(model.agentId, "a1");
+  assert.equal(model.budgetMs, 24_000, "the model slice that was actually given");
+  assert.notEqual(model.stage, early.stage, "two timeout stages are not one bucket");
+  assert.equal(model.reason, early.reason, "the controlled reason itself is unchanged");
+});
+
+test("a failure after selection keeps the selected agentId in the line", async () => {
+  const line = await captureFailure(() => runManualJob("rg_selected", {
+    // No time left once the conversation is in hand: this exit's result carries
+    // no agentId, so the line must take it from the run itself.
+    deadlineAt: 20_000,
+    now: () => 20_000,
+    readConversation: async () => null,
+  }));
+  assert.equal(line.jobId, "rg_selected");
+  assert.equal(line.agentId, "a1");
+  assert.equal(line.stage, "conversation_read");
+  assert.equal(line.reason, "timeout");
+  assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
+});
+
 test("successful, skipped and disposed jobs log nothing", async (t) => {
   const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
   const warn = t.mock.method(console, "warn", () => {});
