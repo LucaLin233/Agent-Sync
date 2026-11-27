@@ -44,6 +44,7 @@ import {
   MANUAL_GENERATION_DEADLINE_MS,
   type RegenerateResult,
   type RegenerateScope,
+  type RegenerationDiagnostics,
 } from "./regenerate.ts";
 import { RegenerationJobs, type RegenerationStatusOutcome, type StartRegenerationOutcome } from "./regeneration-jobs.ts";
 import { helperDirectory, isInsideDirectory, loadState, markBaseline, safePluginPath, saveState, type ChineseTitlesState } from "./state.ts";
@@ -283,7 +284,10 @@ export class ChineseTitlesEngine {
     if (this.regenerationJobs.isRunning(claimKey)) return { status: "busy" };
     if (wantsWorkspace && this.processingWorkspaces.has(workspaceId)) return { status: "busy" };
     if (wantsSession && agentId && this.processingAgents.has(agentId)) return { status: "busy" };
-    const started = this.regenerationJobs.start({ workspaceId, claimKey }, async (isCancelled) => {
+    // The job's diagnostic line can name the step and the selected session even
+    // when the run fails before the result carries an agentId.
+    const diagnostics: RegenerationDiagnostics = {};
+    const started = this.regenerationJobs.start({ workspaceId, claimKey, diagnostics }, async (isCancelled) => {
       // The job owns its own deadline; nothing here depends on the RPC transport.
       const deadlineAt = Date.now() + MANUAL_GENERATION_DEADLINE_MS;
       await this.ready;
@@ -302,6 +306,7 @@ export class ChineseTitlesEngine {
         agentClaims: this.processingAgents,
         deadlineAt,
         isCancelled,
+        diagnostics,
         generateConversation: (request, timeoutMs, generateDeadlineAt) =>
           generateConversationTitle(paseo, settings, request, { timeoutMs, deadlineAt: generateDeadlineAt }),
         listAgents: () => this.listAgents(paseo),
@@ -311,7 +316,7 @@ export class ChineseTitlesEngine {
           return renamed.ok ? { ok: true } : { ok: false, failure: renamed.failure ?? "failed" };
         },
       });
-      await this.recordRegeneration(workspaceId, result);
+      await this.recordRegeneration(workspaceId, result, diagnostics);
       return result;
     });
     return started;
@@ -322,7 +327,11 @@ export class ChineseTitlesEngine {
     return this.regenerationJobs.status(input);
   }
 
-  private async recordRegeneration(workspaceId: string, result: RegenerateResult): Promise<void> {
+  private async recordRegeneration(
+    workspaceId: string,
+    result: RegenerateResult,
+    diagnostics: RegenerationDiagnostics,
+  ): Promise<void> {
     // After a reload the old process must not rewrite the state file over the
     // new process's view; the title itself was already written and verified.
     if (!this.state || this.disposed) return;
@@ -337,7 +346,15 @@ export class ChineseTitlesEngine {
         changed = true;
       }
     }
-    if (changed) await saveState(this.state);
+    if (!changed) return;
+    // The titles are already written and verified; only the bookkeeping write is
+    // left. Name that step for the one failure line and drop the model budget
+    // and timeout source, which belong to an earlier stage. If saveState throws,
+    // the job's catch keeps this stage and the already recorded agentId.
+    diagnostics.stage = "state_save";
+    diagnostics.budgetMs = undefined;
+    diagnostics.timeoutSource = undefined;
+    await saveState(this.state);
   }
 
   /**

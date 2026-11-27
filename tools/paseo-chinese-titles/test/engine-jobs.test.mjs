@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * The engine's job wiring, exercised without a daemon: a fake settings store,
@@ -189,5 +193,51 @@ test("disposing the engine cancels a running job before its write", async () => 
     assert.deepEqual(state.workspaceWrites, []);
   } finally {
     await engine.dispose();
+  }
+});
+
+test("a failing state save names the save step and keeps the selected session", async (t) => {
+  const { ChineseTitlesEngine } = await import("../server/engine.ts");
+  const { state, settings, paseo, helperPaseo } = makeEngineHarness();
+  const root = await fs.mkdtemp(join(tmpdir(), "chinese-titles-state-"));
+  const previous = { HOME: process.env.HOME, PASEO_HOME: process.env.PASEO_HOME };
+  // The state file path is occupied by a non-empty directory, so the final
+  // rename of the bookkeeping write fails after the title itself was written
+  // and verified. Nothing else about the run is disturbed.
+  const paseoHome = join(root, "paseo-home");
+  const namespace = createHash("sha256").update(paseoHome).digest("hex").slice(0, 32);
+  const dataDir = join(root, ".paseo", "plugin-data", "paseo-chinese-titles", "daemons", namespace);
+  await fs.mkdir(join(dataDir, "state.json"), { recursive: true });
+  await fs.writeFile(join(dataDir, "state.json", "occupied"), "x");
+  const warn = t.mock.method(console, "warn", () => {});
+  process.env.HOME = root;
+  process.env.PASEO_HOME = paseoHome;
+  const engine = new ChineseTitlesEngine(settings);
+  try {
+    await engine.usePaseo(paseo);
+    const started = engine.startRegeneration("w1", helperPaseo, "a1", "workspace");
+    assert.equal(started.status, "started");
+    const done = await settle(engine, started.jobId);
+    // The run itself succeeded and wrote the title; only the save threw.
+    assert.equal(done.status, "done");
+    assert.equal(done.result.status, "error", JSON.stringify(done.result));
+    assert.equal(done.result.reason, "internal_failed");
+    assert.deepEqual(state.workspaceWrites, ["排查标题超时并改为后台生成"]);
+    assert.equal(warn.mock.callCount(), 1);
+    const args = warn.mock.calls[0].arguments;
+    assert.equal(args.length, 1, "one argument, so the line stays searchable");
+    const prefix = "[paseo-chinese-titles] regeneration job failed ";
+    assert.equal(args[0].startsWith(prefix), true);
+    const line = JSON.parse(args[0].slice(prefix.length));
+    assert.equal(line.stage, "state_save", "the step that actually failed");
+    assert.equal(line.agentId, "a1", "the selection survives the save failure");
+    assert.equal("budgetMs" in line, false, "no model budget left over on the save step");
+    assert.equal("timeoutSource" in line, false, "no clock reported for the save step");
+    assert.equal(JSON.stringify(line).includes("排查标题超时并改为后台生成"), false, "no title text");
+  } finally {
+    await engine.dispose();
+    if (previous.HOME === undefined) delete process.env.HOME; else process.env.HOME = previous.HOME;
+    if (previous.PASEO_HOME === undefined) delete process.env.PASEO_HOME; else process.env.PASEO_HOME = previous.PASEO_HOME;
+    await fs.rm(root, { recursive: true, force: true });
   }
 });

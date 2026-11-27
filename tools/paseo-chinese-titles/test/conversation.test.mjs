@@ -781,11 +781,12 @@ test("a failed helper session is reported apart from an empty reply", async () =
   );
 
   const timedOut = fakePaseoForModel(null, { status: "timeout" });
-  assert.deepEqual(
-    await generateConversationTitle(timedOut.paseo, settings, request),
-    { title: null, errorCode: "timeout" },
-    "the SDK's own timeout is reported as a timeout",
-  );
+  const sdkTimeout = await generateConversationTitle(timedOut.paseo, settings, request);
+  assert.equal(sdkTimeout.title, null);
+  assert.equal(sdkTimeout.errorCode, "timeout");
+  assert.equal(sdkTimeout.timeout?.source, "helper_sdk_timeout", "the SDK's own clock, not a local cap");
+  assert.equal(typeof sdkTimeout.timeout?.capMs, "number", "the cap this turn was actually given");
+  assert.equal(sdkTimeout.timeout?.capMs > 0, true);
 
   // Automatic naming keeps its fallback title and its old codes: the new reason
   // belongs to the manual path only, and the SDK's own timeout is not the
@@ -847,20 +848,95 @@ test("a failed shortening turn keeps the helper failure instead of rewrite_faile
 });
 
 test("the SDK's own timeout is only a timeout on the manual path", async () => {
-  const { generateConversationTitle, generateTitle } = await import("../server/helper.ts");
+  const { generateConversationTitle, generateSessionTitle, generateTitle } = await import("../server/helper.ts");
   const settings = settingsSchema.parse({});
   const manual = await generateConversationTitle(
     fakePaseoForModel(null, { status: "timeout" }).paseo,
     settings,
     { transcript: "用户：先排查", maxChars: 28 },
   );
-  assert.deepEqual(manual, { title: null, errorCode: "timeout" });
+  assert.equal(manual.title, null);
+  assert.equal(manual.errorCode, "timeout");
+  assert.equal(manual.timeout?.source, "helper_sdk_timeout");
   const automatic = await generateTitle(
     fakePaseoForModel(null, { status: "timeout" }).paseo,
     settings,
     { kind: "workspace", prompt: "Fix login bug", maxChars: 28 },
   );
   assert.equal(automatic.errorCode, "model_failed");
+  // The automatic path keeps its old code and gets no timeout metadata either.
+  const automaticSession = await generateSessionTitle(
+    fakePaseoForModel(null, { status: "timeout" }).paseo,
+    settings,
+    { question: "先看 Codex 为什么走 WebSocket", answer: "因为要保持长连接。", maxChars: 28 },
+  );
+  assert.equal(automaticSession.errorCode, "model_failed");
+  assert.equal("timeout" in automaticSession, false, "no metadata on a non-timeout code");
+});
+
+test("each helper timeout names the clock that stopped it, with a measured cap only where one exists", async () => {
+  const { generateConversationTitle } = await import("../server/helper.ts");
+  const settings = settingsSchema.parse({});
+  const request = { transcript: "用户：先排查\n助手：已排查", maxChars: 28 };
+
+  // 1) Nothing like enough of the caller's budget left to even start a helper.
+  const startGuard = await generateConversationTitle(
+    fakePaseoForModel("排查连接方式").paseo,
+    settings,
+    request,
+    { deadlineAt: 3_000, now: () => 1_000 },
+  );
+  assert.equal(startGuard.errorCode, "timeout");
+  assert.deepEqual(startGuard.timeout, { source: "helper_start_deadline" }, "no cap was measured");
+  assert.equal("capMs" in (startGuard.timeout ?? {}), false);
+
+  // 2) The caller's deadline is gone between turns: no cap is at fault.
+  const clock = [1_000, 1_000, 1_000, 1_000, 1_000, 9_000];
+  let read = 0;
+  const twoParts = ["用户：一", "用户：二"];
+  const betweenTurns = await generateConversationTitle(
+    fakePaseoForModel("段一").paseo,
+    settings,
+    { transcript: twoParts.join("\n\n"), segments: twoParts, maxChars: 28 },
+    { deadlineAt: 10_000, now: () => clock[Math.min(read++, clock.length - 1)] },
+  );
+  assert.equal(betweenTurns.errorCode, "timeout");
+  assert.deepEqual(betweenTurns.timeout, { source: "helper_turn_deadline" });
+  assert.deepEqual(betweenTurns.segments, { total: 2, used: 1 });
+
+  // 3) One turn overran the slice this module measured: the cap is real, so the
+  //    line can say how much it was. A fixed clock that jumps after the turn
+  //    keeps this deterministic without waiting.
+  const capClock = [1_000, 1_000, 1_000, 1_000, 9_000];
+  let capRead = 0;
+  const cap = await generateConversationTitle(
+    fakePaseoForModel("排查连接方式").paseo,
+    settings,
+    request,
+    { timeoutMs: 8_000, deadlineAt: 100_000, now: () => capClock[Math.min(capRead++, capClock.length - 1)] },
+  );
+  assert.equal(cap.errorCode, "timeout");
+  assert.deepEqual(cap.timeout, { source: "helper_turn_cap", capMs: 8_000 }, "the cap actually given this turn");
+
+  // 4) The SDK's own structured timeout is a different clock from our cap.
+  const sdk = await generateConversationTitle(
+    fakePaseoForModel(null, { status: "timeout" }).paseo,
+    settings,
+    request,
+  );
+  assert.equal(sdk.errorCode, "timeout");
+  assert.equal(sdk.timeout?.source, "helper_sdk_timeout");
+  assert.equal(sdk.timeout?.capMs, sdk.timeout?.capMs, "a measured cap travels alongside it");
+
+  // 5) A non-timeout failure never carries timeout metadata.
+  for (const [label, fake] of [
+    ["model_failed", fakePaseoForModel("", { status: "idle" })],
+    ["helper_failed", fakePaseoForModel(null, { status: "error" })],
+  ]) {
+    const failed = await generateConversationTitle(fake.paseo, settings, request);
+    assert.equal(failed.errorCode, label);
+    assert.equal("timeout" in failed, false, `${label}: no timeout metadata`);
+  }
 });
 
 test("manual conversation titles come only from the model, never from a fallback", async () => {

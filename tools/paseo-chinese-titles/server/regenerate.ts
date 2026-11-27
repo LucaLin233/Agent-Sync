@@ -25,6 +25,49 @@ export type RegenerateStatus = "done" | "partial" | "busy" | "needs_selection" |
 /** Where the one generated summary is written. Omitted means the legacy workspace-only action. */
 export type RegenerateScope = "both" | "workspace" | "session";
 
+/**
+ * Which step the run reached when it failed. Set on a mutable object owned by
+ * the background job, so a failure keeps its stage even where the returned
+ * result carries no `agentId` (an early deadline check, a thrown error). It is
+ * internal diagnostics only: no RPC field, no text, no request id.
+ */
+export type RegenerationStage =
+  | "workspace_read"
+  | "agent_list"
+  | "session_select"
+  | "conversation_read"
+  | "model_generation"
+  | "write_preflight"
+  | "workspace_write"
+  | "session_write"
+  | "state_save";
+
+/**
+ * Which clock stopped a timeout: the task deadline this run measured, the
+ * session CLI's own budget, or one of the helper's own clocks (which one is
+ * decided inside helper.ts and passed through). A controlled value only; no
+ * provider, CLI or exception text is ever stored.
+ */
+export type TimeoutSource =
+  | "task_deadline"
+  | "cli"
+  /** A helper timeout with no metadata: the generic bucket kept for older runs. */
+  | "helper"
+  | "helper_start_deadline"
+  | "helper_turn_deadline"
+  | "helper_turn_cap"
+  | "helper_sdk_timeout";
+
+export interface RegenerationDiagnostics {
+  stage?: RegenerationStage;
+  /** The selected Paseo session, recorded as soon as selection resolves. */
+  agentId?: string;
+  /** Measured ms a failing timeout compared against; only ever set by a timeout. */
+  budgetMs?: number;
+  /** Which clock timed out; only ever set by a timeout. */
+  timeoutSource?: TimeoutSource;
+}
+
 export interface RegenerateResult {
   status: RegenerateStatus;
   /** The summary title, present whenever the model returned one. */
@@ -80,6 +123,8 @@ export interface RegenerateOptions {
    * is disposed or reloaded, so work that outlived its job never writes late.
    */
   isCancelled?: () => boolean;
+  /** Internal failure context for the job's one diagnostic line; never returned. */
+  diagnostics?: RegenerationDiagnostics;
 }
 
 function normalizedTitle(value: string | null | undefined): string | null {
@@ -150,6 +195,23 @@ async function runRegeneration(
   if (wantsWorkspace) claims.add(workspaceId);
   let claimedAgentId: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const diagnostics = options.diagnostics;
+  // A stage on its own never carries a budget or a source: those belong to the
+  // timeout branch that actually measured them, so an earlier model slice can
+  // never be read against a later stage or a non-timeout failure.
+  const atStage = (stage: RegenerationStage) => {
+    if (!diagnostics) return;
+    diagnostics.stage = stage;
+    diagnostics.budgetMs = undefined;
+    diagnostics.timeoutSource = undefined;
+  };
+  const atTimeout = (stage: RegenerationStage, source: TimeoutSource, budgetMs?: number) => {
+    if (!diagnostics) return;
+    diagnostics.stage = stage;
+    diagnostics.budgetMs = budgetMs;
+    diagnostics.timeoutSource = source;
+  };
+  atStage("workspace_read");
   try {
     const workspace = await paseo.workspaces.ref(workspaceId).refresh();
     if (!workspace || workspace.archivingAt) {
@@ -159,6 +221,7 @@ async function runRegeneration(
       return { status: "skipped", reason: "excluded", workspaceUpdated: false, sessionUpdated: false };
     }
 
+    atStage("agent_list");
     const agents = (await options.listAgents()).filter(
       (agent) => agent.workspaceId === workspace.id && !isExcludedAgent(agent),
     );
@@ -179,6 +242,9 @@ async function runRegeneration(
         sessionUpdated: false,
       };
     }
+    // Recorded here, before any early deadline return or throw can lose it.
+    if (diagnostics) diagnostics.agentId = agentId;
+    atStage("session_select");
     const targetAgent = agents.find((agent) => agent.id === agentId);
     if (!targetAgent) {
       return { status: "skipped", reason: "session_not_selectable", workspaceUpdated: false, sessionUpdated: false };
@@ -199,9 +265,12 @@ async function runRegeneration(
     if (cancelled()) {
       return { status: "error", reason: "cancelled", workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
+    const remainingBeforeRead = deadlineAt - reserve - now();
+    if (remainingBeforeRead <= 0) {
+      atTimeout("conversation_read", "task_deadline", remainingBeforeRead);
       return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
     }
+    atStage("conversation_read");
     const conversation = await options.readConversation(agentId);
     if (conversation === null) {
       return { status: "skipped", reason: "conversation_unavailable", agentId, workspaceUpdated: false, sessionUpdated: false };
@@ -228,12 +297,14 @@ async function runRegeneration(
     const maxChars = options.settings.titleMaxChars;
     const remaining = deadlineAt - now() - reserve;
     if (remaining <= 0) {
+      atTimeout("model_generation", "task_deadline", remaining);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     const generationBudget = Math.min(
       options.generationTimeoutMs ?? GENERATION_DEADLINE_MS,
       remaining,
     );
+    atStage("model_generation");
     const generation: Promise<ConversationGenerationResult | null> = options.generateConversation({
       transcript,
       ...(conversation.segments && conversation.segments.length > 1 ? { segments: conversation.segments } : {}),
@@ -242,20 +313,50 @@ async function runRegeneration(
       projectId: workspace.projectId,
       maxChars,
     }, generationBudget, deadlineAt - reserve).catch(() => null);
-    const timeout = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), Math.max(0, deadlineAt - now()));
+    // The timer's own measured value, so the line can say how much of the task
+    // deadline was actually left when that clock fired.
+    const timerMs = Math.max(0, deadlineAt - now());
+    const expired = Symbol("expired");
+    const timeout = new Promise<typeof expired>((resolve) => {
+      timer = setTimeout(() => resolve(expired), timerMs);
     });
     const generated = await Promise.race([generation, timeout]);
-    if (!generated) {
+    if (!generated || generated === expired) {
+      // Only the task timer is a deadline this run measured. A generator that
+      // returned no title keeps its previous timeout reason without claiming a
+      // clock it never observed.
+      if (generated === expired) atTimeout("model_generation", "task_deadline", timerMs);
+      else atStage("model_generation");
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (cancelled()) {
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
+    const remainingAfterModel = deadlineAt - reserve - now();
+    if (remainingAfterModel <= 0) {
+      // Not the model slice that ran out, but the whole task deadline: report
+      // it as the remaining budget that was actually measured, not the slice.
+      // The helper may already have named the clock that stopped it; cleanup
+      // crossing the deadline afterwards must not relabel that known failure.
+      if (generated.errorCode === "timeout" && generated.timeout) {
+        atTimeout("model_generation", generated.timeout.source, generated.timeout.capMs);
+      } else {
+        atTimeout("model_generation", "task_deadline", remainingAfterModel);
+      }
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
     if (!generated.title) {
+      // The helper decides which of its own clocks timed out and whether a turn
+      // cap was measured. Without that metadata a helper timeout keeps the
+      // previous generic source; any other code (provider, helper terminal,
+      // invalid title) is no timeout at all.
+      if (generated.errorCode === "timeout") {
+        const source = generated.timeout?.source ?? "helper";
+        const cap = generated.timeout?.capMs;
+        atTimeout("model_generation", source, cap);
+      } else {
+        atStage("model_generation");
+      }
       return {
         status: "error",
         reason: generated.errorCode ?? "model_failed",
@@ -272,6 +373,7 @@ async function runRegeneration(
 
     // Re-read every target before the first write: a manual rename that landed
     // while the model was running must win, and no target is touched then.
+    atStage("write_preflight");
     if (wantsWorkspace) {
       const current = await paseo.workspaces.ref(workspaceId).refresh();
       if (!current || current.archivingAt) {
@@ -300,7 +402,9 @@ async function runRegeneration(
     if (cancelled()) {
       return { status: "error", reason: "cancelled", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
-    if (now() >= deadlineAt - reserve) {
+    const remainingBeforeWrite = deadlineAt - reserve - now();
+    if (remainingBeforeWrite <= 0) {
+      atTimeout("write_preflight", "task_deadline", remainingBeforeWrite);
       return { status: "error", reason: "timeout", agentId, workspaceUpdated: false, sessionUpdated: false };
     }
 
@@ -314,31 +418,57 @@ async function runRegeneration(
     // failure is never downgraded to a skip.
     let skipped = false;
     let writeFailed = false;
+    // The first write failure is the one the final `reason` reports, and the
+    // session block below always runs its own `atStage`. Keep the deciding
+    // stage with its budget so the line cannot name a later step.
+    let decidingWrite: {
+      stage?: RegenerationStage;
+      budgetMs?: number;
+      timeoutSource?: TimeoutSource;
+    } | null = null;
 
     if (wantsWorkspace) {
+      atStage("workspace_write");
+      // Same order as before: nothing is sampled once the run is cancelled.
       if (cancelled()) {
         reason = "cancelled";
         skipped = true;
-      } else if (now() >= deadlineAt - WRITE_RESERVE_MS) {
-        reason = "timeout";
       } else {
-        try {
-          await paseo.workspaces.ref(workspaceId).setTitle(summary);
-        } catch {
-          reason = "workspace_write_failed";
-          writeFailed = true;
+        const remainingForWrite = deadlineAt - WRITE_RESERVE_MS - now();
+        if (remainingForWrite <= 0) {
+          // Its own measured shortfall, so this write timeout is not read as a
+          // model timeout that merely ran out of time earlier.
+          atTimeout("workspace_write", "task_deadline", remainingForWrite);
+          reason = "timeout";
+        } else {
+          try {
+            await paseo.workspaces.ref(workspaceId).setTitle(summary);
+          } catch {
+            reason = "workspace_write_failed";
+            writeFailed = true;
+          }
+          const verified = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
+          if (verified && normalizedTitle(verified.title) === summary) {
+            workspaceUpdated = true;
+          } else if (!writeFailed) {
+            reason = "workspace_verification_failed";
+            writeFailed = true;
+          }
         }
-        const verified = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
-        if (verified && normalizedTitle(verified.title) === summary) {
-          workspaceUpdated = true;
-        } else if (!writeFailed) {
-          reason = "workspace_verification_failed";
-          writeFailed = true;
-        }
+      }
+      // Snapshot once, right here: a timeout keeps its measured shortfall and a
+      // write failure keeps no budget, both from the workspace stage.
+      if (reason !== undefined && diagnostics) {
+        decidingWrite = {
+          stage: diagnostics.stage,
+          budgetMs: diagnostics.budgetMs,
+          timeoutSource: diagnostics.timeoutSource,
+        };
       }
     }
 
     if (wantsSession) {
+      atStage("session_write");
       // The workspace write above is a separate object. Re-read the session
       // immediately before the CLI so a manual rename, archive or move that
       // landed in between is never overwritten; the workspace write already
@@ -358,27 +488,47 @@ async function runRegeneration(
       } else if (cancelled()) {
         skipped = true;
         reason ??= "cancelled";
-      } else if (now() >= deadlineAt - 1_000) {
-        reason ??= "timeout";
       } else {
-        const renameBudget = Math.max(1_000, deadlineAt - now() - 1_000);
-        let renamed: SessionRenameResult = { ok: false, failure: "failed" };
-        try {
-          renamed = await options.renameSession(agentId, summary, renameBudget);
-        } catch {
-          renamed = { ok: false, failure: "failed" };
-        }
-        const verified = await paseo.agents.ref(agentId).refresh().catch(() => null);
-        if (verified?.agent && normalizedTitle(verified.agent.title) === summary) {
-          sessionUpdated = true;
-        } else if (!renamed.ok) {
-          reason ??= "session_write_failed";
-          writeFailed = true;
+        // The same single sample as before for the check itself; the rename
+        // branch then samples once more for the budget it hands to the CLI.
+        const remainingForRename = deadlineAt - 1_000 - now();
+        if (remainingForRename <= 0) {
+          atTimeout("session_write", "task_deadline", remainingForRename);
+          reason ??= "timeout";
         } else {
-          reason ??= "session_verification_failed";
-          writeFailed = true;
+          const renameBudget = Math.max(1_000, deadlineAt - now() - 1_000);
+          let renamed: SessionRenameResult = { ok: false, failure: "failed" };
+          try {
+            renamed = await options.renameSession(agentId, summary, renameBudget);
+          } catch {
+            renamed = { ok: false, failure: "failed" };
+          }
+          const verified = await paseo.agents.ref(agentId).refresh().catch(() => null);
+          if (verified?.agent && normalizedTitle(verified.agent.title) === summary) {
+            sessionUpdated = true;
+          } else if (!renamed.ok) {
+            // The CLI's own budget can be what failed; keep the existing reason,
+            // and record the budget actually handed to it and its source only
+            // when this is the failure the line will report.
+            if (reason === undefined && renamed.failure === "timeout") {
+              atTimeout("session_write", "cli", renameBudget);
+            }
+            reason ??= "session_write_failed";
+            writeFailed = true;
+          } else {
+            reason ??= "session_verification_failed";
+            writeFailed = true;
+          }
         }
       }
+    }
+
+    // Restore the deciding write's stage on the normal path only: an unexpected
+    // throw keeps the stage the run actually reached in the catch below.
+    if (decidingWrite && diagnostics) {
+      diagnostics.stage = decidingWrite.stage;
+      diagnostics.budgetMs = decidingWrite.budgetMs;
+      diagnostics.timeoutSource = decidingWrite.timeoutSource;
     }
 
     const written = statusFor(wantsWorkspace, wantsSession, workspaceUpdated, sessionUpdated);

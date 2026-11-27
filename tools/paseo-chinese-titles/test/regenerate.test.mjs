@@ -840,6 +840,346 @@ test("a job whose run throws logs internal_failed once, without the raw error", 
   assert.equal(args[0].includes("synthetic raw failure text"), false);
 });
 
+const LOG_PREFIX = "[paseo-chinese-titles] regeneration job failed ";
+
+/** Captures console.warn for one job and returns the single parsed line. */
+async function captureFailure(run) {
+  const lines = [];
+  const original = console.warn;
+  console.warn = (...args) => { lines.push(args); };
+  try {
+    await run();
+    // The job runs detached from start(); wait for its one line instead of
+    // guessing a number of ticks.
+    const until = Date.now() + 2_000;
+    while (lines.length === 0 && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(lines.length, 1, `exactly one diagnostic line, saw ${lines.length}`);
+  assert.equal(lines[0].length, 1, "one string argument");
+  assert.equal(typeof lines[0][0], "string");
+  assert.equal(lines[0][0].startsWith(LOG_PREFIX), true);
+  return JSON.parse(lines[0][0].slice(LOG_PREFIX.length));
+}
+
+async function runManualJob(jobId, overrides) {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  const { regenerateWorkspaceTitle } = await import("../server/regenerate.ts");
+  const { paseoOverride, ...rest } = overrides;
+  const jobs = new RegenerationJobs({ id: () => jobId });
+  const diagnostics = {};
+  jobs.start({ workspaceId: "w1", claimKey: "workspace:w1", diagnostics }, async (isCancelled) => {
+    const state = makeState();
+    const paseo = paseoOverride ? paseoOverride(state) : makePaseo(state);
+    return regenerateWorkspaceTitle({
+      ...optionsFor(paseo, state, { agentId: "a1" }),
+      isCancelled,
+      diagnostics,
+      ...rest,
+    });
+  });
+}
+
+test("two different timeout stages are distinguishable and keep the selected session", async () => {
+  // Stage A: no budget left before the conversation is read.
+  const base = 1_000;
+  const early = await captureFailure(() => runManualJob("rg_early", {
+    scope: "session",
+    deadlineAt: base + 5_000,
+    now: () => base + 5_000,
+    readConversation: async () => {
+      throw new Error("must not read: the budget is already spent");
+    },
+  }));
+  assert.equal(early.reason, "timeout");
+  assert.equal(early.stage, "conversation_read");
+  assert.equal(early.agentId, "a1", "the selection survives an early return without agentId");
+  assert.equal(early.jobId, "rg_early");
+  assert.equal(early.workspaceId, "w1");
+  assert.equal(typeof early.budgetMs, "number");
+
+  // Stage B: the model step is what ran out of time. The outer timer really
+  // fires, so the logged budget is the value it measured when armed — the
+  // rest of the task deadline, not the larger model slice handed inward.
+  let armed = 10_000;
+  const model = await captureFailure(() => runManualJob("rg_model", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => armed,
+    generateConversation: () => {
+      armed = 39_900; // time passes while the model works; the timer is armed next
+      return new Promise(() => {}); // never settles
+    },
+  }));
+  assert.equal(model.reason, "timeout");
+  assert.equal(model.stage, "model_generation");
+  assert.equal(model.agentId, "a1");
+  assert.equal(model.timeoutSource, "task_deadline");
+  assert.equal(model.budgetMs, 100, "the deadline this timer measured, not the model slice");
+  assert.notEqual(model.stage, early.stage, "two timeout stages are not one bucket");
+  assert.equal(model.reason, early.reason, "the controlled reason itself is unchanged");
+  assert.equal(early.timeoutSource, "task_deadline");
+});
+
+test("the task timer and the helper's own turn cap are told apart by source", async () => {
+  // The same stage, reason and title-less result, but the clock that stopped it
+  // differs: only the outer timer measured a value, so only it carries a budget.
+  const helper = await captureFailure(() => runManualJob("rg_helper_cap", {
+    scope: "session",
+    generateConversation: async () => ({ title: null, errorCode: "timeout" }),
+  }));
+  assert.equal(helper.reason, "timeout");
+  assert.equal(helper.stage, "model_generation");
+  assert.equal(helper.timeoutSource, "helper", "no metadata from the generator keeps the generic bucket");
+  assert.equal("budgetMs" in helper, false, "the helper's per-turn cap is not measured here");
+
+  // A non-timeout model failure keeps the same stage without any clock report.
+  const failed = await captureFailure(() => runManualJob("rg_helper_failed", {
+    scope: "session",
+    generateConversation: async () => ({ title: null, errorCode: "helper_failed" }),
+  }));
+  assert.equal(failed.reason, "helper_failed");
+  assert.equal(failed.stage, "model_generation");
+  assert.equal("timeoutSource" in failed, false, "no timeout source on a non-timeout failure");
+  assert.equal("budgetMs" in failed, false, "no budget on a non-timeout failure");
+});
+
+test("the helper's own timeout source and cap reach the line unchanged", async () => {
+  // The helper names which of its clocks stopped the run; the job must not
+  // re-derive it. A measured cap comes along, an unmeasured one does not.
+  const capped = await captureFailure(() => runManualJob("rg_helper_cap_line", {
+    scope: "session",
+    generateConversation: async () => ({
+      title: null,
+      errorCode: "timeout",
+      timeout: { source: "helper_turn_cap", capMs: 8_000 },
+    }),
+  }));
+  assert.equal(capped.reason, "timeout");
+  assert.equal(capped.stage, "model_generation");
+  assert.equal(capped.timeoutSource, "helper_turn_cap");
+  assert.equal(capped.budgetMs, 8_000, "the cap the helper actually measured");
+
+  const sdk = await captureFailure(() => runManualJob("rg_helper_sdk_line", {
+    scope: "session",
+    generateConversation: async () => ({ title: null, errorCode: "timeout", timeout: { source: "helper_sdk_timeout" } }),
+  }));
+  assert.equal(sdk.timeoutSource, "helper_sdk_timeout");
+  assert.equal("budgetMs" in sdk, false, "no cap was measured for this turn");
+
+  // A non-timeout helper failure never borrows a timeout source or a budget.
+  const failed = await captureFailure(() => runManualJob("rg_helper_failed_line", {
+    scope: "session",
+    generateConversation: async () => ({
+      title: null,
+      errorCode: "helper_failed",
+      timeout: { source: "helper_turn_cap", capMs: 8_000 },
+    }),
+  }));
+  assert.equal(failed.reason, "helper_failed");
+  assert.equal("timeoutSource" in failed, false);
+  assert.equal("budgetMs" in failed, false);
+});
+
+test("a helper timeout keeps its own source when cleanup crosses the task deadline", async () => {
+  // The helper names its clock, then finishing the run pushes past the task
+  // deadline. That later measurement must not relabel a failure already known.
+  let armed = 1_000;
+  const line = await captureFailure(() => runManualJob("rg_helper_then_deadline", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => armed,
+    generateConversation: async () => {
+      armed = 45_000; // the deadline passes before the post-model check
+      return { title: null, errorCode: "timeout", timeout: { source: "helper_turn_cap", capMs: 8_000 } };
+    },
+  }));
+  assert.equal(line.reason, "timeout", "the reason itself is unchanged");
+  assert.equal(line.stage, "model_generation");
+  assert.equal(line.timeoutSource, "helper_turn_cap", "the helper's known clock, not the task deadline");
+  assert.equal(line.budgetMs, 8_000, "its measured cap, not the negative task remainder");
+
+  // Without helper metadata this branch keeps the previous task-deadline report.
+  let secondArmed = 1_000;
+  const plain = await captureFailure(() => runManualJob("rg_plain_then_deadline", {
+    scope: "session",
+    deadlineAt: 40_000,
+    now: () => secondArmed,
+    generateConversation: async () => {
+      secondArmed = 43_000;
+      return { title: null, errorCode: "timeout" };
+    },
+  }));
+  assert.equal(plain.reason, "timeout");
+  assert.equal(plain.timeoutSource, "task_deadline");
+  assert.equal(plain.budgetMs, 40_000 - 6_000 - 43_000, "the measured task remainder");
+});
+
+test("an unexpected throw after a workspace write failure keeps the stage actually reached", async () => {
+  // The first write decides `reason`, but an exception later is a different
+  // event: the run reports its real stopping point, not the write snapshot.
+  const line = await captureFailure(() => runManualJob("rg_both_throw", {
+    scope: "both",
+    generationTimeoutMs: 10_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic workspace failure"); },
+      });
+      // Only the session block's own handle lookup throws: the preflight read
+      // and the workspace write already ran normally.
+      const originalAgents = paseo.agents.ref;
+      let agentReads = 0;
+      paseo.agents.ref = (id) => {
+        agentReads += 1;
+        if (agentReads > 1) throw new Error("synthetic unexpected throw");
+        return originalAgents(id);
+      };
+      return paseo;
+    },
+  }));
+  assert.equal(line.reason, "internal_failed");
+  assert.equal(line.stage, "session_write", "where the run actually stopped");
+  assert.equal(line.agentId, "a1");
+  assert.equal("timeoutSource" in line, false);
+});
+
+test("a single session write hitting the CLI's own timeout keeps its reason and its budget", async () => {
+  // The rename budget is measured inside the rename branch, after the deadline
+  // check already sampled once: the clock advances between the two reads, so a
+  // single merged sample would report the wrong value here.
+  let reads = 0;
+  const line = await captureFailure(() => runManualJob("rg_cli_timeout", {
+    scope: "session",
+    deadlineAt: 30_000,
+    // Reads 1-6 are the earlier deadline checks; read 7 is the one inside the
+    // rename branch, which is the sample the budget must come from.
+    now: () => (reads += 1) <= 6 ? 1_000 : 1_500,
+    generationTimeoutMs: 10_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    // The official CLI gave up inside its own budget; the write never landed.
+    renameSession: async () => ({ ok: false, failure: "timeout" }),
+  }));
+  assert.equal(line.reason, "session_write_failed", "the controlled reason is unchanged");
+  assert.equal(line.stage, "session_write");
+  assert.equal(line.timeoutSource, "cli");
+  // The budget actually handed to the CLI: deadline minus the 1 s verify
+  // reserve, from the rename branch's own (later) sample.
+  assert.equal(line.budgetMs, 30_000 - 1_500 - 1_000);
+  assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
+});
+
+test("a CLI timeout never overwrites the workspace failure that decided the reason", async () => {
+  const line = await captureFailure(() => runManualJob("rg_both_cli", {
+    scope: "both",
+    generationTimeoutMs: 10_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic workspace failure"); },
+      });
+      return paseo;
+    },
+    renameSession: async () => ({ ok: false, failure: "timeout" }),
+  }));
+  assert.equal(line.reason, "workspace_write_failed");
+  assert.equal(line.stage, "workspace_write", "the first failure stays the reported one");
+  assert.equal("timeoutSource" in line, false, "the later CLI timeout is not this failure");
+  assert.equal("budgetMs" in line, false);
+});
+
+test("a write failure after a successful generation carries no model budget", async () => {
+  // The model slice is real and finite; the later write is a different stage.
+  // The line must not reuse the model's budget for the write failure.
+  const line = await captureFailure(() => runManualJob("rg_write", {
+    scope: "workspace",
+    generationTimeoutMs: 24_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic daemon failure"); },
+      });
+      return paseo;
+    },
+  }));
+  assert.equal(line.jobId, "rg_write");
+  assert.equal(line.reason, "workspace_write_failed");
+  assert.equal(line.stage, "workspace_write");
+  assert.equal(line.agentId, "a1");
+  assert.equal("budgetMs" in line, false, `no stale model budget: ${JSON.stringify(line)}`);
+  assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
+});
+
+test("both writes failing reports the workspace failure, not the later session stage", async () => {
+  const line = await captureFailure(() => runManualJob("rg_both", {
+    scope: "both",
+    generationTimeoutMs: 24_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    paseoOverride: (state) => {
+      const paseo = makePaseo(state);
+      const original = paseo.workspaces.ref;
+      paseo.workspaces.ref = (id) => ({
+        ...original(id),
+        setTitle: async () => { throw new Error("synthetic workspace failure"); },
+      });
+      return paseo;
+    },
+    renameSession: async () => ({ ok: false, failure: "failed" }),
+  }));
+  // `reason` reports the first write that failed; the stage must agree with it.
+  assert.equal(line.reason, "workspace_write_failed");
+  assert.equal(line.stage, "workspace_write", `stage must match the deciding write: ${JSON.stringify(line)}`);
+  assert.equal("budgetMs" in line, false, "no model budget on a write failure");
+  assert.equal(line.status, "error");
+});
+
+test("both writes failing on time reports the workspace timeout with its own budget", async () => {
+  // The joint preflight reserves more than one write does, so the clock is
+  // scripted: the run reaches and passes the preflight in time, then the
+  // deadline is past the workspace write's own reserve. `reason` keeps that
+  // first write, so the line must name the workspace stage and its measured
+  // shortfall, not a model slice and not the later session stage.
+  let reads = 0;
+  const line = await captureFailure(() => runManualJob("rg_both_timeout", {
+    scope: "both",
+    deadlineAt: 30_000,
+    now: () => (reads += 1) <= 5 ? 1_000 : 25_000,
+    generateConversation: async () => ({ title: "修复登录问题" }),
+    renameSession: async () => ({ ok: false, failure: "failed" }),
+  }));
+  assert.equal(line.reason, "timeout");
+  assert.equal(line.stage, "workspace_write", `stage must match the deciding write: ${JSON.stringify(line)}`);
+  assert.equal(line.budgetMs, 30_000 - 6_000 - 25_000, "the write's own shortfall, not a model slice");
+});
+
+test("a failure after selection keeps the selected agentId in the line", async () => {
+  const line = await captureFailure(() => runManualJob("rg_selected", {
+    // No time left once the conversation is in hand: this exit's result carries
+    // no agentId, so the line must take it from the run itself.
+    deadlineAt: 20_000,
+    now: () => 20_000,
+    readConversation: async () => null,
+  }));
+  assert.equal(line.jobId, "rg_selected");
+  assert.equal(line.agentId, "a1");
+  assert.equal(line.stage, "conversation_read");
+  assert.equal(line.reason, "timeout");
+  assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
+});
+
 test("successful, skipped and disposed jobs log nothing", async (t) => {
   const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
   const warn = t.mock.method(console, "warn", () => {});
