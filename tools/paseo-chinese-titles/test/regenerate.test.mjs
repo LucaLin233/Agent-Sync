@@ -784,3 +784,78 @@ test("a workspace write failure is not downgraded when the session then changes"
   assert.deepEqual(state.sessionWrites, []);
   assert.equal(state.agents[0].title, "手工会话标题");
 });
+
+for (const reason of ["timeout", "helper_failed"]) {
+  test(`a failed manual job (${reason}) logs one single-argument JSON diagnostic keyed by its jobId, without text`, async (t) => {
+    const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+    const warn = t.mock.method(console, "warn", () => {});
+    let clock = 1_000;
+    const jobs = new RegenerationJobs({ id: () => "rg_diag", now: () => clock });
+    jobs.start({ workspaceId: "w1", claimKey: "workspace:w1" }, async () => {
+      clock += 42_000;
+      return {
+        status: "error",
+        reason,
+        agentId: "a1",
+        title: "合成标题正文",
+        workspaceUpdated: false,
+        sessionUpdated: false,
+      };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(warn.mock.callCount(), 1);
+    const args = warn.mock.calls[0].arguments;
+    assert.equal(args.length, 1);
+    const line = args[0];
+    const prefix = "[paseo-chinese-titles] regeneration job failed ";
+    assert.equal(line.startsWith(prefix), true);
+    assert.deepEqual(JSON.parse(line.slice(prefix.length)), {
+      jobId: "rg_diag",
+      workspaceId: "w1",
+      agentId: "a1",
+      status: "error",
+      reason,
+      elapsedMs: 42_000,
+    });
+    assert.equal(line.includes("合成标题正文"), false);
+  });
+}
+
+test("a job whose run throws logs internal_failed once, without the raw error", async (t) => {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  const warn = t.mock.method(console, "warn", () => {});
+  const jobs = new RegenerationJobs({ id: () => "rg_throw" });
+  jobs.start({ workspaceId: "w2", claimKey: "workspace:w2" }, async () => {
+    throw new Error("synthetic raw failure text");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(warn.mock.callCount(), 1);
+  const args = warn.mock.calls[0].arguments;
+  assert.equal(args.length, 1);
+  const fields = JSON.parse(args[0].slice("[paseo-chinese-titles] regeneration job failed ".length));
+  assert.equal(fields.jobId, "rg_throw");
+  assert.equal(fields.workspaceId, "w2");
+  assert.equal(fields.reason, "internal_failed");
+  assert.equal(fields.status, "error");
+  assert.equal(args[0].includes("synthetic raw failure text"), false);
+});
+
+test("successful, skipped and disposed jobs log nothing", async (t) => {
+  const { RegenerationJobs } = await import("../server/regeneration-jobs.ts");
+  const warn = t.mock.method(console, "warn", () => {});
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const jobs = new RegenerationJobs({ id: () => "rg_quiet" });
+  jobs.start({ workspaceId: "w1", claimKey: "workspace:w1" }, async () => ({ status: "done", title: "修复登录问题", workspaceUpdated: true, sessionUpdated: false }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  jobs.start({ workspaceId: "w2", claimKey: "workspace:w2" }, async () => ({ status: "skipped", reason: "not_found", workspaceUpdated: false, sessionUpdated: false }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  jobs.start({ workspaceId: "w3", claimKey: "workspace:w3" }, async () => {
+    await gate;
+    return { status: "error", reason: "timeout", workspaceUpdated: false, sessionUpdated: false };
+  });
+  jobs.dispose();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(warn.mock.callCount(), 0);
+});
