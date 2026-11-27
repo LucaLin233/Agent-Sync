@@ -1151,6 +1151,20 @@ module.main(sys.argv[2:])
                 self.assertEqual(self.snapshot(), before)
                 self.set_profile_role_startup(end, None)
 
+    def test_example_profiles_carry_exact_declarations(self):
+        # 六条 Profile 各写一句公开声明；逐字等于共享启动段识别的三种形态。
+        example = json.loads((ROOT / "platforms/paseo/config.example.json").read_text())
+        profiles = {p["id"]: p for p in example["daemon"]["agentProfiles"]}
+        self.assertEqual(sorted(profiles), ["cch-forge", "cch-lens", "cch-luno",
+                                            "cchp-forge", "cchp-lens", "cchp-luno"])
+        for profile_id, profile in profiles.items():
+            role = profile_id.rsplit("-", 1)[1].upper()
+            self.assertEqual(profile["systemPrompt"], "受管会话角色：" + role + "。")
+            self.assertIn(profile["systemPrompt"], self.PROFILE_DECLARATIONS)
+        self.assertEqual(sum(1 for p in profiles.values() if p["systemPrompt"] == self.PROFILE_DECLARATIONS[0]), 2)
+        self.assertEqual(sum(1 for p in profiles.values() if p["systemPrompt"] == self.PROFILE_DECLARATIONS[1]), 2)
+        self.assertEqual(sum(1 for p in profiles.values() if p["systemPrompt"] == self.PROFILE_DECLARATIONS[2]), 2)
+
     def enable_claude(self, present=True):
         """夹具登记补 claude 端：prompt 用 claude-main 生成，skill 直接软链。"""
         registry_file = self.checkout / "tools/sync-targets.json"
@@ -1209,7 +1223,8 @@ module.main(sys.argv[2:])
                           if o["type"] == "skill" and o["ends"]["claude"]["present"])
         self.assertEqual(linked, expected)
         self.assertTrue(expected)
-        self.assertEqual((claude_home / "CLAUDE.md").read_bytes(), self.expected_role_startup())
+        # 当前登记已在 claude 端启用 Profile 角色开关，生成的是识别创建时声明的启动段。
+        self.assertEqual((claude_home / "CLAUDE.md").read_bytes(), self.expected_profile_role_startup())
         self.assertEqual(sorted(p.name for p in claude_home.iterdir()), ["CLAUDE.md", "skills"])
 
     def test_claude_end_without_registry_key_is_absent_not_an_error(self):

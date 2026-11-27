@@ -2,7 +2,7 @@
 
 本资源是 `luno-platform` 入口〈运行端〉在 Codex 端的槽位取值，与 `references/runtime-host.md` 合用；Paseo 派发与接续按 `luno-platform`〈运行端〉读对应分支。义务、授权和停止条件以引用处为准，本资源只给本端的机制和取值，不新增或放宽权限。
 
-本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式选择 `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 改由受管生成入口按登记渲染：启用 `paseoRoleStartup` 时在前置角色启动段并把 LUNO 职责段改为按当前角色适用，GLOBAL 不再进入生成文件，改由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；该字段的接收范围、来源、授权、切换、回读、验收与恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；原生 CLI 不经该 daemon，不直接获得它，但若与 daemon 共用同一实际 `CODEX_HOME`，它会读到同一生成物，切换前核入口归属。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
+本端全局常驻提示词位于实际 `$CODEX_HOME/AGENTS.md`（未设置 CODEX_HOME 时默认 `~/.codex/AGENTS.md`），默认由安装器把 `prompt/LUNO.md` 原文、一个 LF 和本端 GLOBAL 私人副本原文拼接生成；GLOBAL 副本更新后须重新生成。显式选择 `--ends codex --codex-global-source paseo-append-system-prompt` 时，`AGENTS.md` 改由受管生成入口按登记渲染：启用 `paseoRoleStartup` 时在前置角色启动段并把 LUNO 职责段改为按当前角色适用；该端再启用 `paseoProfileRoleStartup` 时启动段先识别创建时注入的角色声明（角色 Profile 的一句公开声明，或正式 SDK 与原生角色注入的完整受管原文），没有声明时才用首条精确角色行，冲突暂停依赖任务；GLOBAL 不再进入生成文件，改由 Paseo daemon 的私人配置 `daemon.appendSystemPrompt` 提供；该字段的接收范围、来源、授权、切换、回读、验收与恢复按 `luno-core/references/sync.md`〔分支 sync-host〕。角色 home 的 `AGENTS.md` 仍仅角色正文，运行时另收这段提示词；原生 CLI 不经该 daemon，不直接获得它，但若与 daemon 共用同一实际 `CODEX_HOME`，它会读到同一生成物，切换前核入口归属。`AGENTS.override.md` 优先于同目录的 `AGENTS.md`，存在时停止受管安装，不覆盖它。项目级指令另按 Codex 官方发现规则加载；文件一致不证明未被遮蔽、完整注入或实际行为一致。
 
 ## 原生安装与技能发现
 
@@ -30,7 +30,7 @@ Codex CLI 0.170.0 的用户技能根包括实际 HOME 下的 `.agents/skills`，
 
 ## 提示词资源与 MCP
 
-主 LUNO 提示词可先按上述规则生成、离线回读；启用该模式的共享 Codex 生成入口还会渲染角色启动段，首条任务的角色选择在 LUNO 职责段之前生效，适用范围由安装选择确定。LENS、FORGE 原文随已合并受管检出的 `subagents/` 保留为角色启动时必须完整读取的资源，不因此启用角色或取得派发资格。没有可核的角色通道时，需要相应角色的任务仍按总控停止并报告，不用自述、会话内改名或通用子代理冒充。不得把已有提示词文件报告成角色调用成功。
+主 LUNO 提示词可先按上述规则生成、离线回读；启用该模式的共享 Codex 生成入口还会渲染角色启动段，角色选择在 LUNO 职责段之前生效，适用范围由安装选择确定：创建时注入的角色声明优先，没有声明时按首条精确角色行，缺省 LUNO。LENS、FORGE 原文随已合并受管检出的 `subagents/` 保留为角色启动时必须完整读取的资源，不因此启用角色或取得派发资格。没有可核的角色通道时，需要相应角色的任务仍按总控停止并报告，不用自述、会话内改名或通用子代理冒充。不得把已有提示词文件报告成角色调用成功。
 
 含 GLOBAL 的生成物用于所选 Codex 主会话的常驻入口。Paseo 角色家目录与 Codex 原生角色文件沿用各自登记的角色指令，不拼入 GLOBAL。原生子代理从父会话继承的指令按〈派发通道〉核对。
 
