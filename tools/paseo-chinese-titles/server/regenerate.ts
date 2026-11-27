@@ -408,29 +408,31 @@ async function runRegeneration(
 
     if (wantsWorkspace) {
       atStage("workspace_write");
-      // One clock read, used by both the branch and the logged budget.
-      const remainingForWrite = deadlineAt - WRITE_RESERVE_MS - now();
+      // Same order as before: nothing is sampled once the run is cancelled.
       if (cancelled()) {
         reason = "cancelled";
         skipped = true;
-      } else if (remainingForWrite <= 0) {
-        // Its own measured shortfall, so this write timeout is not read as a
-        // model timeout that merely ran out of time earlier.
-        atTimeout("workspace_write", "task_deadline", remainingForWrite);
-        reason = "timeout";
       } else {
-        try {
-          await paseo.workspaces.ref(workspaceId).setTitle(summary);
-        } catch {
-          reason = "workspace_write_failed";
-          writeFailed = true;
-        }
-        const verified = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
-        if (verified && normalizedTitle(verified.title) === summary) {
-          workspaceUpdated = true;
-        } else if (!writeFailed) {
-          reason = "workspace_verification_failed";
-          writeFailed = true;
+        const remainingForWrite = deadlineAt - WRITE_RESERVE_MS - now();
+        if (remainingForWrite <= 0) {
+          // Its own measured shortfall, so this write timeout is not read as a
+          // model timeout that merely ran out of time earlier.
+          atTimeout("workspace_write", "task_deadline", remainingForWrite);
+          reason = "timeout";
+        } else {
+          try {
+            await paseo.workspaces.ref(workspaceId).setTitle(summary);
+          } catch {
+            reason = "workspace_write_failed";
+            writeFailed = true;
+          }
+          const verified = await paseo.workspaces.ref(workspaceId).refresh().catch(() => null);
+          if (verified && normalizedTitle(verified.title) === summary) {
+            workspaceUpdated = true;
+          } else if (!writeFailed) {
+            reason = "workspace_verification_failed";
+            writeFailed = true;
+          }
         }
       }
       // Snapshot once, right here: a timeout keeps its measured shortfall and a
@@ -452,8 +454,6 @@ async function runRegeneration(
       // happened and is reported as a verified partial result.
       const latest = await paseo.agents.ref(agentId).refresh().catch(() => null);
       const latestAgent = latest?.agent;
-      // One clock read, used by both the branch and the rename budget below.
-      const remainingForRename = deadlineAt - 1_000 - now();
       if (!latestAgent || latestAgent.archivedAt || latestAgent.workspaceId !== workspaceId ||
         normalizedTitle(latestAgent.title) !== startSessionTitle) {
         skipped = true;
@@ -467,33 +467,37 @@ async function runRegeneration(
       } else if (cancelled()) {
         skipped = true;
         reason ??= "cancelled";
-      } else if (remainingForRename <= 0) {
-        atTimeout("session_write", "task_deadline", remainingForRename);
-        reason ??= "timeout";
       } else {
-        // The same measurement the branch above used, never a second clock read.
-        const renameBudget = Math.max(1_000, remainingForRename);
-        let renamed: SessionRenameResult = { ok: false, failure: "failed" };
-        try {
-          renamed = await options.renameSession(agentId, summary, renameBudget);
-        } catch {
-          renamed = { ok: false, failure: "failed" };
-        }
-        const verified = await paseo.agents.ref(agentId).refresh().catch(() => null);
-        if (verified?.agent && normalizedTitle(verified.agent.title) === summary) {
-          sessionUpdated = true;
-        } else if (!renamed.ok) {
-          // The CLI's own budget can be what failed; keep the existing reason,
-          // and record the budget actually handed to it and its source only
-          // when this is the failure the line will report.
-          if (reason === undefined && renamed.failure === "timeout") {
-            atTimeout("session_write", "cli", renameBudget);
-          }
-          reason ??= "session_write_failed";
-          writeFailed = true;
+        // The same single sample as before for the check itself; the rename
+        // branch then samples once more for the budget it hands to the CLI.
+        const remainingForRename = deadlineAt - 1_000 - now();
+        if (remainingForRename <= 0) {
+          atTimeout("session_write", "task_deadline", remainingForRename);
+          reason ??= "timeout";
         } else {
-          reason ??= "session_verification_failed";
-          writeFailed = true;
+          const renameBudget = Math.max(1_000, deadlineAt - now() - 1_000);
+          let renamed: SessionRenameResult = { ok: false, failure: "failed" };
+          try {
+            renamed = await options.renameSession(agentId, summary, renameBudget);
+          } catch {
+            renamed = { ok: false, failure: "failed" };
+          }
+          const verified = await paseo.agents.ref(agentId).refresh().catch(() => null);
+          if (verified?.agent && normalizedTitle(verified.agent.title) === summary) {
+            sessionUpdated = true;
+          } else if (!renamed.ok) {
+            // The CLI's own budget can be what failed; keep the existing reason,
+            // and record the budget actually handed to it and its source only
+            // when this is the failure the line will report.
+            if (reason === undefined && renamed.failure === "timeout") {
+              atTimeout("session_write", "cli", renameBudget);
+            }
+            reason ??= "session_write_failed";
+            writeFailed = true;
+          } else {
+            reason ??= "session_verification_failed";
+            writeFailed = true;
+          }
         }
       }
     }

@@ -949,10 +949,16 @@ test("the task timer and the helper's own turn cap are told apart by source", as
 });
 
 test("a single session write hitting the CLI's own timeout keeps its reason and its budget", async () => {
+  // The rename budget is measured inside the rename branch, after the deadline
+  // check already sampled once: the clock advances between the two reads, so a
+  // single merged sample would report the wrong value here.
+  let reads = 0;
   const line = await captureFailure(() => runManualJob("rg_cli_timeout", {
     scope: "session",
     deadlineAt: 30_000,
-    now: () => 1_000,
+    // Reads 1-6 are the earlier deadline checks; read 7 is the one inside the
+    // rename branch, which is the sample the budget must come from.
+    now: () => (reads += 1) <= 6 ? 1_000 : 1_500,
     generationTimeoutMs: 10_000,
     generateConversation: async () => ({ title: "修复登录问题" }),
     // The official CLI gave up inside its own budget; the write never landed.
@@ -961,8 +967,9 @@ test("a single session write hitting the CLI's own timeout keeps its reason and 
   assert.equal(line.reason, "session_write_failed", "the controlled reason is unchanged");
   assert.equal(line.stage, "session_write");
   assert.equal(line.timeoutSource, "cli");
-  // The budget actually handed to the CLI: deadline minus its 1 s verify reserve.
-  assert.equal(line.budgetMs, 30_000 - 1_000 - 1_000);
+  // The budget actually handed to the CLI: deadline minus the 1 s verify
+  // reserve, from the rename branch's own (later) sample.
+  assert.equal(line.budgetMs, 30_000 - 1_500 - 1_000);
   assert.equal(JSON.stringify(line).includes("修复登录问题"), false, "no title text");
 });
 
