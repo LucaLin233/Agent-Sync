@@ -8,6 +8,8 @@ import { MetricsPanel, MetricsSheet } from "./client/panel";
 import { createCumulativeHub } from "./client/cumulative-hub";
 import { CumulativeHubContext } from "./client/cumulative-hub-context";
 import { createPillIcon } from "./client/pill-icon";
+import { createSharedStore } from "./client/shared-store";
+import { SharedStoreProvider } from "./client/shared-store-context";
 import { startPillRuntime } from "./client/pill-runtime";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { cumulativeUsageRpc } from "./shared/cumulative";
@@ -18,23 +20,30 @@ export default function contribute(client: PluginClientContext) {
   // One hub per loaded client: the composer pill and every panel of this client
   // publish and read the same cumulative reading.
   const hub = createCumulativeHub();
+  // The scope, refresh revision and read ownership the pill runtime and every
+  // surface of this client share, so their cumulative queries are one key.
+  const shared = createSharedStore();
   const PanelWithHub = (props: PluginWorkspacePanelProps) => (
     <CumulativeHubContext.Provider value={hub}>
-      <MetricsPanel {...props} />
+      <SharedStoreProvider store={shared}>
+        <MetricsPanel {...props} />
+      </SharedStoreProvider>
     </CumulativeHubContext.Provider>
   );
   const SheetWithHub = (props: PluginButtonContentProps) => (
     <CumulativeHubContext.Provider value={hub}>
-      <MetricsSheet {...props} />
+      <SharedStoreProvider store={shared}>
+        <MetricsSheet {...props} />
+      </SharedStoreProvider>
     </CumulativeHubContext.Provider>
   );
-  // The pill icon is created before the runtime that registers it. The icon only
-  // runs once mounted, which is after the runtime below exists.
-  const surface: { runtime: { adoptScope(scope: WorkspaceScope): boolean; hasScope(): boolean } | null } =
-    { runtime: null };
-  const PillIcon = createPillIcon({
+  // The pill icon owns the workspace's shared cumulative query, so the label can
+  // appear on mount without opening the panel or waiting for a runtime read. It
+  // is created before the runtime that hands it the scope, but only runs once
+  // mounted; `surface.runtime` is set right after the runtime exists.
+  const surface: { runtime: { adoptScope(scope: WorkspaceScope): boolean } | null } = { runtime: null };
+  const PillIcon = createPillIcon(hub, shared, {
     adoptScope: (scope) => surface.runtime?.adoptScope(scope) ?? false,
-    hasScope: () => surface.runtime?.hasScope() ?? false,
   });
   const runtime = startPillRuntime({
     addPill({ workspaceId, agentId, title, label, onPress }) {
@@ -83,7 +92,7 @@ export default function contribute(client: PluginClientContext) {
         onClosed: closed,
       });
     },
-  }, hub);
+  }, hub, shared);
   surface.runtime = runtime;
 
   const removePanel = client.addWorkspacePanel({

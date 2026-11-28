@@ -72,3 +72,22 @@ export function effectiveWorkspaceScope(values: WorkspaceSettingsValues = {}): E
 export function workspaceInScope(scope: WorkspaceScope, workspaceId: string): boolean {
   return scope.enabled && (scope.allWorkspaces || scope.workspaceIds.includes(workspaceId));
 }
+
+/**
+ * The effective settings identity both surfaces key a cumulative read on. Only
+ * the values that can change a read are included, in a stable order, so the
+ * composer pill and the panel derive the same key from the same settings.
+ */
+export function scopeQueryKey(scope: WorkspaceScope | null): string {
+  return scope === null
+    ? "pending"
+    : [
+      scope.enabled,
+      scope.allWorkspaces,
+      [...scope.workspaceIds].sort().join(","),
+      // A changed Codex home changes which rollouts are read even though the
+      // allowlist is identical, so it is part of the identity too.
+      scope.codexHomeConfigured,
+      scope.error ?? "",
+    ].join("|");
+}

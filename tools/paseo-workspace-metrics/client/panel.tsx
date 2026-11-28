@@ -22,8 +22,11 @@ import {
   tokensPerSecond,
   weightedTurnSpeed,
 } from "../shared/metrics";
-import { workspaceInScope, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
-import { useCumulativeUsage } from "./use-cumulative";
+import { scopeQueryKey, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
+import { cumulativeReadEnabled, useCumulativeUsage } from "./use-cumulative";
+import { useCumulativeHub } from "./cumulative-hub-context";
+import { useSharedRevision, useSharedScope } from "./shared-store";
+import { useSharedStore } from "./shared-store-context";
 import { useLiveTurn } from "./use-turn";
 import { useTurnOutput } from "./use-turn-output";
 import { useWorkspaceUsage, type UsageSnapshot } from "./use-usage";
@@ -428,9 +431,21 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   });
   const query = useWorkspaceUsage(host.id, workspaceId, refs);
   const queryClient = useQueryClient();
-  const [scope, setScope] = useState<WorkspaceScope | null>(null);
+  // The panel's own settings stream is what its turn details and gating follow.
+  const shared = useSharedStore();
+  const sharedScope = useSharedScope(shared);
+  const [localScope, setScope] = useState<WorkspaceScope | null>(null);
+  const scope: WorkspaceScope | null = localScope ?? sharedScope;
+  // The cumulative key is derived from the shared scope whenever one exists:
+  // the runtime publishes scope and revision in one commit per settings event,
+  // so the panel cannot first key on its own copy of an event and then move
+  // again when the runtime publishes it — that would be two requests for one
+  // change. Its own scope is only the fallback when nothing else resolved one.
+  const cumulativeScope: WorkspaceScope | null = sharedScope ?? localScope;
   const [scopeRevision, setScopeRevision] = useState(0);
-  const [refreshRevision, setRefreshRevision] = useState(0);
+  // The manual refresh belongs to the shared store, so it bumps the one key the
+  // composer pill also observes instead of only this panel's query.
+  const refreshRevision = useSharedRevision(shared);
   // A rejected or closed subscription is never replayed by the host, so each
   // close opens a new one on the same backoff schedule as the composer pill.
   const [scopeAttempt, setScopeAttempt] = useState(0);
@@ -445,11 +460,11 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   const scopeSubscription = useSubscription(workspaceSettingsSubscription, { attempt: scopeAttempt }, (event) => {
     scopeRetry.opened();
     setScope(event);
-    // Every settings event starts a fresh read: the scope projection can be
-    // identical (for example, a changed Codex home), so the revision is part of
-    // the keys. Clearing first also prevents a remount from reusing old data.
+    // Every settings event starts a fresh read. The per-agent turn keys carry
+    // the local revision, so they are dropped. The cumulative key belongs to
+    // the shared revision the runtime bumps on the same event, so the pill and
+    // this panel move to the new key together — one query, one request.
     setScopeRevision((revision) => revision + 1);
-    queryClient.removeQueries({ queryKey: ["workspace-metrics-cumulative"] });
     queryClient.removeQueries({ queryKey: ["workspace-metrics-turn"] });
   });
   useEffect(() => {
@@ -457,18 +472,19 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   }, [scopeRetry, scopeSubscription.status]);
   useEffect(() => () => scopeRetry.dispose(), [scopeRetry]);
   // Derived from the effective values, so a remount and a settings change that
-  // leaves the same values map to the same query.
-  const scopeKey = scope
-    ? [scope.enabled, scope.allWorkspaces, [...scope.workspaceIds].sort().join(","), scope.error ?? ""].join("|")
-    : "pending";
-  const cumulativeEnabled = scope !== null && workspaceInScope(scope, workspaceId);
+  // leaves the same values map to the same query — and to the composer pill's.
+  const scopeKey = scopeQueryKey(cumulativeScope);
+  const cumulativeEnabled = cumulativeReadEnabled(cumulativeScope, workspaceId);
+  const hub = useCumulativeHub();
   const cumulative = useCumulativeUsage(
+    host.id,
     workspaceId,
     refs,
     cumulativeEnabled,
     scopeKey,
-    scopeRevision,
     refreshRevision,
+    hub,
+    shared.refreshIntent(refreshRevision),
   );
   // Paseo's reported Claude usage has no cache-write count, so Claude
   // sessions take their newest request from the transcript instead.
@@ -574,9 +590,10 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
         : "按整轮耗时加权，包含工具与等待。");
 
   const refresh = () => {
-    setRefreshRevision((revision) => revision + 1);
+    // One shared revision bumps the cumulative key for the pill and the panel
+    // alike; the key change is what refetches, so there is no second request.
+    shared.bump(true);
     void query.refetch();
-    if (cumulativeEnabled) void cumulative.refetch();
   };
 
   const styles = useMemo(() => {

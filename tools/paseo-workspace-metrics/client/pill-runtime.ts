@@ -7,6 +7,7 @@ import {
 } from "../shared/metrics.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
 import type { CumulativeHub } from "./cumulative-hub.ts";
+import { createSharedStore, type SharedStore } from "./shared-store.ts";
 import { settingsRetryDelayMs } from "./subscription-retry.ts";
 
 export interface PillHandle {
@@ -76,7 +77,13 @@ const EMPTY_SCOPE: WorkspaceScope = {
  * reads; a finished turn additionally gets a small number of bounded re-reads
  * so a rollout flushed after the event still reaches the label.
  */
-export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
+export function startPillRuntime(
+  deps: PillRuntimeDeps,
+  hub: CumulativeHub,
+  // One store per client in production; a standalone store keeps a runtime
+  // that no surface observes self-contained.
+  shared: SharedStore = createSharedStore(),
+) {
   const agents = new Map<string, DirectoryAgent>();
   const pills = new Map<string, PillState>();
   const routineTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -210,6 +217,14 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
       queued.delete(workspaceId);
       hub.clear(workspaceId);
       reconcile();
+      return;
+    }
+    // A mounted composer pill owns this workspace's cumulative read through the
+    // shared query key. Its own key already carries the member set, so routine
+    // and member demands need no extra request; a terminal follow-up (or an
+    // explicit bypass) asks both surfaces for one fresh revision instead.
+    if (shared.surfaceOwns(workspaceId)) {
+      if (refresh) shared.bump(true);
       return;
     }
     if (inflight.has(workspaceId)) {
@@ -469,6 +484,7 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
    */
   const takeInitialScope = (event: WorkspaceScope) => {
     scope = event;
+    shared.setScope(event, "live");
     reconcile();
     scheduleRoutine();
   };
@@ -493,8 +509,14 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   const applyScope = (event: WorkspaceScope) => {
     generation += 1;
     scope = event;
+    // This runtime owns the settings stream, so it is the only publisher that
+    // starts a fresh shared read. An open panel's copy of the same event only
+    // publishes a scope (and usually matches what is already in force), so one
+    // settings change is one new key and one request.
+    shared.setScope(event, "live", true);
     inflight.clear();
     queued.clear();
+    // A settings generation change drops what the old scope showed.
     hub.clearAll();
     lastRequest.clear();
     clearRoutine();
@@ -516,6 +538,7 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
         if (disposed) return;
         generation += 1;
         scope = EMPTY_SCOPE;
+        shared.setScope(EMPTY_SCOPE, "failed");
         inflight.clear();
         queued.clear();
         hub.clearAll();
@@ -532,27 +555,30 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
       },
     });
   };
+  // The panel publishes the scope its own settings stream resolved, and a
+  // surface may publish one it read itself. Whichever arrives first is this
+  // runtime's first scope; later settings events still take the change path.
+  const unsubscribeShared = shared.subscribe(() => {
+    if (disposed || scope !== null) return;
+    const event = shared.scope();
+    if (event) takeInitialScope(event);
+  });
   openSettings();
   requestScopeRead();
 
   return {
     /**
-     * Adopts a scope read by the composer pill's own surface (its icon's `useRpc`
-     * runs against the same host-scoped client). Only the first resolution wins:
-     * the settings stream and any earlier resolution own the scope afterwards, so
-     * several pills mounting together cannot clear and re-read in a loop. `false`
-     * tells the caller to stop; the runtime's own path remains in charge.
+     * Adopts a scope the composer pill's own surface read, when the runtime has
+     * not learned one yet. It is a first scope, not a settings change: nothing
+     * was read under an earlier scope and the panel may already hold a reading,
+     * so it takes the scope and lets `scheduleRoutine` decide (including
+     * clearing a disabled or out-of-allowlist workspace) instead of resetting.
+     * `false` means the runtime or its settings stream already owns the scope.
      */
     adoptScope(event: WorkspaceScope): boolean {
       if (disposed || scope !== null) return false;
-      // Same first-scope path as the runtime's own startup read: a reading the
-      // panel already published stays visible instead of being cleared.
       takeInitialScope(event);
       return true;
-    },
-    /** Whether this runtime already holds a scope, so a surface need not read one. */
-    hasScope(): boolean {
-      return !disposed && scope !== null;
     },
     dispose() {
       if (disposed) return;
@@ -564,6 +590,7 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
       clearFollowUps();
       unsubscribeAgents();
       unsubscribeHub();
+      unsubscribeShared();
       clearTimeout(settingsRetry);
       releaseSettings();
       for (const pill of pills.values()) pill.handle.remove();
