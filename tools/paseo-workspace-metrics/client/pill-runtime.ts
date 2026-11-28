@@ -5,7 +5,7 @@ import {
   formatPillTitle,
   type PillCacheBasis,
 } from "../shared/metrics.ts";
-import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
+import { scopeQueryKey, workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
 import type { CumulativeHub } from "./cumulative-hub.ts";
 import { createSharedStore, type SharedStore } from "./shared-store.ts";
 import { settingsRetryDelayMs } from "./subscription-retry.ts";
@@ -224,7 +224,7 @@ export function startPillRuntime(
     // and member demands need no extra request; a terminal follow-up (or an
     // explicit bypass) asks both surfaces for one fresh revision instead.
     if (shared.surfaceOwns(workspaceId)) {
-      if (refresh) shared.bump(true);
+      if (refresh) shared.bumpWorkspace(workspaceId, true);
       return;
     }
     if (inflight.has(workspaceId)) {
@@ -473,6 +473,19 @@ export function startPillRuntime(
   let releaseSettings: () => void;
   let settingsRetry: ReturnType<typeof setTimeout> | undefined;
   let settingsCloses = 0;
+  /**
+   * Recovery of a scope that never arrived or was lost: the settings stream is
+   * not the only source (the scope RPC may work while the stream is closed or
+   * silent), so a failed read is retried on the same backoff instead of
+   * leaving the label unknown until some surface happens to ask again.
+   */
+  let scopeTimer: ReturnType<typeof setTimeout> | undefined;
+  let scopeAttempts = 0;
+  let scopeInflight = false;
+  /** The settings stream closed and its scope is only a placeholder. */
+  let scopeLost = false;
+  /** Workspaces whose last composer pill unmounted since the last routine pass. */
+  let ownedWorkspaces = new Set<string>();
 
   /**
    * The first scope this runtime ever learns, from either startup path (its own
@@ -484,24 +497,62 @@ export function startPillRuntime(
    */
   const takeInitialScope = (event: WorkspaceScope) => {
     scope = event;
+    scopeLost = false;
     shared.setScope(event, "live");
     reconcile();
     scheduleRoutine();
   };
 
+  const cancelScopeRead = () => {
+    if (scopeTimer !== undefined) clearTimeout(scopeTimer);
+    scopeTimer = undefined;
+  };
+
   /**
-   * One direct scope read at startup. The settings stream owns the scope once
-   * it produces its first event — a value or a close, both leave `scope`
-   * non-null — so a reply arriving after that, or after dispose, is dropped
-   * instead of overwriting the newer state.
+   * A scope from the direct read. While the settings stream is healthy it owns
+   * the scope, so a reply that merely repeats it changes nothing. Without it —
+   * no first event yet, or a closed stream — this is the recovery path: a first
+   * scope, a changed projection, or the same projection coming back after the
+   * stream failed, which restores the settings generation.
+   */
+  const adoptScopeRead = (event: WorkspaceScope) => {
+    if (scope === null) {
+      takeInitialScope(event);
+      return;
+    }
+    // A live settings stream owns the scope: a direct read that arrives after
+    // its event is older information and must not replace it.
+    if (!scopeLost) return;
+    // The stream failed. A working scope RPC is the recovery path: its reply
+    // restores the generation exactly like a settings event would.
+    applyScope(event);
+  };
+
+  /**
+   * One direct scope read, retried on the settings backoff until it answers or
+   * the settings stream takes over again. The settings stream is not assumed
+   * to be deliverable: on a cold start it may never produce a first event, and
+   * a closed stream is only reopened by a later retry, so this read is the
+   * liveness path for the label.
    */
   const requestScopeRead = () => {
+    if (disposed || scopeInflight) return;
+    cancelScopeRead();
+    scopeInflight = true;
     deps.requestScope().then((event) => {
-      if (disposed || scope !== null) return;
-      takeInitialScope(event);
+      scopeInflight = false;
+      if (disposed) return;
+      scopeAttempts = 0;
+      adoptScopeRead(event);
     }).catch(() => {
-      // Without a settings event either, the label keeps its unknown state and
-      // the settings subscription stays the only source, with its own retry.
+      scopeInflight = false;
+      if (disposed) return;
+      // A live scope from the settings stream wins; only an unknown or lost
+      // one needs this read to keep trying.
+      if (scope !== null && !scopeLost) return;
+      const delay = settingsRetryDelayMs(scopeAttempts);
+      scopeAttempts += 1;
+      scopeTimer = setTimeout(requestScopeRead, delay);
     });
   };
 
@@ -532,6 +583,11 @@ export function startPillRuntime(
       next(event) {
         if (disposed) return;
         settingsCloses = 0;
+        // The stream is delivering again, so its own retry chain is the only
+        // one needed; a pending direct read stops here.
+        cancelScopeRead();
+        scopeAttempts = 0;
+        scopeLost = false;
         applyScope(event);
       },
       closed() {
@@ -546,6 +602,11 @@ export function startPillRuntime(
         clearFollowUps();
         reconcile();
         scheduleRoutine();
+        // The stream is down, but the scope RPC may still work: its retries run
+        // alongside the reopening subscription, so a working backend recovers
+        // the label without waiting for a stream that may never reopen.
+        scopeLost = true;
+        requestScopeRead();
         const delay = settingsRetryDelayMs(settingsCloses);
         settingsCloses += 1;
         settingsRetry = setTimeout(() => {
@@ -559,9 +620,26 @@ export function startPillRuntime(
   // surface may publish one it read itself. Whichever arrives first is this
   // runtime's first scope; later settings events still take the change path.
   const unsubscribeShared = shared.subscribe(() => {
-    if (disposed || scope !== null) return;
-    const event = shared.scope();
-    if (event) takeInitialScope(event);
+    if (disposed) return;
+    if (scope === null) {
+      const event = shared.scope();
+      if (event) takeInitialScope(event);
+      return;
+    }
+    // Ownership is per workspace. When the last composer pill of a workspace
+    // unmounts, its shared query stops, so the runtime takes that workspace
+    // back on its own schedule; other workspaces are untouched.
+    const owned = new Set<string>();
+    for (const agent of agents.values()) {
+      if (!agent.workspaceId || agent.archived || agent.background) continue;
+      if (shared.surfaceOwns(agent.workspaceId)) owned.add(agent.workspaceId);
+    }
+    const resumed = new Set<string>();
+    for (const workspaceId of ownedWorkspaces) {
+      if (!owned.has(workspaceId)) resumed.add(workspaceId);
+    }
+    ownedWorkspaces = owned;
+    if (resumed.size > 0) scheduleRoutine(resumed);
   });
   openSettings();
   requestScopeRead();
@@ -576,8 +654,11 @@ export function startPillRuntime(
      * `false` means the runtime or its settings stream already owns the scope.
      */
     adoptScope(event: WorkspaceScope): boolean {
-      if (disposed || scope !== null) return false;
-      takeInitialScope(event);
+      if (disposed) return false;
+      if (scope !== null && !scopeLost) return false;
+      adoptScopeRead(event);
+      cancelScopeRead();
+      scopeAttempts = 0;
       return true;
     },
     dispose() {
@@ -592,6 +673,7 @@ export function startPillRuntime(
       unsubscribeHub();
       unsubscribeShared();
       clearTimeout(settingsRetry);
+      cancelScopeRead();
       releaseSettings();
       for (const pill of pills.values()) pill.handle.remove();
       pills.clear();

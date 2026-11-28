@@ -4,7 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { scopeQueryKey, workspaceScopeRpc, type WorkspaceScope } from "../shared/scope";
 import type { CumulativeHub } from "./cumulative-hub";
-import { useSharedRevision, useSharedScope, useSharedScopeStatus, type SharedStore } from "./shared-store";
+import {
+  useSharedRevision,
+  useSharedScope,
+  useSharedScopeStatus,
+  useWorkspaceRevision,
+  type SharedStore,
+} from "./shared-store";
 import { cumulativeReadEnabled, useCumulativeUsage } from "./use-cumulative";
 
 /**
@@ -26,7 +32,8 @@ export function createPillIcon(
     const readScope = useRpc(workspaceScopeRpc);
     const runtimeScope = useSharedScope(shared);
     const scopeStatus = useSharedScopeStatus(shared);
-    const revision = useSharedRevision(shared);
+    const settingsRevision = useSharedRevision(shared);
+    const workspaceRevision = useWorkspaceRevision(shared, workspaceId);
     // The surface reads a scope itself only while the runtime has not resolved
     // one. Both paths gate the cumulative read on the same settings.
     const ownScope = useQuery({
@@ -65,9 +72,10 @@ export function createPillIcon(
       agents,
       cumulativeReadEnabled(scope, workspaceId),
       scopeQueryKey(scope),
-      revision,
+      settingsRevision,
+      workspaceRevision,
       hub,
-      shared.refreshIntent(revision),
+      shared.refreshIntent(workspaceId, workspaceRevision),
     );
     return <Icon name="Activity" size={size} color={color} />;
   };

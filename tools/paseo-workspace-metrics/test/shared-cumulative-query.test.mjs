@@ -23,22 +23,23 @@ test("the pill and the panel derive one key from the same workspace, members, sc
   // The panel lists agents newest first; the pill lists them in directory order.
   const panelAgents = [{ id: "b" }, { id: "a" }];
   const pillAgents = [{ id: "a" }, { id: "b" }];
-  const panelKey = cumulativeQueryKey(HOST, WS, panelAgents.map(({ id }) => id), scopeQueryKey(scope), 0);
-  const pillKey = cumulativeQueryKey(HOST, WS, pillAgents.map(({ id }) => id), scopeQueryKey(scope), 0);
+  const panelKey = cumulativeQueryKey(HOST, WS, panelAgents.map(({ id }) => id), scopeQueryKey(scope), 0, 0);
+  const pillKey = cumulativeQueryKey(HOST, WS, pillAgents.map(({ id }) => id), scopeQueryKey(scope), 0, 0);
   assert.deepEqual(panelKey, pillKey);
   assert.deepEqual(panelKey, ["workspace-metrics-cumulative", HOST, WS, ["a", "b"],
-    "true|false|wks_shared|true|", 0]);
+    "true|false|wks_shared|true|", 0, 0]);
 });
 
 test("another host, workspace, member set, settings value or refresh revision is another key", () => {
-  const base = cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), 0);
-  assert.notDeepEqual(cumulativeQueryKey("host_other", WS, ["a"], scopeQueryKey(scope), 0), base);
-  assert.notDeepEqual(cumulativeQueryKey(HOST, "wks_other", ["a"], scopeQueryKey(scope), 0), base);
-  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a", "b"], scopeQueryKey(scope), 0), base);
-  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(wksScope({ enabled: false })), 0), base);
-  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), 1), base);
+  const base = cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), 0, 0);
+  assert.notDeepEqual(cumulativeQueryKey("host_other", WS, ["a"], scopeQueryKey(scope), 0, 0), base);
+  assert.notDeepEqual(cumulativeQueryKey(HOST, "wks_other", ["a"], scopeQueryKey(scope), 0, 0), base);
+  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a", "b"], scopeQueryKey(scope), 0, 0), base);
+  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(wksScope({ enabled: false })), 0, 0), base);
+  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), 1, 0), base);
+  assert.notDeepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), 0, 1), base);
   // A settings change that leaves the effective values identical keeps the key.
-  assert.deepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(wksScope()), 0), base);
+  assert.deepEqual(cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(wksScope()), 0, 0), base);
 });
 
 test("a closed setting, an out-of-allowlist workspace or an unresolved scope reads nothing", () => {
@@ -122,16 +123,22 @@ test("a settings change replaces the shared scope and gating uses it immediately
 
 test("a revision bump moves both surfaces to one new read and carries the refresh intent", () => {
   const shared = createSharedStore();
-  const key = () => cumulativeQueryKey(HOST, WS, ["a"], scopeQueryKey(scope), shared.revision());
+  const key = () => cumulativeQueryKey(
+    HOST, WS, ["a"], scopeQueryKey(scope), shared.revision(), shared.workspaceRevision(WS));
   const before = key();
-  shared.bump();
-  const routine = shared.revision();
-  assert.equal(shared.refreshIntent(routine), false);
+  shared.bumpWorkspace(WS);
+  const routine = shared.workspaceRevision(WS);
+  assert.equal(shared.refreshIntent(WS, routine), false);
   assert.notDeepEqual(key(), before);
-  shared.bump(true);
-  assert.equal(shared.refreshIntent(shared.revision()), true);
-  assert.equal(shared.refreshIntent(routine), false, "a routine revision keeps its own, non-bypassing read");
+  shared.bumpWorkspace(WS, true);
+  assert.equal(shared.refreshIntent(WS, shared.workspaceRevision(WS)), true);
+  assert.equal(shared.refreshIntent(WS, routine), false, "a routine revision keeps its own, non-bypassing read");
   assert.notDeepEqual(key(), before);
+  // A refresh of this workspace does not move another workspace's key.
+  assert.deepEqual(
+    cumulativeQueryKey(HOST, "wks_other", ["a"], scopeQueryKey(scope), shared.revision(), shared.workspaceRevision("wks_other")),
+    cumulativeQueryKey(HOST, "wks_other", ["a"], scopeQueryKey(scope), 0, 0),
+  );
 });
 
 test("one settings event that changes the projection moves the key exactly once", () => {

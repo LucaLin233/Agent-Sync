@@ -103,12 +103,13 @@ test("a terminal follow-up asks both surfaces for one fresh revision instead of 
   const release = shared.claimSurface(WS);
   t.after(release);
 
-  const before = shared.revision();
+  const before = shared.workspaceRevision(WS);
   fake.directory([agent("a", { status: "idle", updatedAt: "2026-11-28T00:00:00Z" })]);
   await advance(t, 2_000);
-  assert.equal(shared.revision(), before + 1, "one bump drives the shared key");
-  assert.equal(shared.refreshIntent(shared.revision()), true, "a terminal read bypasses the short cache");
-  assert.equal(shared.refreshIntent(before), false, "an earlier revision does not inherit it");
+  assert.equal(shared.workspaceRevision(WS), before + 1, "one bump drives this workspace's shared key");
+  assert.equal(shared.refreshIntent(WS, shared.workspaceRevision(WS)), true,
+    "a terminal read bypasses the short cache");
+  assert.equal(shared.refreshIntent(WS, before), false, "an earlier revision does not inherit it");
   assert.equal(fake.calls.length, 0);
 });
 
@@ -302,4 +303,88 @@ test("one settings event cannot make the shared key move twice", async (t) => {
   // starts one fresh read: a changed Codex home is not visible in the values.
   fake.settings(scope());
   assert.equal(shared.revision(), first + 1, "an identical projection still reads once");
+});
+
+test("a scope read that fails past the pill's short retries still recovers on the runtime's backoff", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  // The settings stream never delivers a first value, and the scope RPC is
+  // transiently down for longer than the pill surface's two retries.
+  let attempts = 0;
+  const deps = {
+    ...fake.deps,
+    requestScope() {
+      attempts += 1;
+      if (attempts <= 4) return Promise.reject(new Error("scope rpc transient"));
+      return Promise.resolve(scope());
+    },
+  };
+  const runtime = startPillRuntime(deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  fake.directory([agent("a")]);
+  assert.equal(fake.pills.get("a").label, "…");
+
+  // 1s, 2s, 5s, 10s backoff: each failure schedules the next read itself, so
+  // the fifth attempt succeeds well after the pill's two short retries.
+  for (let step = 0; step < 12 && attempts <= 4; step += 1) await advance(t, 5_000);
+  assert.ok(attempts >= 5, "the runtime kept retrying past the pill's short retry");
+  await advance(t, 10_000);
+  assert.deepEqual(fake.calls.map(({ type, ...input }) => input),
+    [{ workspaceId: WS, agentIds: ["a"], refresh: false }],
+    "the recovered scope starts the read without any panel");
+  fake.pending.shift().resolve(reply(0.976));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+});
+
+test("a terminal refresh in one workspace leaves another workspace's key alone", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  const other = { ...agent("z"), workspaceId: "wks_other" };
+  fake.settings(scope({ allWorkspaces: true, workspaceIds: [] }));
+  fake.directory([agent("a", { status: "running" }), other]);
+  const releases = [shared.claimSurface(WS), shared.claimSurface("wks_other")];
+  t.after(() => releases.forEach((release) => release()));
+
+  const otherBefore = shared.workspaceRevision("wks_other");
+  fake.directory([agent("a", { status: "idle", updatedAt: "2026-11-28T00:00:00Z" }), other]);
+  await advance(t, 2_000);
+  assert.equal(shared.workspaceRevision(WS), 1);
+  assert.equal(shared.workspaceRevision("wks_other"), otherBefore,
+    "a finished turn in one workspace does not re-key the other");
+});
+
+test("unmounting every pill of one workspace resumes only that workspace's runtime read", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  const other = { ...agent("z"), workspaceId: "wks_other_pills" };
+  // Two composer pills of the same workspace and one of another are mounted
+  // before the settings event, so no runtime read is started at all.
+  const releaseA1 = shared.claimSurface(WS);
+  const releaseA2 = shared.claimSurface(WS);
+  const releaseZ = shared.claimSurface("wks_other_pills");
+  t.after(() => [releaseA1, releaseA2, releaseZ].forEach((release) => release()));
+  fake.settings(scope({ allWorkspaces: true, workspaceIds: [] }));
+  fake.directory([agent("a"), other]);
+  await advance(t, 10_000);
+  assert.equal(fake.calls.length, 0, "both workspaces are read by their pills");
+
+  // One pill unmounting must not hand the workspace back to a side read.
+  releaseA1();
+  assert.equal(shared.surfaceOwns(WS), true);
+  await advance(t, 60_000);
+  assert.equal(fake.calls.length, 0, "a remaining pill still owns the read");
+
+  // The last pill of this workspace unmounts while the other keeps its own.
+  releaseA2();
+  await advance(t, 10_000);
+  assert.deepEqual(fake.calls.map(({ workspaceId }) => workspaceId), [WS],
+    "only the workspace that lost its last pill is read again");
 });

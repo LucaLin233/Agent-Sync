@@ -25,7 +25,7 @@ import {
 import { scopeQueryKey, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
 import { cumulativeReadEnabled, useCumulativeUsage } from "./use-cumulative";
 import { useCumulativeHub } from "./cumulative-hub-context";
-import { useSharedRevision, useSharedScope } from "./shared-store";
+import { useSharedRevision, useSharedScope, useWorkspaceRevision } from "./shared-store";
 import { useSharedStore } from "./shared-store-context";
 import { useLiveTurn } from "./use-turn";
 import { useTurnOutput } from "./use-turn-output";
@@ -445,7 +445,8 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   const [scopeRevision, setScopeRevision] = useState(0);
   // The manual refresh belongs to the shared store, so it bumps the one key the
   // composer pill also observes instead of only this panel's query.
-  const refreshRevision = useSharedRevision(shared);
+  const settingsRevision = useSharedRevision(shared);
+  const refreshRevision = useWorkspaceRevision(shared, workspaceId);
   // A rejected or closed subscription is never replayed by the host, so each
   // close opens a new one on the same backoff schedule as the composer pill.
   const [scopeAttempt, setScopeAttempt] = useState(0);
@@ -482,9 +483,10 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
     refs,
     cumulativeEnabled,
     scopeKey,
+    settingsRevision,
     refreshRevision,
     hub,
-    shared.refreshIntent(refreshRevision),
+    shared.refreshIntent(workspaceId, refreshRevision),
   );
   // Paseo's reported Claude usage has no cache-write count, so Claude
   // sessions take their newest request from the transcript instead.
@@ -590,9 +592,9 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
         : "按整轮耗时加权，包含工具与等待。");
 
   const refresh = () => {
-    // One shared revision bumps the cumulative key for the pill and the panel
-    // alike; the key change is what refetches, so there is no second request.
-    shared.bump(true);
+    // Only this workspace's shared revision moves, so the pill and the panel
+    // for this workspace refetch once while other workspaces keep their data.
+    shared.bumpWorkspace(workspaceId, true);
     void query.refetch();
   };
 

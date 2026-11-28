@@ -7,7 +7,8 @@ import type { WorkspaceScope } from "../shared/scope.ts";
  *
  * - the effective scope, so a settings change gates the pill's read at once;
  * - the manual/terminal refresh revision, part of the shared cumulative query
- *   key, so one refresh bumps both surfaces and they stay one request;
+ *   key, so one refresh bumps both surfaces of that workspace and they stay
+ *   one request — without re-keying a different workspace's label;
  * - whether a surface already owns a workspace's cumulative read. While it
  *   does, the runtime's own timer-driven reads become revision bumps instead of
  *   a second RPC, so the read never depends on a timer firing.
@@ -25,15 +26,22 @@ export interface SharedStore {
    * first scope) never bumps, so one settings change stays one key.
    */
   setScope(scope: WorkspaceScope | null, status: SharedScopeStatus, fresh?: boolean): void;
+  /** The settings generation, bumped once per event that changed the scope. */
   revision(): number;
-  /** Starts a fresh shared read; `refresh` also bypasses the server's short cache. */
-  bump(refresh?: boolean): void;
+  /** One workspace's refresh revision; other workspaces keep their own key. */
+  workspaceRevision(workspaceId: string): number;
+  /**
+   * Starts a fresh read of one workspace; `refresh` also bypasses the server's
+   * short cache. Only that workspace's surfaces move key, so a refresh or a
+   * finished turn in A never re-reads B.
+   */
+  bumpWorkspace(workspaceId: string, refresh?: boolean): void;
   /**
    * Whether the bump that produced `revision` asked for a cache-bypassing read.
    * A later key (for example a changed member set) reads the server's cache
    * again instead of inheriting an old manual refresh forever.
    */
-  refreshIntent(revision: number): boolean;
+  refreshIntent(workspaceId: string, revision: number): boolean;
   surfaceOwns(workspaceId: string): boolean;
   claimSurface(workspaceId: string): () => void;
   subscribe(listener: () => void): () => void;
@@ -43,7 +51,10 @@ export function createSharedStore(): SharedStore {
   let scope: WorkspaceScope | null = null;
   let status: SharedScopeStatus = "pending";
   let revision = 0;
-  let bypassAt = -1;
+  // One refresh revision per workspace: a refresh or a finished turn in one
+  // workspace moves that workspace's key and nothing else's.
+  const workspaceRevisions = new Map<string, number>();
+  const bypassAt = new Map<string, number>();
   const surfaces = new Map<string, number>();
   const listeners = new Set<() => void>();
   const notify = () => {
@@ -65,22 +76,27 @@ export function createSharedStore(): SharedStore {
       status = nextStatus;
       if (fresh) {
         revision += 1;
-        bypassAt = -1;
+        bypassAt.clear();
       }
       notify();
     },
     revision: () => revision,
-    bump(bypass = false) {
-      revision += 1;
-      if (bypass) bypassAt = revision;
+    workspaceRevision: (workspaceId) => workspaceRevisions.get(workspaceId) ?? 0,
+    bumpWorkspace(workspaceId, bypass = false) {
+      const next = (workspaceRevisions.get(workspaceId) ?? 0) + 1;
+      workspaceRevisions.set(workspaceId, next);
+      if (bypass) bypassAt.set(workspaceId, next);
       notify();
     },
-    refreshIntent: (at) => bypassAt === at,
+    refreshIntent: (workspaceId, at) => bypassAt.get(workspaceId) === at,
     surfaceOwns: (workspaceId) => (surfaces.get(workspaceId) ?? 0) > 0,
     claimSurface(workspaceId) {
       // Several pills (one per agent) can observe one workspace; only the last
-      // unmount releases the workspace back to the runtime's own reads.
+      // unmount releases the workspace back to the runtime's own reads, so the
+      // runtime hears every transition and can resume reading what nobody
+      // observes anymore.
       surfaces.set(workspaceId, (surfaces.get(workspaceId) ?? 0) + 1);
+      notify();
       let released = false;
       return () => {
         if (released) return;
@@ -88,6 +104,7 @@ export function createSharedStore(): SharedStore {
         const left = (surfaces.get(workspaceId) ?? 0) - 1;
         if (left > 0) surfaces.set(workspaceId, left);
         else surfaces.delete(workspaceId);
+        notify();
       };
     },
     subscribe(listener) {
@@ -109,7 +126,16 @@ export function useSharedScopeStatus(store: SharedStore): SharedScopeStatus {
   return useSyncExternalStore(store.subscribe, store.scopeStatus, store.scopeStatus);
 }
 
-/** The shared refresh revision, part of every surface's cumulative query key. */
+/** The settings generation, part of every surface's cumulative query key. */
 export function useSharedRevision(store: SharedStore): number {
   return useSyncExternalStore(store.subscribe, store.revision, store.revision);
+}
+
+/** One workspace's refresh revision; a refresh of A leaves B untouched. */
+export function useWorkspaceRevision(store: SharedStore, workspaceId: string): number {
+  return useSyncExternalStore(
+    store.subscribe,
+    () => store.workspaceRevision(workspaceId),
+    () => store.workspaceRevision(workspaceId),
+  );
 }

@@ -806,7 +806,7 @@ test("a startup scope reply arriving after the settings event cannot replace it"
   assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
 });
 
-test("a startup scope reply arriving after a close cannot revive the pill", async (t) => {
+test("a scope RPC that answers after the settings stream closed recovers the label", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
   const runtime = startPillRuntime(fake.deps, createCumulativeHub());
@@ -815,10 +815,17 @@ test("a startup scope reply arriving after a close cannot revive the pill", asyn
 
   fake.closeSettings();
   assert.match(fake.pills.get("a").title, /累计设置错误：设置订阅已关闭/);
+
+  // The stream is down, but the scope RPC works: its reply is the recovery
+  // path, not stale information, so the pill starts reading again.
   fake.resolveScope();
   await advance(t, 0);
-  assert.match(fake.pills.get("a").title, /累计设置错误：设置订阅已关闭/);
-  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+  await advance(t, 10_000);
+  assert.deepEqual(fake.pending.map((entry) => entry.input),
+    [{ workspaceId: WS, agentIds: ["a"], refresh: false }]);
+  fake.pending.shift().resolve(reply(0.9, 900, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "90.0%");
 });
 
 test("a startup scope reply arriving after dispose is ignored", async (t) => {

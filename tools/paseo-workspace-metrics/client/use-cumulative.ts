@@ -15,7 +15,8 @@ export function cumulativeQueryKey(
   workspaceId: string,
   agentIds: readonly string[],
   scopeKey: string,
-  refreshRevision: number,
+  settingsRevision: number,
+  workspaceRevision: number,
 ) {
   return [
     "workspace-metrics-cumulative",
@@ -23,7 +24,8 @@ export function cumulativeQueryKey(
     workspaceId,
     [...agentIds].sort(),
     scopeKey,
-    refreshRevision,
+    settingsRevision,
+    workspaceRevision,
   ] as const;
 }
 
@@ -68,9 +70,10 @@ export async function readCumulativeIntoHub(input: {
 }
 
 /**
- * The cumulative read both surfaces share. `refreshRevision` is the shared
- * store's revision: both surfaces pass the same number, so they agree on the
- * key, and a bump moves both to one new request.
+ * The cumulative read both surfaces share. Both revision numbers come from the
+ * shared store: the settings generation, and this one workspace's refresh
+ * revision. Both surfaces pass the same pair, so they agree on the key; a
+ * refresh or finished turn in this workspace moves only this workspace.
  */
 export function useCumulativeUsage(
   hostId: string,
@@ -78,7 +81,8 @@ export function useCumulativeUsage(
   agents: readonly AgentRef[],
   enabled: boolean,
   scopeKey: string,
-  refreshRevision: number,
+  settingsRevision: number,
+  workspaceRevision: number,
   hub: CumulativeHub,
   /** A manual or terminal refresh additionally bypasses the server's cache. */
   bypassCache = false,
@@ -86,7 +90,7 @@ export function useCumulativeUsage(
   const run = useRpc(cumulativeUsageRpc);
   const ids = [...agents].map(({ id }) => id).sort();
   return useQuery({
-    queryKey: cumulativeQueryKey(hostId, workspaceId, ids, scopeKey, refreshRevision),
+    queryKey: cumulativeQueryKey(hostId, workspaceId, ids, scopeKey, settingsRevision, workspaceRevision),
     enabled: enabled && ids.length > 0,
     retry: false,
     staleTime: 15_000,
