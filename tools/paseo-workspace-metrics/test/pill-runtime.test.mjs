@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { startPillRuntime } from "../client/pill-runtime.ts";
+import { createCumulativeHub } from "../client/cumulative-hub.ts";
 
 const WS = "wks_metrics";
 
@@ -120,7 +121,7 @@ async function advance(t, ms) {
 test("a terminal transition re-reads after the rollout flush without new directory events", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
 
   fake.enable();
@@ -149,10 +150,40 @@ test("a terminal transition re-reads after the rollout flush without new directo
     "打开工作区用量 · 累计缓存 60.0%");
 });
 
+test("an earlier valid reply still reaches the label when a follow-up was demanded", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.enable();
+  fake.emitSnapshot([agent("a", { status: "running" })]);
+  await advance(t, 10_000);
+  const first = fake.pending.shift();
+
+  // The turn ends before the first read returns; the terminal transition asks
+  // for a bounded follow-up. It waits for the read already in flight.
+  fake.emitUpsert(agent("a", { status: "idle" }));
+  await advance(t, 1_200);
+  assert.equal(fake.pending.length, 0, "overlapping reads for one workspace are serialized");
+
+  // The first read lands with a valid 96.2% while nothing newer is shown.
+  first.resolve(reply(0.962, 962, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "96.2%");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 累计缓存 96.2%");
+
+  // The coalesced follow-up then starts by itself and can still refresh it.
+  assert.equal(fake.pending.length, 1);
+  assert.equal(fake.pending[0].input.refresh, true);
+  fake.pending.shift().resolve(reply(0.971, 971, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.1%");
+});
+
 test("a second terminal turn during the chain restores the budget for its rollout", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" }), agent("b", { status: "running" })]);
@@ -190,7 +221,7 @@ test("a second terminal turn during the chain restores the budget for its rollou
 test("a member change keeps an active chain and reads the current members", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" }), agent("b", { status: "running" })]);
@@ -223,7 +254,7 @@ test("a member change keeps an active chain and reads the current members", asyn
 test("a member change keeps the last reading until its matching reply lands", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a"), agent("b")]);
@@ -260,7 +291,7 @@ test("a member change keeps the last reading until its matching reply lands", as
 test("a member change retains a real zero until the new reading replaces it", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -283,7 +314,7 @@ test("a member change retains a real zero until the new reading replaces it", as
 test("a member-driven re-read replaces the retained reading even without a valid snapshot", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -320,7 +351,7 @@ test("a member-driven re-read replaces the retained reading even without a valid
 test("a settings update still clears the reading kept across a member change", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -343,7 +374,7 @@ test("a settings update still clears the reading kept across a member change", a
 test("a workspace that loses every visible member drops the retained reading", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -368,7 +399,7 @@ test("a workspace that loses every visible member drops the retained reading", a
 test("follow-up reads are bounded and stop", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" })]);
@@ -391,7 +422,7 @@ test("follow-up reads are bounded and stop", async (t) => {
 test("a turn that ended between snapshots still triggers one bounded re-read", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "idle", updatedAt: "2026-11-22T00:00:00Z" })]);
@@ -412,7 +443,7 @@ test("a turn that ended between snapshots still triggers one bounded re-read", a
 test("a routine read does not race the follow-up chain for the same workspace", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" })]);
@@ -441,10 +472,10 @@ test("a routine read does not race the follow-up chain for the same workspace", 
   assert.equal(fake.calls.filter((call) => call.type === "rpc" && !call.refresh).length, 1);
 });
 
-test("a late reply for archived members cannot overwrite the current workspace", async (t) => {
+test("a reply for an archived member set cannot overwrite the current workspace", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" }), agent("b")]);
@@ -456,38 +487,19 @@ test("a late reply for archived members cannot overwrite the current workspace",
   fake.emitUpsert(agent("b", { archivedAt: "2026-11-22T00:00:00Z" }));
   assert.equal(fake.pills.has("b"), false);
 
+  // The in-flight read still owns the workspace, so the member-triggered read
+  // waits for it instead of opening a second overlapping request.
   await advance(t, 10_000);
+  assert.equal(fake.pending.length, 0);
+  stale.resolve(reply(0.8, 800, 10_000));
+  await advance(t, 0);
+  // That reply belongs to the old member set; it must not land.
+  assert.equal(fake.pills.get("a").label, "…");
+
+  await advance(t, 0);
   const fresh = fake.pending.shift();
   assert.deepEqual(fresh.input.agentIds, ["a"]);
   fresh.resolve(reply(0.2, 200, 10_000));
-  await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "20.0%");
-
-  // The older [A,B] reply lands last and must be discarded.
-  stale.resolve(reply(0.8, 800, 10_000));
-  await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "20.0%");
-});
-
-test("same-member concurrent replies keep only the newest request", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
-  t.after(() => runtime.dispose());
-  fake.enable();
-  fake.emitSnapshot([agent("a")]);
-  await advance(t, 10_000);
-  const first = fake.pending.shift();
-
-  // A settings refresh starts a second read for the same member set.
-  fake.enable();
-  await advance(t, 10_000);
-  const second = fake.pending.shift();
-  second.resolve(reply(0.2, 200, 10_000));
-  await advance(t, 0);
-  assert.equal(fake.pills.get("a").label, "20.0%");
-
-  first.resolve(reply(0.8, 800, 10_000));
   await advance(t, 0);
   assert.equal(fake.pills.get("a").label, "20.0%");
 });
@@ -495,7 +507,7 @@ test("same-member concurrent replies keep only the newest request", async (t) =>
 test("a cumulative reply without a snapshot leaves the pill missing instead of borrowing another reading", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -524,7 +536,7 @@ test("a cumulative reply without a snapshot leaves the pill missing instead of b
 test("a closed cumulative setting keeps the pill missing and reads nothing", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.emitSnapshot([agent("a")]);
   assert.equal(fake.pills.get("a").label, "…");
@@ -540,7 +552,7 @@ test("a closed cumulative setting keeps the pill missing and reads nothing", asy
 test("a closed settings subscription is reopened and the pill recovers", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -561,7 +573,7 @@ test("a closed settings subscription is reopened and the pill recovers", async (
 test("settings retries back off to a capped delay, reset on success, and stop on dispose", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
 
   const expectReopenAfter = async (delay) => {
@@ -586,7 +598,7 @@ test("settings retries back off to a capped delay, reset on success, and stop on
 test("a workspace outside the cumulative allowlist shows its own reason", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable({ workspaceIds: ["wks_elsewhere"] });
   fake.emitSnapshot([agent("a")]);
@@ -600,7 +612,7 @@ test("a workspace outside the cumulative allowlist shows its own reason", async 
 test("a failed cumulative read is reported and never backfilled", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a")]);
@@ -615,7 +627,7 @@ test("a failed cumulative read is reported and never backfilled", async (t) => {
 test("a real cumulative zero is a measurement, not a missing value", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a", { lastUsage: { inputTokens: 100, cachedInputTokens: 0 } })]);
@@ -627,10 +639,10 @@ test("a real cumulative zero is a measurement, not a missing value", async (t) =
     "打开工作区用量 · 累计缓存 0.0%");
 });
 
-test("failures from a superseded request are ignored too", async (t) => {
+test("failures from a reply that no longer matches the members are ignored", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable();
   fake.emitSnapshot([agent("a"), agent("b")]);
@@ -638,9 +650,13 @@ test("failures from a superseded request are ignored too", async (t) => {
   const stale = fake.pending.shift();
   fake.emitRemove("b");
   await advance(t, 10_000);
-  fake.pending.shift().resolve(reply(0.2, 200, 10_000));
-  await advance(t, 0);
   stale.reject(new Error("late failure"));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "…", "the old member set's failure cannot land");
+
+  const fresh = fake.pending.shift();
+  assert.deepEqual(fresh.input.agentIds, ["a"]);
+  fresh.resolve(reply(0.2, 200, 10_000));
   await advance(t, 0);
   assert.equal(fake.pills.get("a").label, "20.0%");
 });
@@ -648,7 +664,7 @@ test("failures from a superseded request are ignored too", async (t) => {
 test("workspace migration and background flag recompute membership", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   t.after(() => runtime.dispose());
   fake.enable({ allWorkspaces: true, workspaceIds: [] });
   fake.emitSnapshot([agent("a"), agent("b")]);
@@ -674,7 +690,7 @@ test("workspace migration and background flag recompute membership", async (t) =
 test("dispose cancels pending timers and unregisters pills", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const fake = fakeClient();
-  const runtime = startPillRuntime(fake.deps);
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
   fake.enable();
   fake.emitSnapshot([agent("a", { status: "running" })]);
   await advance(t, 10_000);

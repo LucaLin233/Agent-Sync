@@ -6,6 +6,7 @@ import {
   type PillCacheBasis,
 } from "../shared/metrics.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
+import type { CumulativeHub } from "./cumulative-hub.ts";
 import { settingsRetryDelayMs } from "./subscription-retry.ts";
 
 export interface PillHandle {
@@ -48,11 +49,6 @@ interface PillState {
   title: string;
 }
 
-interface CumulativeState {
-  rate: number | null;
-  error: string | null;
-}
-
 /** Routine directory-driven reads stay at most one per this window per workspace. */
 const CUMULATIVE_MIN_INTERVAL_MS = 10_000;
 /** A finished turn may be flushed to its rollout after the directory update. */
@@ -74,18 +70,23 @@ const EMPTY_SCOPE: WorkspaceScope = {
  * reads; a finished turn additionally gets a small number of bounded re-reads
  * so a rollout flushed after the event still reaches the label.
  */
-export function startPillRuntime(deps: PillRuntimeDeps) {
+export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   const agents = new Map<string, DirectoryAgent>();
   const pills = new Map<string, PillState>();
-  const cumulative = new Map<string, CumulativeState>();
   const routineTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const followUpTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const followUpsLeft = new Map<string, number>();
   const lastRequest = new Map<string, number>();
   /** Bumped whenever the effective member set of a workspace changes. */
   const memberVersions = new Map<string, number>();
-  /** Monotonic per-workspace request id; only the newest may land. */
-  const requestSequences = new Map<string, number>();
+  /**
+   * One read per workspace at a time. A demand that arrives while another read is
+   * in flight coalesces into one follow-on read issued when the current one
+   * settles, so overlapping reads never race each other into the host.
+   */
+  const inflight = new Map<string, { generation: number; task: Promise<void> }>();
+  /** A pending follow-on read per workspace; `true` asks for a bypassing refresh. */
+  const queued = new Map<string, boolean>();
   const members = new Map<string, string>();
   let scope: WorkspaceScope | null = null;
   let generation = 0;
@@ -113,14 +114,26 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
    * snapshot all leave the slot empty with its own reason.
    */
   const cumulativeSlot = (workspaceId: string): PillCacheBasis => {
-    if (!scope) return { kind: "loading" };
+    if (!scope) {
+      // This client's settings stream has not produced its first event yet.
+      // A reading the panel already obtained through its own settings stream
+      // was validated by the backend for this workspace, so show it instead of
+      // leaving the label on "…" until both streams happen to coincide. An
+      // explicit disabled or out-of-allowlist scope below still wins.
+      const shared = hub.read(workspaceId);
+      if (!shared) return { kind: "loading" };
+      if (shared.error) return { kind: "unavailable", reason: "累计读取失败：" + shared.error };
+      return { kind: "ready", rate: shared.rate };
+    }
     if (scope.error) return { kind: "unavailable", reason: "累计设置错误：" + scope.error };
     if (!scope.enabled) return { kind: "unavailable", reason: "累计统计已关闭" };
     if (!inScope(workspaceId)) return { kind: "unavailable", reason: "不在本机累计名单" };
-    const state = cumulative.get(workspaceId);
-    if (!state) return { kind: "loading" };
-    if (state.error) return { kind: "unavailable", reason: "累计读取失败：" + state.error };
-    return { kind: "ready", rate: state.rate };
+    // The shared hub also carries results the panel obtained, so either entry
+    // point publishing a valid reading updates this label.
+    const reading = hub.read(workspaceId);
+    if (!reading) return { kind: "loading" };
+    if (reading.error) return { kind: "unavailable", reason: "累计读取失败：" + reading.error };
+    return { kind: "ready", rate: reading.rate };
   };
 
   const labelFor = (workspaceId: string) => formatPillLabel(cumulativeSlot(workspaceId));
@@ -175,39 +188,63 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     }
   };
 
+  /**
+   * Issues one cumulative read, or coalesces the demand into the read already in
+   * flight. Any reply from the current settings generation and member set may
+   * land: an older in-flight read carrying a valid result is not voided just
+   * because a newer read is queued. The hub only accepts replies newer than the
+   * last adopted request signature, so a late older reply never overwrites
+   * fresher data while a newer reply that returns second still replaces it.
+   */
   const requestCumulative = (workspaceId: string, refresh: boolean) => {
     if (disposed) return;
     const agentIds = agentIdsFor(workspaceId);
     if (agentIds.length === 0) {
-      cumulative.delete(workspaceId);
       members.delete(workspaceId);
+      queued.delete(workspaceId);
+      hub.clear(workspaceId);
       reconcile();
       return;
     }
-    const seq = (requestSequences.get(workspaceId) ?? 0) + 1;
-    requestSequences.set(workspaceId, seq);
+    if (inflight.has(workspaceId)) {
+      queued.set(workspaceId, (queued.get(workspaceId) ?? false) || refresh);
+      return;
+    }
     const version = memberVersions.get(workspaceId) ?? 0;
     const requestGeneration = generation;
+    const ticket = hub.begin(workspaceId);
     lastRequest.set(workspaceId, Date.now());
-    // A late reply is dropped when settings moved, members changed, or a newer
-    // request exists; success and failure take the same guard.
+    // A settings or member change still voids a reply; a merely newer request
+    // does not, and overlapping reads are serialized per workspace.
     const live = () =>
       !disposed &&
       requestGeneration === generation &&
-      seq === requestSequences.get(workspaceId) &&
       version === (memberVersions.get(workspaceId) ?? 0);
-    void deps
+    const task = deps
       .requestCumulative({ workspaceId, agentIds, refresh })
       .then((result) => {
         if (!live()) return;
-        cumulative.set(workspaceId, { rate: result.rate, error: result.error });
+        hub.publish(workspaceId, ticket, { rate: result.rate, error: result.error });
         reconcile();
       })
       .catch(() => {
         if (!live()) return;
-        cumulative.set(workspaceId, { rate: null, error: "累计用量读取失败" });
+        // Failure and success take the same ordering gate: only a reply newer
+        // than the last adopted one can change what is shown.
+        hub.publish(workspaceId, ticket, { rate: null, error: "累计用量读取失败" });
         reconcile();
+      })
+      .finally(() => {
+        if (inflight.get(workspaceId)?.task === task) inflight.delete(workspaceId);
+        // A settings change starts its own generation; the old reply that has
+        // just settled must not drive reads for the new scope.
+        if (requestGeneration !== generation || disposed) return;
+        const pending = queued.get(workspaceId);
+        queued.delete(workspaceId);
+        if (pending === undefined) return;
+        requestCumulative(workspaceId, pending);
       });
+    inflight.set(workspaceId, { generation: requestGeneration, task });
   };
 
   // Bounded, non-periodic: only a terminal transition starts this sequence.
@@ -247,10 +284,19 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
 
   const scheduleRoutine = (only?: ReadonlySet<string>) => {
     if (disposed) return;
-    if (!scope || !scope.enabled) {
+    if (!scope) {
+      // Scope still unknown: issue no reads of our own and keep readings the
+      // panel already validated; the first settings event owns the next clear.
       clearRoutine();
       clearFollowUps();
-      cumulative.clear();
+      queued.clear();
+      return;
+    }
+    if (!scope.enabled) {
+      clearRoutine();
+      clearFollowUps();
+      queued.clear();
+      hub.clearAll();
       return;
     }
     const workspaces = new Set<string>();
@@ -276,7 +322,7 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       if (workspaces.has(workspaceId)) continue;
       clearTimeout(timer);
       routineTimers.delete(workspaceId);
-      cumulative.delete(workspaceId);
+      hub.clear(workspaceId);
     }
   };
 
@@ -300,14 +346,24 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       if (before === after) continue;
       changed.add(workspaceId);
       memberVersions.set(workspaceId, (memberVersions.get(workspaceId) ?? 0) + 1);
-      // A still-visible workspace keeps its last valid rate (a real zero
-      // included) while the member-triggered re-read is pending; in-flight
-      // replies are already voided by the member version and the next reply
-      // replaces it. Loading, empty, and failed readings have no valid rate to
-      // keep, and a workspace that lost every visible member drops its state.
-      const state = cumulative.get(workspaceId);
-      const keep = after !== undefined && state?.rate != null && state.error === null;
-      if (!keep) cumulative.delete(workspaceId);
+      // Seeing a workspace's members for the first time is not a member
+      // change: no earlier set existed to void, and the panel may already hold
+      // a reading, or a read in flight, for exactly those members.
+      if (before !== undefined) {
+        // A still-visible workspace keeps its last valid rate (a real zero
+        // included) while the member-triggered re-read is pending. Loading,
+        // empty, and failed readings have no valid rate to keep, and a
+        // workspace that lost every visible member drops its state.
+        const reading = hub.read(workspaceId);
+        const keep = after !== undefined && reading !== undefined &&
+          reading.rate !== null && reading.error === null;
+        if (!keep) hub.clear(workspaceId);
+        // Reads started before this member change must not land on the new set.
+        // `invalidate` keeps the shown reading but voids those replies; the
+        // in-flight read still serializes the follow-on read for current
+        // members.
+        else hub.invalidate(workspaceId);
+      }
       // A changed but still visible member set keeps its chain: in-flight
       // responses are already voided by the member version, and each tick
       // reads the members that exist then. Only an empty workspace stops it.
@@ -390,6 +446,9 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
     },
   });
 
+  // The panel publishes into the same hub, so its readings also move the label.
+  const unsubscribeHub = hub.subscribeAll(() => reconcile());
+
   let releaseSettings: () => void;
   let settingsRetry: ReturnType<typeof setTimeout> | undefined;
   let settingsCloses = 0;
@@ -403,7 +462,9 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
         settingsCloses = 0;
         generation += 1;
         scope = event;
-        cumulative.clear();
+        inflight.clear();
+        queued.clear();
+        hub.clearAll();
         lastRequest.clear();
         clearRoutine();
         clearFollowUps();
@@ -414,7 +475,9 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
         if (disposed) return;
         generation += 1;
         scope = EMPTY_SCOPE;
-        cumulative.clear();
+        inflight.clear();
+        queued.clear();
+        hub.clearAll();
         clearRoutine();
         clearFollowUps();
         reconcile();
@@ -435,15 +498,17 @@ export function startPillRuntime(deps: PillRuntimeDeps) {
       if (disposed) return;
       disposed = true;
       generation += 1;
+      inflight.clear();
+      queued.clear();
       clearRoutine();
       clearFollowUps();
       unsubscribeAgents();
+      unsubscribeHub();
       clearTimeout(settingsRetry);
       releaseSettings();
       for (const pill of pills.values()) pill.handle.remove();
       pills.clear();
       agents.clear();
-      cumulative.clear();
     },
   };
 }
