@@ -26,6 +26,12 @@ export interface PillRuntimeDeps {
   openPanel(workspaceId: string, agentId: string): void;
   /** The same cumulative RPC the panel uses; `refresh` bypasses its short caches. */
   requestCumulative(input: { workspaceId: string; agentIds: string[]; refresh?: boolean }): Promise<CumulativeUsage>;
+  /**
+   * One direct read of the effective scope, independent of the settings stream.
+   * A freshly loaded client may never receive that stream's first event; this
+   * read still lets the pill learn its scope and start its own reads.
+   */
+  requestScope(): Promise<WorkspaceScope>;
   subscribeAgents(handlers: {
     snapshot(entries: readonly AgentDirectoryEntry[]): void;
     update(message: { type: string; payload: AgentUpdatePayload }): void;
@@ -453,6 +459,24 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   let settingsRetry: ReturnType<typeof setTimeout> | undefined;
   let settingsCloses = 0;
 
+  /**
+   * One direct scope read at startup. The settings stream owns the scope once
+   * it produces its first event — a value or a close, both leave `scope`
+   * non-null — so a reply arriving after that, or after dispose, is dropped
+   * instead of overwriting the newer state.
+   */
+  const requestScopeRead = () => {
+    deps.requestScope().then((event) => {
+      if (disposed || scope !== null) return;
+      scope = event;
+      reconcile();
+      scheduleRoutine();
+    }).catch(() => {
+      // Without a settings event either, the label keeps its unknown state and
+      // the settings subscription stays the only source, with its own retry.
+    });
+  };
+
   // The host never replays a rejected or closed subscription (for example one
   // retried while the plugin is still loading after a daemon restart).
   const openSettings = () => {
@@ -492,6 +516,7 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
     });
   };
   openSettings();
+  requestScopeRead();
 
   return {
     dispose() {

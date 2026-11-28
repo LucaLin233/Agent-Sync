@@ -10,7 +10,7 @@ import { CumulativeHubContext } from "./client/cumulative-hub-context";
 import { startPillRuntime } from "./client/pill-runtime";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { cumulativeUsageRpc } from "./shared/cumulative";
-import { workspaceSettingsSubscription } from "./shared/scope";
+import { workspaceScopeRpc, workspaceSettingsSubscription } from "./shared/scope";
 
 export default function contribute(client: PluginClientContext) {
   const native = Platform.OS === "ios" || Platform.OS === "android";
@@ -47,6 +47,7 @@ export default function contribute(client: PluginClientContext) {
       client.openPanel("metrics", { workspaceId, agentId });
     },
     requestCumulative: (input) => client.rpc(cumulativeUsageRpc, input),
+    requestScope: () => client.rpc(workspaceScopeRpc, {}),
     subscribeAgents(handlers) {
       const lifetime = new AbortController();
       void client.paseo.agents

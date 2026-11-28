@@ -25,6 +25,7 @@ function fakeClient() {
       },
       openPanel() {},
       requestCumulative: () => new Promise(() => {}),
+      requestScope: () => new Promise(() => {}),
       subscribeAgents(handlers) {
         agentHandlers = handlers;
         return () => { agentHandlers = null; };

@@ -11,12 +11,14 @@ function fakeClient() {
   let agentHandlers = null;
   let settingsHandlers = null;
   const pending = [];
+  const scopeRequests = [];
   const settings = { opened: 0, released: 0 };
   return {
     settings,
     pills,
     calls,
     pending,
+    scopeRequests,
     deps: {
       addPill({ workspaceId, agentId, title, label, onPress }) {
         const pill = { workspaceId, agentId, title, label, onPress, removed: false };
@@ -39,6 +41,10 @@ function fakeClient() {
         calls.push({ type: "rpc", ...input });
         return new Promise((resolve, reject) => pending.push({ input, resolve, reject }));
       },
+      requestScope() {
+        calls.push({ type: "scope" });
+        return new Promise((resolve, reject) => scopeRequests.push({ resolve, reject }));
+      },
       subscribeAgents(handlers) {
         agentHandlers = handlers;
         return () => { agentHandlers = null; };
@@ -60,6 +66,20 @@ function fakeClient() {
     },
     closeSettings() {
       settingsHandlers.closed();
+    },
+    resolveScope(patch = {}) {
+      const request = scopeRequests.shift();
+      return request.resolve({
+        enabled: true,
+        workspaceIds: [WS],
+        allWorkspaces: false,
+        codexHomeConfigured: true,
+        error: null,
+        ...patch,
+      });
+    },
+    failScope() {
+      scopeRequests.shift().reject(new Error("scope rpc down"));
     },
     enable(patch = {}) {
       settingsHandlers.next({
@@ -111,6 +131,22 @@ async function settle() {
   await Promise.resolve();
   await Promise.resolve();
   await new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Startup scope read that answers on its own, like a healthy backend: no test
+ * step is needed to get past it, so the pill alone has to move the label.
+ */
+function autoScopeClient() {
+  const fake = fakeClient();
+  fake.deps.requestScope = () => Promise.resolve({
+    enabled: true,
+    workspaceIds: [WS],
+    allWorkspaces: false,
+    codexHomeConfigured: true,
+    error: null,
+  });
+  return fake;
 }
 
 async function advance(t, ms) {
@@ -701,4 +737,175 @@ test("dispose cancels pending timers and unregisters pills", async (t) => {
   assert.equal(fake.pills.size, 0);
   await advance(t, 20_000);
   assert.equal(fake.calls.filter((call) => call.type === "rpc" && call.refresh).length, 0);
+});
+
+test("a fresh client reaches its cumulative label with no settings event and no user action", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = autoScopeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+
+  // Fresh open: the directory arrives, the settings stream stays silent. Before
+  // the startup read existed nothing ever resolved the scope, so the pill sat
+  // on "…" and issued no cumulative request until the panel was opened.
+  fake.emitSnapshot([agent("a", { status: "idle" })]);
+  assert.equal(fake.pills.get("a").label, "…");
+  await settle();
+  await advance(t, 10_000);
+  assert.equal(fake.pending.length, 1, "the pill read starts on its own");
+  fake.pending.shift().resolve(reply(0.962, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "96.2%");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 累计缓存 96.2%");
+});
+
+test("the startup scope read fills the pill when the settings stream never delivers", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+
+  // The directory arrives, then the settings stream stays silent: no first
+  // event, exactly the fresh-open case where scope used to stay null forever.
+  fake.emitSnapshot([agent("a", { status: "idle" })]);
+  assert.equal(fake.pills.get("a").label, "…");
+  assert.deepEqual(fake.scopeRequests.length, 1, "one direct scope read at startup");
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+
+  fake.resolveScope();
+  await settle();
+  await advance(t, 0);
+  assert.equal(fake.scopeRequests.length, 0);
+  // The resolved scope lets the routine read start without any user action.
+  await advance(t, 10_000);
+  assert.deepEqual(fake.pending.map((entry) => entry.input), [{ workspaceId: WS, agentIds: ["a"], refresh: false }]);
+  fake.pending.shift().resolve(reply(0.962, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "96.2%");
+  assert.equal(fake.pills.get("a").title, "打开工作区用量 · 累计缓存 96.2%");
+});
+
+test("a startup scope reply arriving after the settings event cannot replace it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+
+  // The settings stream wins first, excluding this workspace.
+  fake.enable({ workspaceIds: ["wks_elsewhere"] });
+  assert.match(fake.pills.get("a").title, /不在本机累计名单/);
+
+  // The older direct read then answers with an all-workspaces scope; it must
+  // not resurrect the workspace or clear the settings error.
+  fake.resolveScope({ allWorkspaces: true, workspaceIds: [] });
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "—");
+  assert.match(fake.pills.get("a").title, /不在本机累计名单/);
+  await advance(t, 10_000);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("a startup scope reply arriving after a close cannot revive the pill", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+
+  fake.closeSettings();
+  assert.match(fake.pills.get("a").title, /累计设置错误：设置订阅已关闭/);
+  fake.resolveScope();
+  await advance(t, 0);
+  assert.match(fake.pills.get("a").title, /累计设置错误：设置订阅已关闭/);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("a startup scope reply arriving after dispose is ignored", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  fake.emitSnapshot([agent("a")]);
+  runtime.dispose();
+
+  fake.resolveScope();
+  await advance(t, 20_000);
+  assert.equal(fake.pills.size, 0);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("the startup scope read keeps a reading the panel already published", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const hub = createCumulativeHub();
+  const runtime = startPillRuntime(fake.deps, hub);
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  hub.publish(WS, hub.begin(WS), { rate: 0.962, error: null });
+  assert.equal(fake.pills.get("a").label, "96.2%");
+
+  // The direct read confirms the scope; the panel's backend-validated reading
+  // stays on the label and is not immediately re-read against the short cache.
+  fake.resolveScope();
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "96.2%");
+  assert.equal(hub.read(WS).rate, 0.962);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+  await advance(t, 10_000);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc" && !call.refresh).length, 1);
+});
+
+test("a failed startup scope read leaves the settings stream as the only source", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.failScope();
+  await advance(t, 10_000);
+  assert.equal(fake.pills.size, 0);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+
+  // A later settings event still works.
+  fake.enable();
+  fake.emitSnapshot([agent("a")]);
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+});
+
+test("the startup scope read reports a disabled or out-of-allowlist setting", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  fake.resolveScope({ enabled: false, workspaceIds: [] });
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "—");
+  assert.match(fake.pills.get("a").title, /累计统计已关闭/);
+  await advance(t, 10_000);
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("a later settings event still owns the scope after the startup read", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  fake.resolveScope();
+  // The reply adopts scope in a microtask; its routine timer starts after that.
+  await settle();
+  await advance(t, 10_000);
+  assert.equal(fake.pending.length, 1);
+  fake.pending.shift().resolve(reply(0.3, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "30.0%");
+
+  // The real settings stream then changes the allowlist away from this
+  // workspace. Its generation clears the accumulated reading as before.
+  fake.enable({ workspaceIds: ["wks_elsewhere"] });
+  assert.equal(fake.pills.get("a").label, "—");
+  assert.match(fake.pills.get("a").title, /不在本机累计名单/);
 });
