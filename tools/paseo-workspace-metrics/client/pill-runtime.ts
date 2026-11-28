@@ -484,6 +484,13 @@ export function startPillRuntime(
   let scopeInflight = false;
   /** The settings stream closed and its scope is only a placeholder. */
   let scopeLost = false;
+  /**
+   * The shared revision whose panel-published scope was already adopted. A
+   * panel event bumps the revision exactly once, so this both adopts every new
+   * panel event and keeps an unrelated notification (a surface claiming a
+   * workspace, a refresh bump) from re-applying the same scope.
+   */
+  let adoptedPanelRevision = -1;
   /** Workspaces whose last composer pill unmounted since the last routine pass. */
   let ownedWorkspaces = new Set<string>();
 
@@ -498,6 +505,10 @@ export function startPillRuntime(
   const takeInitialScope = (event: WorkspaceScope) => {
     scope = event;
     scopeLost = false;
+    // A first scope a panel published was already applied by the panel (its
+    // reading may be in the hub, or in flight): adopting it here is not a
+    // settings change, so it must not be re-applied later as one.
+    if (shared.scopeSource() === "panel") adoptedPanelRevision = shared.revision();
     shared.setScope(event, "live");
     reconcile();
     scheduleRoutine();
@@ -556,10 +567,22 @@ export function startPillRuntime(
     });
   };
 
-  /** One settings generation: every surface read of it is voided and re-issued. */
-  const applyScope = (event: WorkspaceScope) => {
+  /**
+   * One settings generation: every surface read of it is voided and re-issued.
+   *
+   * `fresh` publishes this event as the settings-stream owner would: it bumps
+   * the shared revision and moves every surface's key. A panel's event was
+   * already published by the panel, which owns that generation, so it is
+   * adopted with `fresh: false`: the runtime clears and re-reads under it, but
+   * the same settings event does not re-key every surface a second time.
+   */
+  const applyScope = (event: WorkspaceScope, fresh = true) => {
     generation += 1;
     scope = event;
+    // Clear the placeholder marker before publishing: the publish notifies the
+    // shared subscription synchronously, and this event is now the real scope,
+    // so it must not be adopted a second time from inside its own notification.
+    scopeLost = false;
     inflight.clear();
     queued.clear();
     // A settings generation change drops what the old scope showed. This must
@@ -567,11 +590,11 @@ export function startPillRuntime(
     // synchronously (a surface can start its read for the new key right away),
     // and clearing afterwards would void that new generation's first reply.
     hub.clearAll();
-    // This runtime owns the settings stream, so it is the only publisher that
-    // starts a fresh shared read. An open panel's copy of the same event only
-    // publishes a scope (and usually matches what is already in force), so one
-    // settings change is one new key and one request.
-    shared.setScope(event, "live", true);
+    // While this stream delivers, the runtime owns the settings generation and
+    // bumps the shared revision once per event; the panel's copy is skipped. A
+    // panel-owned event is adopted below with `fresh: false` instead. Either
+    // way one settings change is one new key and one request.
+    shared.setScope(event, "live", fresh);
     lastRequest.clear();
     clearRoutine();
     clearFollowUps();
@@ -586,15 +609,30 @@ export function startPillRuntime(
       next(event) {
         if (disposed) return;
         settingsCloses = 0;
+        // This stream is live again: it owns the scope over a panel's copy.
+        shared.setRuntimeStreamLive(true);
         // The stream is delivering again, so its own retry chain is the only
         // one needed; a pending direct read stops here.
         cancelScopeRead();
         scopeAttempts = 0;
+        // A panel already established exactly this settings while this stream
+        // was down, and the runtime adopted it. Reopening the stream confirms
+        // the same read identity: it must not void the label or re-key the
+        // shared read. Any other event is a real settings change.
+        if (
+          scope !== null &&
+          !scopeLost &&
+          shared.scopeSource() === "panel" &&
+          scopeQueryKey(scope) === scopeQueryKey(event)
+        ) {
+          return;
+        }
         scopeLost = false;
         applyScope(event);
       },
       closed() {
         if (disposed) return;
+        shared.setRuntimeStreamLive(false);
         generation += 1;
         scope = EMPTY_SCOPE;
         shared.setScope(EMPTY_SCOPE, "failed");
@@ -624,9 +662,24 @@ export function startPillRuntime(
   // runtime's first scope; later settings events still take the change path.
   const unsubscribeShared = shared.subscribe(() => {
     if (disposed) return;
+    const event = shared.scope();
     if (scope === null) {
-      const event = shared.scope();
       if (event) takeInitialScope(event);
+      return;
+    }
+    // A live scope published by a panel's own stream (this runtime's stream is
+    // down) is adopted like a settings event. The source mark is what keeps a
+    // runtime publish from being adopted by its own notification; and adopting
+    // every panel event, not only the first, keeps a later change from being
+    // masked by an earlier one.
+    const panelOwns = event && shared.scopeStatus() === "live" && shared.scopeSource() === "panel";
+    if (panelOwns && shared.revision() !== adoptedPanelRevision) {
+      adoptedPanelRevision = shared.revision();
+      scopeAttempts = 0;
+      cancelScopeRead();
+      // The panel already published this event; adopting it must not bump the
+      // shared revision and start a second read of the same settings change.
+      applyScope(event, false);
       return;
     }
     // Ownership is per workspace. When the last composer pill of a workspace

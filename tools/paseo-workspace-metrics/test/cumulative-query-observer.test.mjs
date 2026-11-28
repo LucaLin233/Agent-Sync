@@ -152,3 +152,134 @@ test("a retry of a failed read bypasses the server cache and stays on this works
   assert.equal(cacheKeys[0][0], "workspace-metrics-cumulative");
   assert.equal(cacheKeys[0][2], WS, "and it belongs to the mounted workspace only");
 });
+
+test("a closed runtime stream no longer masks the popover's own settings event", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
+  const { resolveCumulativeScope, cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
+
+  const shared = createSharedStore();
+  // The runtime's settings subscription closed and published its placeholder.
+  const placeholder = {
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: false, error: "设置订阅已关闭",
+  };
+  shared.setScope(placeholder, "failed");
+
+  // The panel's own subscription then delivers usable settings, which is what
+  // the user reaches by simply opening the popover (no other action).
+  const panelEvent = { ...scope };
+  publishPanelScope(shared, panelEvent);
+
+  const before = resolveCumulativeScope(shared.scope(), shared.scopeStatus(), panelEvent);
+  assert.equal(cumulativeReadEnabled(before, WS), true,
+    "the popover's event is usable while the runtime stream is down");
+  // The old rule (take the shared scope unconditionally) is exactly what broke
+  // it: the failed placeholder would have disabled the popover's read.
+  assert.equal(cumulativeReadEnabled(placeholder, WS), false,
+    "the failed placeholder alone gates the read off");
+
+  let calls = 0;
+  const hub = createCumulativeHub();
+  const { observer, stop } = mount({
+    hostId: HOST,
+    workspaceId: WS,
+    agentIds: ["a"],
+    enabled: cumulativeReadEnabled(before, WS),
+    scopeKey: scopeQueryKey(before),
+    settingsRevision: shared.revision(),
+    workspaceRevision: shared.workspaceRevision(WS),
+    hub,
+    run: async () => { calls += 1; return reply(0.976); },
+  });
+  t.after(stop);
+  await flush();
+  assert.equal(calls, 1, "opening the popover still issues the real read");
+  assert.equal(observer.getCurrentResult().data.rate, 0.976);
+  assert.deepEqual(hub.read(WS), { rate: 0.976, error: null },
+    "and the composer pill shows it too");
+});
+
+test("a live shared scope still wins over an older local panel event", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
+  const { resolveCumulativeScope } = await import("../client/use-cumulative.ts");
+
+  const shared = createSharedStore();
+  const live = { ...scope };
+  // The runtime's own stream delivered this scope: its event owns the scope.
+  shared.setRuntimeStreamLive(true);
+  shared.setScope(live, "live", true);
+  // A stale local copy (the panel's previous event) must not bypass it.
+  const stale = { ...scope, enabled: false };
+  assert.equal(resolveCumulativeScope(shared.scope(), shared.scopeStatus(), stale), live);
+
+  // And a duplicate panel event while shared is live does not re-key the read.
+  const revision = shared.revision();
+  publishPanelScope(shared, { ...scope, workspaceIds: [WS, "wks_two"] });
+  assert.equal(shared.revision(), revision, "no second key for a duplicate event");
+  assert.deepEqual(shared.scope()?.workspaceIds, [WS], "the runtime's live scope is retained");
+});
+
+test("opening the panel after the pill read shares its key instead of reading twice", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
+  const { resolveCumulativeScope, cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
+
+  const shared = createSharedStore();
+  const hub = createCumulativeHub();
+  // The runtime's settings stream closed and left its placeholder.
+  shared.setScope({
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: false, error: "设置订阅已关闭",
+  }, "failed");
+
+  // The pill mounted first, with no scope: nothing to read yet.
+  let calls = 0;
+  const options = () => {
+    const scope = resolveCumulativeScope(shared.scope(), shared.scopeStatus(), null);
+    return {
+      hostId: HOST,
+      workspaceId: WS,
+      agentIds: ["a"],
+      enabled: cumulativeReadEnabled(scope, WS),
+      scopeKey: scopeQueryKey(scope),
+      settingsRevision: shared.revision(),
+      workspaceRevision: shared.workspaceRevision(WS),
+      hub,
+      run: async () => { calls += 1; return reply(0.976); },
+    };
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const pill = new QueryObserver(client, cumulativeQueryOptions(options()));
+  const seen = [];
+  pill.subscribe((result) => seen.push(result));
+  t.after(() => { pill.destroy(); client.clear(); });
+  await flush();
+  assert.equal(calls, 0, "a failed placeholder gates the pill off");
+
+  // The panel's own stream delivers the real settings while the pill is
+  // mounted. One generation, and both surfaces now share that key.
+  publishPanelScope(shared, { ...scope });
+  pill.setOptions(cumulativeQueryOptions(options()));
+  t.mock.timers.tick(0);
+  await flush();
+  assert.equal(calls, 1, "the pill reads once for the panel's settings");
+
+  const popover = new QueryObserver(client, cumulativeQueryOptions(options()));
+  popover.subscribe(() => {});
+  t.after(() => popover.destroy());
+  t.mock.timers.tick(0);
+  await flush();
+  assert.equal(calls, 1, "opening the popover observes the same cached query");
+  const popoverData = popover.getCurrentResult().data;
+  assert.equal(popoverData.rate, 0.976, "the popover already holds the pill's reading");
+  assert.deepEqual(seen.at(-1).data, popoverData, "both surfaces see the same cached reply");
+  const cumulativeEntries = client.getQueryCache().getAll()
+    .filter((query) => query.queryKey[0] === "workspace-metrics-cumulative");
+  // The gated mount left one never-fetched placeholder key; the real reading is
+  // one entry both surfaces observe — not one per surface.
+  assert.equal(cumulativeEntries.filter((query) => query.state.data !== undefined).length, 1,
+    "one fetched cumulative cache entry for the pill and the popover");
+  assert.equal(cumulativeEntries.filter((query) => query.state.status === "error").length, 0);
+});

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createCumulativeHub } from "../client/cumulative-hub.ts";
-import { createSharedStore } from "../client/shared-store.ts";
+import { createSharedStore, publishPanelScope } from "../client/shared-store.ts";
 import {
   cumulativeQueryKey,
   cumulativeReadEnabled,
   readCumulativeIntoHub,
+  resolveCumulativeScope,
 } from "../client/use-cumulative.ts";
 import { scopeQueryKey } from "../shared/scope.ts";
 
@@ -201,4 +202,51 @@ test("clearing the old generation before publishing the scope keeps the new read
   assert.equal(reversed.old, false);
   assert.equal(reversed.fresh, false, "publishing before the clear would void the new reply");
   assert.equal(reversed.shown, undefined);
+});
+
+test("a failed shared scope does not mask the panel's own settings event", () => {
+  const shared = createSharedStore();
+  const placeholder = {
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: false, error: "设置订阅已关闭",
+  };
+  shared.setScope(placeholder, "failed");
+  const panelEvent = wksScope();
+
+  // A failed scope is a placeholder, not a decision: the panel's own event is
+  // what the cumulative read must use while the shared scope is not live.
+  assert.equal(resolveCumulativeScope(shared.scope(), "failed", panelEvent), panelEvent);
+  assert.equal(resolveCumulativeScope(shared.scope(), "pending", panelEvent), panelEvent);
+  // A live shared scope wins, so an older local copy cannot bypass the
+  // runtime's current settings.
+  assert.equal(resolveCumulativeScope(panelEvent, "live", wksScope({ enabled: false })), panelEvent);
+  // Without any local event the placeholder still gates the read off.
+  assert.equal(cumulativeReadEnabled(resolveCumulativeScope(shared.scope(), "failed", null), WS), false);
+});
+
+test("the panel's event replaces a failed scope in the shared store, a live one is left to the runtime", () => {
+  const shared = createSharedStore();
+  const failed = {
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: false, error: "设置订阅已关闭",
+  };
+  shared.setScope(failed, "failed");
+  publishPanelScope(shared, wksScope());
+  assert.equal(shared.scopeStatus(), "live");
+  assert.equal(cumulativeReadEnabled(shared.scope(), WS), true);
+
+  // The runtime's stream is down, so a later panel event still flows through.
+  assert.equal(shared.runtimeStreamLive(), false);
+  publishPanelScope(shared, wksScope({ workspaceIds: [WS, "wks_three"] }));
+  assert.deepEqual(shared.scope()?.workspaceIds, [WS, "wks_three"]);
+
+  // Once the runtime's own stream delivers, the panel's copy is a duplicate of
+  // the same event and must not re-key the read a second time.
+  shared.setRuntimeStreamLive(true);
+  shared.setScope(wksScope(), "live");
+  const revision = shared.revision();
+  const scope = shared.scope();
+  publishPanelScope(shared, wksScope({ workspaceIds: [WS, "wks_four"] }));
+  assert.equal(shared.revision(), revision);
+  assert.equal(shared.scope(), scope, "the runtime's live scope is retained");
 });

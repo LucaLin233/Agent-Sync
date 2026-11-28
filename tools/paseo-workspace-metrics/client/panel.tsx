@@ -23,9 +23,15 @@ import {
   weightedTurnSpeed,
 } from "../shared/metrics";
 import { scopeQueryKey, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
-import { cumulativeReadEnabled, useCumulativeUsage } from "./use-cumulative";
+import { cumulativeReadEnabled, resolveCumulativeScope, useCumulativeUsage } from "./use-cumulative";
 import { useCumulativeHub } from "./cumulative-hub-context";
-import { useSharedRevision, useSharedScope, useWorkspaceRevision } from "./shared-store";
+import {
+  publishPanelScope,
+  useSharedRevision,
+  useSharedScope,
+  useSharedScopeStatus,
+  useWorkspaceRevision,
+} from "./shared-store";
 import { useSharedStore } from "./shared-store-context";
 import { useLiveTurn } from "./use-turn";
 import { useTurnOutput } from "./use-turn-output";
@@ -434,14 +440,16 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   // The panel's own settings stream is what its turn details and gating follow.
   const shared = useSharedStore();
   const sharedScope = useSharedScope(shared);
+  const sharedScopeStatus = useSharedScopeStatus(shared);
   const [localScope, setScope] = useState<WorkspaceScope | null>(null);
   const scope: WorkspaceScope | null = localScope ?? sharedScope;
-  // The cumulative key is derived from the shared scope whenever one exists:
-  // the runtime publishes scope and revision in one commit per settings event,
-  // so the panel cannot first key on its own copy of an event and then move
-  // again when the runtime publishes it — that would be two requests for one
-  // change. Its own scope is only the fallback when nothing else resolved one.
-  const cumulativeScope: WorkspaceScope | null = sharedScope ?? localScope;
+  // A live shared scope is the runtime's current settings and wins, so an older
+  // local copy cannot bypass it. While the shared scope is only pending or has
+  // failed (its subscription closed), it is a placeholder: this panel's own
+  // event is the real settings — both for its query and for the pill — and
+  // must not be masked by it.
+  const cumulativeScope: WorkspaceScope | null =
+    resolveCumulativeScope(sharedScope, sharedScopeStatus, localScope);
   const [scopeRevision, setScopeRevision] = useState(0);
   // The manual refresh belongs to the shared store, so it bumps the one key the
   // composer pill also observes instead of only this panel's query.
@@ -461,6 +469,10 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   const scopeSubscription = useSubscription(workspaceSettingsSubscription, { attempt: scopeAttempt }, (event) => {
     scopeRetry.opened();
     setScope(event);
+    // While the shared scope is pending or its stream closed, hand this event
+    // to the runtime as well. The runtime then has a scope even when its own
+    // subscription never delivers, and the composer pill keys on the same one.
+    publishPanelScope(shared, event);
     // Every settings event starts a fresh read. The per-agent turn keys carry
     // the local revision, so they are dropped. The cumulative key belongs to
     // the shared revision the runtime bumps on the same event, so the pill and

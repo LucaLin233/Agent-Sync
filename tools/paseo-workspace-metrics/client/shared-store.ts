@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { WorkspaceScope } from "../shared/scope.ts";
+import { scopeQueryKey, type WorkspaceScope } from "../shared/scope.ts";
 
 /**
  * The small amount of state the bundle runtime and the host-rendered composer
@@ -14,6 +14,12 @@ import type { WorkspaceScope } from "../shared/scope.ts";
  *   a second RPC, so the read never depends on a timer firing.
  */
 export type SharedScopeStatus = "pending" | "live" | "failed";
+/**
+ * Who published the current scope. The runtime's own settings stream (and its
+ * direct scope read) are `runtime`; an open panel's copy of the same event is
+ * `panel`. It only decides who may adopt an event, never which one wins.
+ */
+export type SharedScopeSource = "runtime" | "panel";
 
 export interface SharedStore {
   scope(): WorkspaceScope | null;
@@ -25,7 +31,22 @@ export interface SharedStore {
    * publisher (another subscription's copy of the same event, or a surface's
    * first scope) never bumps, so one settings change stays one key.
    */
-  setScope(scope: WorkspaceScope | null, status: SharedScopeStatus, fresh?: boolean): void;
+  setScope(
+    scope: WorkspaceScope | null,
+    status: SharedScopeStatus,
+    fresh?: boolean,
+    source?: SharedScopeSource,
+  ): void;
+  /** Who published the current scope; a runtime's own publish is not adopted. */
+  scopeSource(): SharedScopeSource;
+  /**
+   * Whether the runtime's own settings subscription currently has a delivered
+   * event. While it does, that stream owns the scope and a panel's copy of the
+   * same event must not publish a second one. While it does not (no first value
+   * yet, or closed), a panel's event is the only real settings and may.
+   */
+  runtimeStreamLive(): boolean;
+  setRuntimeStreamLive(live: boolean): void;
   /** The settings generation, bumped once per event that changed the scope. */
   revision(): number;
   /** One workspace's refresh revision; other workspaces keep their own key. */
@@ -51,6 +72,8 @@ export function createSharedStore(): SharedStore {
   let scope: WorkspaceScope | null = null;
   let status: SharedScopeStatus = "pending";
   let revision = 0;
+  let runtimeLive = false;
+  let source: SharedScopeSource = "runtime";
   // One refresh revision per workspace: a refresh or a finished turn in one
   // workspace moves that workspace's key and nothing else's.
   const workspaceRevisions = new Map<string, number>();
@@ -63,7 +86,14 @@ export function createSharedStore(): SharedStore {
   return {
     scope: () => scope,
     scopeStatus: () => status,
-    setScope(next, nextStatus, fresh = false) {
+    runtimeStreamLive: () => runtimeLive,
+    setRuntimeStreamLive(live) {
+      if (runtimeLive === live) return;
+      runtimeLive = live;
+      notify();
+    },
+    scopeSource: () => source,
+    setScope(next, nextStatus, fresh = false, nextSource = "runtime") {
       // A duplicate copy of a settings event is a no-op; the one owner's
       // `fresh` call still advances the revision so an identical projection
       // gets its fresh read, and it does it in the same commit as the scope.
@@ -74,6 +104,7 @@ export function createSharedStore(): SharedStore {
       // observes the new scope under the old revision.
       scope = next;
       status = nextStatus;
+      source = nextSource;
       if (fresh) {
         revision += 1;
         bypassAt.clear();
@@ -114,6 +145,36 @@ export function createSharedStore(): SharedStore {
       };
     },
   };
+}
+
+/**
+ * A settings event an open panel received on its own stream.
+ *
+ * The runtime and the panel each subscribe; either one can be the first, or
+ * the only, subscriber that survives. While the runtime's own stream delivers,
+ * it owns the scope: the panel's copy is the same event, and publishing it
+ * would move the key twice. Otherwise (no first value yet, or the stream
+ * closed) the panel's event is the real settings, and it is published as the
+ * one owner of this generation — a fresh revision — so the runtime adopts it
+ * without publishing again, and every surface still moves key exactly once.
+ */
+export function publishPanelScope(store: SharedStore, event: WorkspaceScope): void {
+  if (store.runtimeStreamLive()) return;
+  // A live scope with the same read identity is already in force (a reconnected
+  // panel delivering its previous event, or a scope the runtime resolved
+  // itself). Re-keying then would start a read nobody's settings changed for.
+  // A pending or failed placeholder is not a decision even when it happens to
+  // look identical (a closed stream's empty scope), so the panel's real event
+  // still replaces it and marks the scope live.
+  const current = store.scope();
+  if (
+    store.scopeStatus() === "live" &&
+    current !== null &&
+    scopeQueryKey(current) === scopeQueryKey(event)
+  ) {
+    return;
+  }
+  store.setScope(event, "live", true, "panel");
 }
 
 /** The scope the runtime learned; `null` until it has one. */

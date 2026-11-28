@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { startPillRuntime } from "../client/pill-runtime.ts";
 import { createCumulativeHub } from "../client/cumulative-hub.ts";
-import { createSharedStore } from "../client/shared-store.ts";
+import { createSharedStore, publishPanelScope } from "../client/shared-store.ts";
 
 const WS = "wks_shared_query";
 const scope = (patch = {}) => ({
@@ -387,4 +387,137 @@ test("unmounting every pill of one workspace resumes only that workspace's runti
   await advance(t, 10_000);
   assert.deepEqual(fake.calls.map(({ workspaceId }) => workspaceId), [WS],
     "only the workspace that lost its last pill is read again");
+});
+
+test("a scope the panel's own stream delivers after a closed stream is adopted by the runtime", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  fake.directory([agent("a")]);
+  fake.settings(scope());
+  assert.equal(fake.pills.get("a").label, "…");
+
+  // The runtime's own settings subscription dies and publishes a placeholder.
+  fake.closeSettings();
+  assert.equal(shared.scopeStatus(), "failed");
+  assert.equal(fake.pills.get("a").label, "—");
+
+  // The user opens the panel; its own stream delivers a usable scope. Its
+  // generation is the one fresh revision, even though the runtime adopts it.
+  const before = shared.revision();
+  publishPanelScope(shared, scope());
+  assert.equal(shared.scopeStatus(), "live", "the panel's event is not masked by the placeholder");
+  assert.equal(shared.revision(), before + 1, "the panel's event is one settings generation, not two");
+  await advance(t, 10_000);
+  assert.deepEqual(fake.calls.map(({ type, ...input }) => input),
+    [{ workspaceId: WS, agentIds: ["a"], refresh: false }],
+    "the runtime adopts the panel's scope and starts its own read");
+  fake.pending.shift().resolve(reply(0.976));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+  assert.equal(shared.revision(), before + 1, "adopting the panel's event does not re-key the shared read");
+
+  // The panel's stream keeps sending the same projection: nothing is re-keyed.
+  publishPanelScope(shared, scope());
+  await advance(t, 10_000);
+  assert.equal(shared.revision(), before + 1);
+  assert.equal(fake.calls.length, 1, "a duplicate settings event does not read again");
+  assert.equal(fake.pills.get("a").label, "97.6%", "and the reading stays on the label");
+});
+
+test("a notifying shared change does not re-apply the panel's scope and clear the label", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  fake.directory([agent("a")]);
+  fake.settings(scope());
+  fake.closeSettings();
+  publishPanelScope(shared, scope());
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.976));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+
+  // A refresh of this workspace moves the shared key without changing the
+  // scope. Its notification must not be mistaken for a new panel event: that
+  // used to clear the hub and drop the label back to "…" until a read landed.
+  shared.bumpWorkspace(WS, true);
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%", "the reading survives the refresh bump");
+  assert.equal(fake.calls.length, 1, "and only the surfaces' shared query owns that new key");
+});
+
+test("a panel event that disables or excludes the workspace is adopted and reads nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  for (const patch of [{ enabled: false }, { workspaceIds: ["wks_elsewhere"] }]) {
+    const fake = fakeClient();
+    const shared = createSharedStore();
+    const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+    fake.directory([agent("a")]);
+    fake.settings(scope());
+    fake.closeSettings();
+    assert.equal(shared.scopeStatus(), "failed");
+
+    publishPanelScope(shared, scope(patch));
+    await advance(t, 60_000);
+    assert.equal(fake.pills.get("a").label, "—");
+    assert.equal(fake.calls.length, 0, "an explicit off/out-of-scope event still reads nothing");
+    runtime.dispose();
+  }
+});
+
+test("the reopened runtime stream keeps the label the panel's event already filled", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  fake.directory([agent("a")]);
+  fake.settings(scope());
+  fake.closeSettings();
+  publishPanelScope(shared, scope());
+  const revision = shared.revision();
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.976));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+
+  // The runtime's stream reconnects and repeats the same settings. That
+  // confirmation is not a new generation: the label stays and no second read
+  // starts behind the user's back.
+  fake.settings(scope());
+  await advance(t, 10_000);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+  assert.equal(shared.revision(), revision, "the same settings is not re-keyed");
+  assert.equal(fake.calls.length, 1, "and no duplicate cumulative read is issued");
+});
+
+test("two panel events after a closed runtime stream both reach the label", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const shared = createSharedStore();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub(), shared);
+  t.after(() => runtime.dispose());
+  fake.directory([agent("a")]);
+  fake.settings(scope());
+  fake.closeSettings();
+
+  publishPanelScope(shared, scope());
+  await advance(t, 10_000);
+  fake.pending.shift().resolve(reply(0.4));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "40.0%");
+
+  // The user changes settings; the panel's stream is now the only one. That
+  // second event must not be swallowed by the live scope the first one left.
+  publishPanelScope(shared, scope({ workspaceIds: [WS, "wks_two"] }));
+  await advance(t, 10_000);
+  assert.equal(fake.calls.length, 2, "the second panel event starts its own read");
+  fake.pending.shift().resolve(reply(0.976));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
 });
