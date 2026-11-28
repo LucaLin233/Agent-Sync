@@ -909,3 +909,140 @@ test("a later settings event still owns the scope after the startup read", async
   assert.equal(fake.pills.get("a").label, "—");
   assert.match(fake.pills.get("a").title, /不在本机累计名单/);
 });
+
+test("a pill surface's own scope read feeds the one runtime and starts its read", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  // The runtime's own startup read and settings stream both stay silent, as on
+  // the cold start where only the composer pill is mounted.
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  assert.equal(fake.pills.get("a").label, "…");
+  assert.equal(fake.calls.filter((call) => call.type === "rpc").length, 0);
+
+  assert.equal(runtime.adoptScope({
+    enabled: true, workspaceIds: [WS], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  }), true, "the first resolution is adopted");
+  await advance(t, 10_000);
+  assert.deepEqual(fake.pending.map((entry) => entry.input),
+    [{ workspaceId: WS, agentIds: ["a"], refresh: false }]);
+  fake.pending.shift().resolve(reply(0.976, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+});
+
+test("a second surface scope cannot displace the adopted one, a later settings event still owns changes", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  assert.equal(runtime.adoptScope({
+    enabled: true, workspaceIds: [WS], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  }), true);
+  // Another pill mounting does not clear and re-read.
+  assert.equal(runtime.adoptScope({
+    enabled: true, workspaceIds: ["wks_elsewhere"], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  }), false);
+  fake.enable({ workspaceIds: ["wks_elsewhere"] });
+  assert.equal(fake.pills.get("a").label, "—", "the settings stream still owns later changes");
+  assert.match(fake.pills.get("a").title, /不在本机累计名单/);
+});
+
+test("an adopted disabled or out-of-scope setting reads no cumulative data", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const disabled = fakeClient();
+  const off = startPillRuntime(disabled.deps, createCumulativeHub());
+  t.after(() => off.dispose());
+  disabled.emitSnapshot([agent("a")]);
+  off.adoptScope({
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  });
+  await advance(t, 60_000);
+  assert.equal(disabled.calls.filter((call) => call.type === "rpc").length, 0);
+  assert.equal(disabled.pills.get("a").label, "—");
+
+  const outside = fakeClient();
+  const scoped = startPillRuntime(outside.deps, createCumulativeHub());
+  t.after(() => scoped.dispose());
+  outside.emitSnapshot([agent("a")]);
+  scoped.adoptScope({
+    enabled: true, workspaceIds: ["wks_elsewhere"], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  });
+  await advance(t, 60_000);
+  assert.equal(outside.calls.filter((call) => call.type === "rpc").length, 0);
+});
+
+test("after an adopted scope, a member change voids the older reply and reads all members", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  runtime.adoptScope({
+    enabled: true, workspaceIds: [WS], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  });
+  await advance(t, 10_000);
+  const stale = fake.pending.shift();
+  assert.deepEqual(stale.input.agentIds, ["a"]);
+
+  fake.emitUpsert(agent("b"));
+  await advance(t, 10_000);
+  stale.resolve(reply(0.1, 100, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "…", "the older member set's reply cannot land");
+
+  const fresh = fake.pending.shift();
+  assert.deepEqual(fresh.input.agentIds, ["a", "b"]);
+  fresh.resolve(reply(0.7, 700, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "70.0%");
+});
+
+test("an adopted scope is ignored after dispose", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const runtime = startPillRuntime(fake.deps, createCumulativeHub());
+  runtime.dispose();
+  assert.equal(runtime.adoptScope({
+    enabled: true, workspaceIds: [WS], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  }), false);
+});
+
+test("a late surface scope keeps the reading the panel already published", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const fake = fakeClient();
+  const hub = createCumulativeHub();
+  const runtime = startPillRuntime(fake.deps, hub);
+  t.after(() => runtime.dispose());
+  fake.emitSnapshot([agent("a")]);
+  assert.equal(fake.pills.get("a").label, "…");
+
+  // The user opens the popover first: the panel's own read publishes 97.6%.
+  hub.publish(WS, hub.begin(WS), { rate: 0.976, error: null });
+  assert.equal(fake.pills.get("a").label, "97.6%");
+
+  // The pill surface's scope read lands later. It must not clear that reading.
+  assert.equal(runtime.adoptScope({
+    enabled: true, workspaceIds: [WS], allWorkspaces: false,
+    codexHomeConfigured: true, error: null,
+  }), true);
+  assert.equal(fake.pills.get("a").label, "97.6%");
+  assert.deepEqual(hub.read(WS), { rate: 0.976, error: null });
+
+  // Its routine read still starts from the current members and replaces it.
+  await advance(t, 10_000);
+  assert.deepEqual(fake.pending.map((entry) => entry.input),
+    [{ workspaceId: WS, agentIds: ["a"], refresh: false }]);
+  fake.pending.shift().resolve(reply(0.962, null, 10_000));
+  await advance(t, 0);
+  assert.equal(fake.pills.get("a").label, "96.2%");
+});
