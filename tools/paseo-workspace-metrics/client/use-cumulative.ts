@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { cumulativeUsageRpc, type CumulativeUsage } from "../shared/cumulative.ts";
 import { workspaceInScope, type WorkspaceScope } from "../shared/scope.ts";
 import type { CumulativeHub } from "./cumulative-hub.ts";
-import type { SharedScopeStatus } from "./shared-store.ts";
 
 /**
  * The key one cumulative read is cached under. The composer pill and the panel
@@ -28,23 +27,6 @@ export function cumulativeQueryKey(
     settingsRevision,
     workspaceRevision,
   ] as const;
-}
-
-/**
- * Which scope the cumulative read must use. A live shared scope is the
- * runtime's current settings and always wins, so a stale local copy cannot
- * bypass it. A pending or failed shared scope is only a placeholder — the
- * runtime's subscription has no answer yet, or it closed — so a settings event
- * the panel received itself is the better information and must not be hidden
- * behind it. With neither, the read stays gated off.
- */
-export function resolveCumulativeScope(
-  sharedScope: WorkspaceScope | null,
-  status: SharedScopeStatus,
-  localScope: WorkspaceScope | null,
-): WorkspaceScope | null {
-  if (status === "live" && sharedScope !== null) return sharedScope;
-  return localScope ?? sharedScope;
 }
 
 /**

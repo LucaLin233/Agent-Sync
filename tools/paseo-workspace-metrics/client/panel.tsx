@@ -23,13 +23,12 @@ import {
   weightedTurnSpeed,
 } from "../shared/metrics";
 import { scopeQueryKey, workspaceSettingsSubscription, type WorkspaceScope } from "../shared/scope";
-import { cumulativeReadEnabled, resolveCumulativeScope, useCumulativeUsage } from "./use-cumulative";
+import { cumulativeReadEnabled, useCumulativeUsage } from "./use-cumulative";
 import { useCumulativeHub } from "./cumulative-hub-context";
 import {
   publishPanelScope,
   useSharedRevision,
   useSharedScope,
-  useSharedScopeStatus,
   useWorkspaceRevision,
 } from "./shared-store";
 import { useSharedStore } from "./shared-store-context";
@@ -440,16 +439,13 @@ function WorkspaceMetrics({ workspaceId, host, layout, theme, sheet = false }: W
   // The panel's own settings stream is what its turn details and gating follow.
   const shared = useSharedStore();
   const sharedScope = useSharedScope(shared);
-  const sharedScopeStatus = useSharedScopeStatus(shared);
   const [localScope, setScope] = useState<WorkspaceScope | null>(null);
   const scope: WorkspaceScope | null = localScope ?? sharedScope;
-  // A live shared scope is the runtime's current settings and wins, so an older
-  // local copy cannot bypass it. While the shared scope is only pending or has
-  // failed (its subscription closed), it is a placeholder: this panel's own
-  // event is the real settings — both for its query and for the pill — and
-  // must not be masked by it.
-  const cumulativeScope: WorkspaceScope | null =
-    resolveCumulativeScope(sharedScope, sharedScopeStatus, localScope);
+  // The cumulative read always uses the shared scope, the same one the
+  // composer pill uses. An event from this panel's own stream is handed to the
+  // runtime below, so the shared scope is this panel's event rather than a
+  // failed placeholder; there is no separate local fallback to keep in sync.
+  const cumulativeScope: WorkspaceScope | null = sharedScope;
   const [scopeRevision, setScopeRevision] = useState(0);
   // The manual refresh belongs to the shared store, so it bumps the one key the
   // composer pill also observes instead of only this panel's query.

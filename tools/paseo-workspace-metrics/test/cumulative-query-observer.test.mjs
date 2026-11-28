@@ -156,75 +156,86 @@ test("a retry of a failed read bypasses the server cache and stays on this works
 test("a closed runtime stream no longer masks the popover's own settings event", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
-  const { resolveCumulativeScope, cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
+  const { cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
 
   const shared = createSharedStore();
-  // The runtime's settings subscription closed and published its placeholder.
   const placeholder = {
     enabled: false, workspaceIds: [], allWorkspaces: false,
     codexHomeConfigured: false, error: "设置订阅已关闭",
   };
   shared.setScope(placeholder, "failed");
 
-  // The panel's own subscription then delivers usable settings, which is what
-  // the user reaches by simply opening the popover (no other action).
-  const panelEvent = { ...scope };
-  publishPanelScope(shared, panelEvent);
-
-  const before = resolveCumulativeScope(shared.scope(), shared.scopeStatus(), panelEvent);
-  assert.equal(cumulativeReadEnabled(before, WS), true,
-    "the popover's event is usable while the runtime stream is down");
-  // The old rule (take the shared scope unconditionally) is exactly what broke
-  // it: the failed placeholder would have disabled the popover's read.
-  assert.equal(cumulativeReadEnabled(placeholder, WS), false,
-    "the failed placeholder alone gates the read off");
-
   let calls = 0;
   const hub = createCumulativeHub();
-  const { observer, stop } = mount({
+  const read = (scope) => mount({
     hostId: HOST,
     workspaceId: WS,
     agentIds: ["a"],
-    enabled: cumulativeReadEnabled(before, WS),
-    scopeKey: scopeQueryKey(before),
+    enabled: cumulativeReadEnabled(scope, WS),
+    scopeKey: scopeQueryKey(scope),
     settingsRevision: shared.revision(),
     workspaceRevision: shared.workspaceRevision(WS),
     hub,
     run: async () => { calls += 1; return reply(0.976); },
   });
-  t.after(stop);
+
+  // With only the runtime's failed placeholder, the popover reads nothing.
+  const gated = read(shared.scope());
+  t.after(gated.stop);
+  await flush();
+  assert.equal(calls, 0, "a failed placeholder alone gates the read off");
+
+  // The panel's own subscription then delivers usable settings, which is what
+  // the user reaches by simply opening the popover (no other action). The
+  // panel hands it to the runtime, so the shared scope itself becomes usable.
+  publishPanelScope(shared, { ...scope });
+  const live = read(shared.scope());
+  t.after(live.stop);
   await flush();
   assert.equal(calls, 1, "opening the popover still issues the real read");
-  assert.equal(observer.getCurrentResult().data.rate, 0.976);
+  assert.equal(live.observer.getCurrentResult().data.rate, 0.976);
   assert.deepEqual(hub.read(WS), { rate: 0.976, error: null },
     "and the composer pill shows it too");
 });
 
-test("a live shared scope still wins over an older local panel event", async (t) => {
+test("a second close is not bridged by the panel's previous event", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
-  const { resolveCumulativeScope } = await import("../client/use-cumulative.ts");
+  const { cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
 
   const shared = createSharedStore();
-  const live = { ...scope };
-  // The runtime's own stream delivered this scope: its event owns the scope.
-  shared.setRuntimeStreamLive(true);
-  shared.setScope(live, "live", true);
-  // A stale local copy (the panel's previous event) must not bypass it.
-  const stale = { ...scope, enabled: false };
-  assert.equal(resolveCumulativeScope(shared.scope(), shared.scopeStatus(), stale), live);
+  const placeholder = {
+    enabled: false, workspaceIds: [], allWorkspaces: false,
+    codexHomeConfigured: false, error: "设置订阅已关闭",
+  };
+  shared.setScope(placeholder, "failed");
+  const panelEvent = { ...scope };
+  publishPanelScope(shared, panelEvent);
+  assert.equal(cumulativeReadEnabled(shared.scope(), WS), true,
+    "the panel's own event enables the read");
 
-  // And a duplicate panel event while shared is live does not re-key the read.
-  const revision = shared.revision();
-  publishPanelScope(shared, { ...scope, workspaceIds: [WS, "wks_two"] });
-  assert.equal(shared.revision(), revision, "no second key for a duplicate event");
-  assert.deepEqual(shared.scope()?.workspaceIds, [WS], "the runtime's live scope is retained");
+  // The runtime's stream closes again. The earlier event is history, not a
+  // live setting: the cumulative read must gate off until a new event lands,
+  // and the popover's stale copy must not be reused in its place.
+  shared.setScope(placeholder, "failed");
+  // This is exactly what the removed `localScope` fallback would have done:
+  // keep reading the old allowlist until the panel's stream speaks again.
+  assert.equal(cumulativeReadEnabled(panelEvent, WS), true,
+    "the removed fallback would have read the old allowlist");
+  assert.equal(cumulativeReadEnabled(shared.scope(), WS), false,
+    "a second close gates the read instead of reviving the old allowlist");
+  assert.equal(shared.scopeStatus(), "failed");
+
+  // A fresh event from the panel's own stream is what turns it back on.
+  publishPanelScope(shared, { ...scope });
+  assert.equal(cumulativeReadEnabled(shared.scope(), WS), true);
+  assert.equal(shared.scopeStatus(), "live");
 });
 
 test("opening the panel after the pill read shares its key instead of reading twice", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const { createSharedStore, publishPanelScope } = await import("../client/shared-store.ts");
-  const { resolveCumulativeScope, cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
+  const { cumulativeReadEnabled } = await import("../client/use-cumulative.ts");
 
   const shared = createSharedStore();
   const hub = createCumulativeHub();
@@ -237,7 +248,7 @@ test("opening the panel after the pill read shares its key instead of reading tw
   // The pill mounted first, with no scope: nothing to read yet.
   let calls = 0;
   const options = () => {
-    const scope = resolveCumulativeScope(shared.scope(), shared.scopeStatus(), null);
+    const scope = shared.scope();
     return {
       hostId: HOST,
       workspaceId: WS,
