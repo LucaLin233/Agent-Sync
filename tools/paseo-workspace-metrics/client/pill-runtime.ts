@@ -460,6 +460,20 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   let settingsCloses = 0;
 
   /**
+   * The first scope this runtime ever learns, from either startup path (its own
+   * direct read, or the composer pill surface's read). It is not a settings
+   * change: nothing was read under an earlier scope, and the panel may already
+   * hold a valid reading in the shared hub. So it only takes the scope and lets
+   * `scheduleRoutine` decide — which includes clearing when the scope is
+   * disabled or excludes this workspace — instead of resetting the hub.
+   */
+  const takeInitialScope = (event: WorkspaceScope) => {
+    scope = event;
+    reconcile();
+    scheduleRoutine();
+  };
+
+  /**
    * One direct scope read at startup. The settings stream owns the scope once
    * it produces its first event — a value or a close, both leave `scope`
    * non-null — so a reply arriving after that, or after dispose, is dropped
@@ -468,13 +482,25 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   const requestScopeRead = () => {
     deps.requestScope().then((event) => {
       if (disposed || scope !== null) return;
-      scope = event;
-      reconcile();
-      scheduleRoutine();
+      takeInitialScope(event);
     }).catch(() => {
       // Without a settings event either, the label keeps its unknown state and
       // the settings subscription stays the only source, with its own retry.
     });
+  };
+
+  /** One settings generation: every surface read of it is voided and re-issued. */
+  const applyScope = (event: WorkspaceScope) => {
+    generation += 1;
+    scope = event;
+    inflight.clear();
+    queued.clear();
+    hub.clearAll();
+    lastRequest.clear();
+    clearRoutine();
+    clearFollowUps();
+    reconcile();
+    scheduleRoutine();
   };
 
   // The host never replays a rejected or closed subscription (for example one
@@ -484,16 +510,7 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
       next(event) {
         if (disposed) return;
         settingsCloses = 0;
-        generation += 1;
-        scope = event;
-        inflight.clear();
-        queued.clear();
-        hub.clearAll();
-        lastRequest.clear();
-        clearRoutine();
-        clearFollowUps();
-        reconcile();
-        scheduleRoutine();
+        applyScope(event);
       },
       closed() {
         if (disposed) return;
@@ -519,6 +536,24 @@ export function startPillRuntime(deps: PillRuntimeDeps, hub: CumulativeHub) {
   requestScopeRead();
 
   return {
+    /**
+     * Adopts a scope read by the composer pill's own surface (its icon's `useRpc`
+     * runs against the same host-scoped client). Only the first resolution wins:
+     * the settings stream and any earlier resolution own the scope afterwards, so
+     * several pills mounting together cannot clear and re-read in a loop. `false`
+     * tells the caller to stop; the runtime's own path remains in charge.
+     */
+    adoptScope(event: WorkspaceScope): boolean {
+      if (disposed || scope !== null) return false;
+      // Same first-scope path as the runtime's own startup read: a reading the
+      // panel already published stays visible instead of being cleared.
+      takeInitialScope(event);
+      return true;
+    },
+    /** Whether this runtime already holds a scope, so a surface need not read one. */
+    hasScope(): boolean {
+      return !disposed && scope !== null;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -7,10 +7,11 @@ import { Platform } from "react-native";
 import { MetricsPanel, MetricsSheet } from "./client/panel";
 import { createCumulativeHub } from "./client/cumulative-hub";
 import { CumulativeHubContext } from "./client/cumulative-hub-context";
+import { createPillIcon } from "./client/pill-icon";
 import { startPillRuntime } from "./client/pill-runtime";
 import { WorkspaceMetricsSettings } from "./client/settings";
 import { cumulativeUsageRpc } from "./shared/cumulative";
-import { workspaceScopeRpc, workspaceSettingsSubscription } from "./shared/scope";
+import { workspaceScopeRpc, workspaceSettingsSubscription, type WorkspaceScope } from "./shared/scope";
 
 export default function contribute(client: PluginClientContext) {
   const native = Platform.OS === "ios" || Platform.OS === "android";
@@ -27,6 +28,14 @@ export default function contribute(client: PluginClientContext) {
       <MetricsSheet {...props} />
     </CumulativeHubContext.Provider>
   );
+  // The pill icon is created before the runtime that registers it. The icon only
+  // runs once mounted, which is after the runtime below exists.
+  const surface: { runtime: { adoptScope(scope: WorkspaceScope): boolean; hasScope(): boolean } | null } =
+    { runtime: null };
+  const PillIcon = createPillIcon({
+    adoptScope: (scope) => surface.runtime?.adoptScope(scope) ?? false,
+    hasScope: () => surface.runtime?.hasScope() ?? false,
+  });
   const runtime = startPillRuntime({
     addPill({ workspaceId, agentId, title, label, onPress }) {
       return client.addComposerPill({
@@ -35,7 +44,7 @@ export default function contribute(client: PluginClientContext) {
         agentId,
         button: {
           title,
-          icon: "Activity",
+          icon: PillIcon,
           label,
           behavior: native
             ? { kind: "popover", Content: SheetWithHub }
@@ -75,6 +84,7 @@ export default function contribute(client: PluginClientContext) {
       });
     },
   }, hub);
+  surface.runtime = runtime;
 
   const removePanel = client.addWorkspacePanel({
     id: "metrics",
