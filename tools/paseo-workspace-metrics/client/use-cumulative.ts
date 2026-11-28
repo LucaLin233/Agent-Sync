@@ -70,6 +70,72 @@ export async function readCumulativeIntoHub(input: {
 }
 
 /**
+ * How long an unsuccessful read of one workspace waits before trying again.
+ * A mount can race a still-settling connection: the first cumulative RPC is
+ * rejected, no member or settings change comes, and nothing else would ever
+ * re-issue it. Retrying only in the error state keeps a healthy label quiet and
+ * stops the moment a read succeeds.
+ */
+export const CUMULATIVE_ERROR_RETRY_MS = 15_000;
+
+/** Retry schedule of one cumulative query: only after a failed read. */
+export function cumulativeRefetchInterval(
+  enabled: boolean,
+  status: "pending" | "error" | "success",
+): number | false {
+  return enabled && status === "error" ? CUMULATIVE_ERROR_RETRY_MS : false;
+}
+
+export interface CumulativeQueryInput {
+  hostId: string;
+  workspaceId: string;
+  agentIds: readonly string[];
+  enabled: boolean;
+  scopeKey: string;
+  settingsRevision: number;
+  workspaceRevision: number;
+  hub: CumulativeHub;
+  run(request: { workspaceId: string; agentIds: string[]; refresh?: boolean }): Promise<CumulativeUsage>;
+  /** A manual or terminal refresh additionally bypasses the server's cache. */
+  bypassCache?: boolean;
+}
+
+/**
+ * The query both surfaces run. Kept as plain options so the exact object the
+ * hooks use can be driven by a real TanStack `QueryObserver` in tests.
+ */
+export function cumulativeQueryOptions(input: CumulativeQueryInput) {
+  const ids = [...input.agentIds].sort();
+  const enabled = input.enabled && ids.length > 0;
+  return {
+    queryKey: cumulativeQueryKey(
+      input.hostId,
+      input.workspaceId,
+      ids,
+      input.scopeKey,
+      input.settingsRevision,
+      input.workspaceRevision,
+    ),
+    enabled,
+    retry: false,
+    // Disabled and out-of-allowlist workspaces never reach here (`enabled`
+    // false); a failed read of a permitted workspace retries itself.
+    refetchInterval: (query: { state: { status: "pending" | "error" | "success" } }) =>
+      cumulativeRefetchInterval(enabled, query.state.status),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    queryFn: () => readCumulativeIntoHub({
+      run: input.run,
+      hub: input.hub,
+      workspaceId: input.workspaceId,
+      agentIds: ids,
+      refresh: input.bypassCache ?? false,
+    }),
+  };
+}
+
+/**
  * The cumulative read both surfaces share. Both revision numbers come from the
  * shared store: the settings generation, and this one workspace's refresh
  * revision. Both surfaces pass the same pair, so they agree on the key; a
@@ -88,20 +154,16 @@ export function useCumulativeUsage(
   bypassCache = false,
 ) {
   const run = useRpc(cumulativeUsageRpc);
-  const ids = [...agents].map(({ id }) => id).sort();
-  return useQuery({
-    queryKey: cumulativeQueryKey(hostId, workspaceId, ids, scopeKey, settingsRevision, workspaceRevision),
-    enabled: enabled && ids.length > 0,
-    retry: false,
-    staleTime: 15_000,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    queryFn: () => readCumulativeIntoHub({
-      run,
-      hub,
-      workspaceId,
-      agentIds: ids,
-      refresh: bypassCache,
-    }),
-  });
+  return useQuery(cumulativeQueryOptions({
+    hostId,
+    workspaceId,
+    agentIds: [...agents].map(({ id }) => id),
+    enabled,
+    scopeKey,
+    settingsRevision,
+    workspaceRevision,
+    hub,
+    run,
+    bypassCache,
+  }));
 }

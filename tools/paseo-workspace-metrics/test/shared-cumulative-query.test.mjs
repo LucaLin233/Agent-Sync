@@ -168,3 +168,37 @@ test("a changed Codex home moves the key once, and a duplicate event does nothin
   shared.setScope(wksScope({ codexHomeConfigured: false }), "live");
   assert.deepEqual(key(), second);
 });
+
+test("clearing the old generation before publishing the scope keeps the new read alive", () => {
+  // Publishing a scope notifies subscribers synchronously, and a surface can
+  // start its read for the new key inside that notification. If the generation
+  // were cleared after publishing, that brand-new reply would be voided and the
+  // label would stay empty until the next refresh. Clearing first is correct.
+  const run = (clearFirst) => {
+    const hub = createCumulativeHub();
+    const shared = createSharedStore();
+    shared.setScope(scope, "live");
+    const oldTicket = hub.begin(WS);
+    let newTicket;
+    const unsubscribe = shared.subscribe(() => { newTicket = hub.begin(WS); });
+    if (clearFirst) hub.clearAll();
+    shared.setScope(wksScope({ workspaceIds: [WS, "wks_two"] }), "live", true);
+    if (!clearFirst) hub.clearAll();
+    unsubscribe();
+    return {
+      old: hub.publish(WS, oldTicket, { rate: 0.5, error: null }),
+      fresh: hub.publish(WS, newTicket, { rate: 0.976, error: null }),
+      shown: hub.read(WS),
+    };
+  };
+
+  const fixed = run(true);
+  assert.equal(fixed.old, false, "a reply from the old settings generation cannot land");
+  assert.equal(fixed.fresh, true, "the new generation's first reply survives the event");
+  assert.equal(fixed.shown?.rate, 0.976);
+
+  const reversed = run(false);
+  assert.equal(reversed.old, false);
+  assert.equal(reversed.fresh, false, "publishing before the clear would void the new reply");
+  assert.equal(reversed.shown, undefined);
+});

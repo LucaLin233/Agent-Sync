@@ -560,15 +560,18 @@ export function startPillRuntime(
   const applyScope = (event: WorkspaceScope) => {
     generation += 1;
     scope = event;
+    inflight.clear();
+    queued.clear();
+    // A settings generation change drops what the old scope showed. This must
+    // happen before the scope is published: publishing notifies subscribers
+    // synchronously (a surface can start its read for the new key right away),
+    // and clearing afterwards would void that new generation's first reply.
+    hub.clearAll();
     // This runtime owns the settings stream, so it is the only publisher that
     // starts a fresh shared read. An open panel's copy of the same event only
     // publishes a scope (and usually matches what is already in force), so one
     // settings change is one new key and one request.
     shared.setScope(event, "live", true);
-    inflight.clear();
-    queued.clear();
-    // A settings generation change drops what the old scope showed.
-    hub.clearAll();
     lastRequest.clear();
     clearRoutine();
     clearFollowUps();
